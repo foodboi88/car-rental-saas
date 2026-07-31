@@ -1,6 +1,13 @@
 # Database Schema - Car Rental SaaS
 
-**Cập nhật:** 06/07/2026 — Đồng bộ user model (N-N với tenants, N-N với branches), bỏ CENTRAL_MANAGER, căn chỉnh với Multi-Tenant-Multi-Branch.md.
+**Cập nhật:** 31/07/2026 — Tối ưu hóa Database Schema sát với thực tế nghiệp vụ doanh nghiệp cho thuê xe tự lái tại Việt Nam (SMBs):
+- **Bỏ bảng `payments` & `pricing_rules`**: Đơn giản hóa quản lý tài chính (chủ xe tự kiểm soát dòng tiền ngoài) và định giá trực tiếp theo xe.
+- **Đưa giá thuê về từng `vehicles`**: Bỏ `base_price` ở `vehicle_types`, thêm `price_per_day` và `weekend_price_per_day` vào bảng `vehicles`.
+- **Tối ưu bảng `bookings`**: Bổ sung `daily_rate` (snapshot đơn giá lúc chốt đơn), tài sản thế chấp (`collateral_type`, `collateral_notes`), trạng thái cọc (`is_deposit_paid`), tách biệt rõ `created_by` (Sale/CTV chốt đơn), `handover_by` (Staff giao xe), `returned_by` (Staff nhận xe) và `commission_amount` (hoa hồng Sale).
+- **Giữ bảng `user_branches`**: Giữ mô hình N-N giữa User-Tenant và Branches để 1 nhân viên/Staff có thể được phân công làm việc tại 1 hoặc nhiều chi nhánh linh hoạt.
+- **Lý giải `tenant_id`**: Giải thích rõ lý do duy trì `tenant_id` ở các bảng chính để đảm bảo hiệu năng truy vấn và bảo mật RLS.
+- **Link DATABASE mới**: https://mermaid.live/edit#pako:eNq1V8tu20YU_ZUB17JjPe1ox0hULUSWDUkx2kLAYEyOxKnJGXY4TKw6XnTRZdEaRZcBGnRRoEDQdmstunCQ_9Cf9A71IkXRMhrYsAH6vubMuS_y2rCFQ426QWWTkbEk_lAOOYIfRTnhKkRv3-7tiWt0IQm3XRqiOhoaxb3u0MgxfE1dZnsUq0nweOvdhnYUKuFTudvyQohLxse7DaOQSryUZYxXF96JdNMyH8CmZYwgn9k0lTtxrCnaCWQVZKelhvhIxlLa3Bt2t2XkeimI40TMQfB79jIpDZUEhIgTn24RO8InjKNXKRfGFQo8wrFiVGq09VbPsgqoVH9h9tuNAirXz3qnBVSpW92B1TvrtfvWGlsiuifGAkfS26KyBVfEVjhwBU8B-yYU_AKFVClN7FJzkymFR1w9ls6pwvDUegwvil4pRBxH0jBMyiHTHiUcsRDblCtJvBwtXIq9phnc6Zp8SvAODW3JAsUE_18QPx9drJwnKkeZZCP3dh4DpkOKoRTVttr1YQJ7m3U7oUQmZQ61mU88FEiIhgPoKodMoKa_YPfvkXKj-z8RH9__NoHnT3_Ppu_4OF3JS_83lF5S7uAH4tjRbHrLkIpmd3_wdBSNLFRERWHcTua52e6YLzpxT_V0EzV1U52YbXjsmt2GpZtr0DO7_ZbV61nNbDQ7khLqEF_62eYBwGOabZ31nHui8luIMy29kFMYNdtGAXOwTaQDzJhWf69UrW2dJY6EmpV4URR5xgsC5hFxmoi1Ph0L5_C1Gu5P3w_L1Oxol7xELJBi_U6yMcsd6B0UMPsyCrCz0UexTlIVSZ7RKeZTqFg_QDAtIuJhl3BHaNaIAvIH7mz6j43U7O5fNGZEoCuaTkTGf3FOxpu7s7sPPOO_7DsHamaCpUY6ND7-_Ok9h_OWLfcsbt3tjkooOJX4IuLxkbPpr8CUYrPp9xzB-b8H6OPtbPpLXsM7NBAhU4kIc1d7Nv3RBgyz6V8Z0IkZu3QPCHMyvSs8PdJgh8QDMB4JX1r4xPxKz4NB2-rC80BPhJfHZmODVz3iEwG4UOkK1wcwzhQDZXo4aM2I8Yx83hOr_OY1zSKBWfWSMUAmCcTGI6rvdObef0DfRpCrS_-hROmbJF2UnE1_iAl-l1cSGkLSBUa3TulPm7mc95akcIKDLybQPODRJx591hicIxtcbhVUARTVFr8VIStHRUaj7dUeO8wJSp4UO-wocFv4PgtD2NbrUjsWRN8HahNptA_ukuPTTlOXTeO022r3Tuab5NjsNq0mPj23enqT9KzBq15Xq6r1hl4vnU5yp9ykX1of_1IZT_SNgbNcAiQM3wiYwS4J3S36UeRB8W4skET_hJHescTxGd8KE-e_AsfqGHJh2zBdT-msgeZWAoaY2XgVD7DZPGl3NcP9gdlqaXb7ZsfKYQ8_8H76Gbg2Nkja4MYoGGPJHKOuZEQLBuwRyAv8a1xrg6GhXAo8G_orwqEjEnkK0HPtFhD-tRD-0lOKaOwa9RHxQvgvCvRSWHzerqTw1uFQ2dCVatSLtYNyHMWoXxtXRn2veFDbLz0_KpfKtcNKtVQ5LBaMSSwvlferR4dH1YNKtVaCv5uC8V18dHm_WKkeFMtgX6kdHT0_OiwY1GFKyJP5J3b8pX3zHyAa-cs
+---
 
 ## Mục lục
 1. [ER Diagram](#1-er-diagram)
@@ -14,88 +21,74 @@
 ## 1. ER Diagram
 
 ```
-                              ┌──────────────────────┐
-                              │       tenants        │
-                              │──────────────────────│
-                              │ id (PK)              │
-                              │ name                 │
-                              │ domain               │
-                              │ plan_tier            │
-                              │ logo_url             │
-                              │ contact_email        │
-                              │ contact_phone        │
-                              │ settings (JSONB)     │
-                              │ created_at           │
-                              │ updated_at           │
-                              └──────────┬───────────┘
-                                         │
-            ┌──────────────┬─────────────┼─────────────┬──────────────┐
-            │ 1:N          │ 1:N         │ 1:N         │ 1:N          │ 1:N
-            ▼              ▼             ▼             ▼              ▼
-  ┌─────────────────┐ ┌───────────┐ ┌────────────┐ ┌──────────┐ ┌───────────────┐
-  │    branches     │ │  vehicles │ │  bookings  │ │customers │ │ vehicle_types │
-  │─────────────────│ │───────────│ │────────────│ │──────────│ │───────────────│
-  │ id (PK)         │ │ id (PK)   │ │ id (PK)    │ │ id (PK)  │ │ id (PK)       │
-  │ tenant_id (FK)  │ │tenant(FK) │ │ tenant(FK) │ │tenant(FK)│ │ tenant_id(FK) │
-  │ name            │ │branch(FK) │ │ branch(FK) │ │ name     │ │ name          │
-  │ address         │ │type (FK)  │ │customer(FK)│ │ phone    │ │ base_price    │
-  │ phone           │ │plate      │ │ vehicle(FK)│ │ email    │ │ description   │
-  │ email           │ │ model     │ │ pickup_date│ │ address  │ │ is_active     │
-  │ lat / lng       │ │ color     │ │return_date │ │ id_card  │ │ created_at    │
-  │ is_central      │ │ year      │ │ status     │ │driver_lic│ └──────┬────────┘
-  │ is_active       │ │ status    │ │total_amount│ │ notes    │        │
-  │ created_at      │ │ current_km│ │deposit_amt │ │ is_active│        │
-  └────────┬────────┘ │ fuel      │ │ late_fee   │ │created_at│        │
-           │          │ images    │ │ damage_fee │ └──────────┘        │
-           │          │ is_active │ │ notes      │                     │
-           │          │ created_at│ │ created_at │                     │
-           │          └─────┬─────┘ └──────┬─────┘                     │
-           │                │              │                           │
-           │                │              │ 1:N                       │ 1:N
-           │                │              ▼                           ▼
-           │                │        ┌──────────────┐         ┌───────────────┐
-           │                │        │   payments   │         │ pricing_rules │
-           │                │        │──────────────│         │───────────────│
-           │                │        │ id (PK)      │         │ id (PK)       │
-           │                │        │ tenant_id(FK)│         │ tenant_id(FK) │
-           │                │        │ booking_id   │         │vehicle_type   │
-           │                │        │ method       │         │ day_type      │
-           │                │        │ amount       │         │ multiplier    │
-           │                │        │ transaction  │         │ is_active     │
-           │                │        │ payment_type │         │ created_at    │
-           │                │        │ paid_at      │         └───────────────┘
-           │                │        │ created_at   │
-           │                │        └──────────────┘
-           │                │
-           │                │  1:1 (FK user_tenants)
-           │                │
-  ┌────────┴────────┐       │       ┌──────────────────────────────┐
-  │  user_branches  │       │       │        user_tenants          │
-  │─────────────────│       │       │──────────────────────────────│
-  │ user_id (PK,FK) │       │       │ user_id (PK,FK) ──────────┐  │
-  │tenant_id(PK,FK)─┼───────┘       │ tenant_id (PK,FK)         │  │
-  │ branch_id (FK)──┘               │ role                      │  │
-  │ assigned_at                     │ joined_at                 │  │
-  └─────────────────────────────────┘───────────────────────────│──┘
-                                                                │
-                                                                │ N:1
-                                                                ▼
-                                                     ┌──────────────────┐
-                                                     │      users       │
-                                                     │──────────────────│
-                                                     │ id (PK)          │
-                                                     │ email (UNIQUE)   │
-                                                     │ password_hash    │
-                                                     │ full_name        │
-                                                     │ phone            │
-                                                     │ avatar_url       │
-                                                     │ is_active        │
-                                                     │ last_login_at    │
-                                                     │ created_at       │
-                                                     │ updated_at       │
-                                                     └──────────────────┘
-
-  Phase 2 bổ sung: vehicle_transfers (điều phối xe)
+                               ┌──────────────────────┐
+                               │       tenants        │
+                               │──────────────────────│
+                               │ id (PK)              │
+                               │ name                 │
+                               │ domain               │
+                               │ plan_tier            │
+                               │ logo_url             │
+                               │ contact_email        │
+                               │ contact_phone        │
+                               │ settings (JSONB)     │
+                               │ created_at           │
+                               │ updated_at           │
+                               └──────────┬───────────┘
+                                          │
+            ┌──────────────┬──────────────┼──────────────┬──────────────┐
+            │ 1:N          │ 1:N          │ 1:N          │ 1:N          │ 1:N
+            ▼              ▼              ▼              ▼              ▼
+  ┌─────────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────┐ ┌───────────────┐
+  │    branches     │ │  vehicles  │ │  bookings  │ │customers │ │ vehicle_types │
+  │─────────────────│ │────────────│ │────────────│ │──────────│ │───────────────│
+  │ id (PK)         │ │ id (PK)    │ │ id (PK)    │ │ id (PK)  │ │ id (PK)       │
+  │ tenant_id (FK)  │ │ tenant(FK) │ │ tenant(FK) │ │tenant(FK)│ │ tenant_id(FK) │
+  │ name            │ │ branch(FK) │ │ branch(FK) │ │ name     │ │ name          │
+  │ address         │ │ type (FK)  │ │customer(FK)│ │ phone    │ │ description   │
+  │ phone           │ │ plate      │ │ vehicle(FK)│ │ email    │ │ is_active     │
+  │ email           │ │ model      │ │ pickup_date│ │ address  │ │ created_at    │
+  │ lat / lng       │ │ color      │ │return_date │ │ id_card  │ └───────────────┘
+  │ is_central      │ │ year       │ │ status     │ │driver_lic│
+  │ is_active       │ │ status     │ │daily_rate  │ │ notes    │
+  │ created_at      │ │ current_km │ │total_amount│ │ is_active│
+  └────────┬────────┘ │ fuel       │ │deposit_amt │ │created_at│
+           │          │price_per_day││is_dep_paid │ └──────────┘
+           │          │images      │ │collateral  │
+           │          │ is_active  │ │created_by  │ (Sale/CTV)
+           │          │ created_at │ │handover_by │ (Staff giao xe)
+           │          └────────────┘ │returned_by │ (Staff nhận xe)
+           │                         │commission  │
+           │                         │ created_at │
+           │                         └────────────┘
+           │
+           │  1:N (FK user_branches)
+           ▼
+  ┌─────────────────────────────────┐       ┌──────────────────────────────┐
+  │  user_branches (N-N Branch)     │       │        user_tenants          │
+  │─────────────────────────────────│       │──────────────────────────────│
+  │ user_id (PK,FK)                 │       │ user_id (PK,FK) ──────────┐  │
+  │ tenant_id (PK,FK)───────────────┼───────┤ tenant_id (PK,FK)         │  │
+  │ branch_id (PK,FK)               │       │ role                      │  │
+  │ assigned_at                     │       │ joined_at                 │  │
+  └─────────────────────────────────┘       └───────────────────────────│──┘
+                                                                        │
+                                                                        │ N:1
+                                                                        ▼
+                                                             ┌──────────────────┐
+                                                             │      users       │
+                                                             │──────────────────│
+                                                             │ id (PK)          │
+                                                             │ email (UNIQUE)   │
+                                                             │ password_hash    │
+                                                             │ full_name        │
+                                                             │ phone            │
+                                                             │ avatar_url       │
+                                                             │ is_active        │
+                                                             │ last_login_at    │
+                                                             │ created_at       │
+                                                             │ updated_at       │
+                                                             └──────────────────┘
 ```
 
 ---
@@ -147,13 +140,14 @@ CREATE INDEX idx_branches_is_central ON branches(tenant_id, is_central);
 
 ### 2.3 vehicle_types
 
+> **Thay đổi:** Loại bỏ cột `base_price`. Bảng `vehicle_types` chỉ đóng vai trò phân loại nhóm xe (SEDAN 4 chỗ, SUV 7 chỗ, Bán tải, v.v.). Giá thuê cụ thể được định vị theo từng chiếc xe trong bảng `vehicles`.
+
 ```sql
 CREATE TABLE vehicle_types (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(50) NOT NULL,
     description TEXT,
-    base_price DECIMAL(12, 2) NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -165,6 +159,8 @@ CREATE INDEX idx_vehicle_types_tenant_id ON vehicle_types(tenant_id);
 
 ### 2.4 vehicles
 
+> **Cập nhật:** Đưa cột `price_per_day` (giá thuê ngày thường) và `weekend_price_per_day` (giá thuê cuối tuần - tùy chọn) trực tiếp vào bảng `vehicles`. Thực tế tại VN, xe cùng dòng nhưng đời xe (năm sản xuất) hoặc phiên bản (số sàn / số tự động) khác nhau sẽ có giá thuê khác nhau.
+
 ```sql
 CREATE TABLE vehicles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -175,6 +171,8 @@ CREATE TABLE vehicles (
     model VARCHAR(100),
     color VARCHAR(30),
     year INTEGER,
+    price_per_day DECIMAL(12, 2) NOT NULL DEFAULT 0, -- Giá thuê niêm yết ngày thường (VNĐ/ngày)
+    weekend_price_per_day DECIMAL(12, 2),            -- Giá thuê niêm yết cuối tuần (tùy chọn)
     description TEXT,
     status SMALLINT NOT NULL DEFAULT 1
         CHECK (status IN (1, 2, 3, 4)), -- Trạng thái xe: 1: Sẵn sàng (AVAILABLE), 2: Đang thuê (RENTED), 3: Bảo dưỡng (MAINTENANCE), 4: Điều phối (TRANSFERRED)
@@ -208,8 +206,10 @@ CREATE TABLE customers (
     phone VARCHAR(20),
     email VARCHAR(255),
     address TEXT,
-    id_card VARCHAR(20),
-    driver_license VARCHAR(20),
+    id_card VARCHAR(20),        -- Mã hóa AES-256
+    driver_license VARCHAR(20), -- Mã hóa AES-256
+    id_card_images JSONB DEFAULT '[]',        -- Mảng đường dẫn ảnh CCCD lưu trên VPS local (VD: ["/uploads/tenants/.../cccd_front.jpg"])
+    driver_license_images JSONB DEFAULT '[]', -- Mảng đường dẫn ảnh GPLX lưu trên VPS local
     notes TEXT,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -224,6 +224,23 @@ CREATE INDEX idx_customers_email ON customers(tenant_id, email);
 
 ### 2.6 bookings
 
+> **Cập nhật nghiệp vụ Việt Nam & Quy trình Giao/Nhận xe (Handover & Return):**
+> 1. `daily_rate`: Lưu đơn giá thuê/ngày thỏa thuận tại thời điểm chốt đơn (tránh ảnh hưởng khi xe đổi giá sau này).
+> 2. `collateral_type` & `collateral_notes`: Tài sản thế chấp (Xe máy + Đăng ký xe hoặc Tiền mặt 15-20 triệu - Bắt buộc trong nghiệp vụ VN).
+> 3. **Luồng Bàn giao xe (Handover Check-in)**:
+>    - `actual_handover_at`: Thời điểm **thực tế** giao chìa khóa cho khách.
+>    - `initial_km` & `initial_fuel`: Số km đồng hồ & Mức nhiên liệu ban đầu.
+>    - `handover_images`: Mảng ảnh hiện trạng xe lúc giao (vết xước cũ, km, nhiên liệu).
+>    - `handover_by`: ID nhân viên bãi trực tiếp làm biên bản bàn giao.
+> 4. **Luồng Nhận lại xe (Return Check-out)**:
+>    - `actual_return_at`: Thời điểm **thực tế** nhận lại xe (Dùng tính tiền trễ giờ `late_fee` tự động).
+>    - `final_km` & `final_fuel`: Số km đồng hồ & Mức nhiên liệu khi trả xe.
+>    - `return_images`: Mảng ảnh hiện trạng xe khi trả (đối chiếu va quẹt/hư hỏng mới).
+>    - `returned_by`: ID nhân viên bãi trực tiếp nhận lại xe.
+>    - `extra_km_fee`: Phí phụ trội km (khi khách đi vượt quá hạn mức km/ngày).
+>    - `late_fee` & `damage_fee`: Phí trễ giờ và Phí đền bù hư hỏng.
+> 5. `created_by` & `commission_amount`: ID Sale/CTV chốt đơn (cố định) và Số tiền hoa hồng.
+
 ```sql
 CREATE TABLE bookings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -236,23 +253,33 @@ CREATE TABLE bookings (
     return_date DATE NOT NULL,
     pickup_time TIME,
     return_time TIME,
+    actual_handover_at TIMESTAMP WITH TIME ZONE,   -- Thời điểm thực tế giao chìa khóa cho khách
+    actual_return_at TIMESTAMP WITH TIME ZONE,     -- Thời điểm thực tế nhận lại xe (Dùng tự động tính trễ giờ)
     status SMALLINT NOT NULL DEFAULT 1
-        CHECK (status IN (1, 2, 3, 4, 5)), -- Trạng thái đơn: 1: Giữ chỗ tạm (HOLD), 2: Đã xác nhận / Đặt cọc (CONFIRMED), 3: Đã bàn giao xe (HANDED_OVER), 4: Đã nhận lại xe (RETURNED), 5: Đã hủy (CANCELLED)
+        CHECK (status IN (1, 2, 3, 4, 5)), -- 1: HOLD, 2: CONFIRMED, 3: HANDED_OVER, 4: RETURNED, 5: CANCELLED
     hold_expires_at TIMESTAMP WITH TIME ZONE,
+    daily_rate DECIMAL(12, 2) NOT NULL DEFAULT 0,  -- Đơn giá thuê/ngày chốt tại thời điểm đặt xe
+    total_amount DECIMAL(12, 2) DEFAULT 0,         -- Tổng giá trị hợp đồng thuê xe
+    deposit_amount DECIMAL(12, 2) DEFAULT 0,       -- Số tiền cọc giữ xe
+    is_deposit_paid BOOLEAN DEFAULT FALSE,         -- Trạng thái đã nhận tiền cọc giữ xe
+    collateral_type SMALLINT DEFAULT 1
+        CHECK (collateral_type IN (1, 2, 3)),      -- Tài sản thế chấp: 1: XE_MAY (Xe máy + Đăng ký), 2: TIEN_MAT (Tiền mặt cọc), 3: KHAC
+    collateral_notes TEXT,                          -- Mô tả tài sản thế chấp (VD: Xe Wave RSX BKS 29X1-12345 + Cavet chính chủ)
     initial_km INTEGER,
     final_km INTEGER,
     initial_fuel VARCHAR(20),
     final_fuel VARCHAR(20),
+    handover_images JSONB DEFAULT '[]',            -- Ảnh tình trạng xe lúc bàn giao (vết xước, km, xăng)
+    return_images JSONB DEFAULT '[]',              -- Ảnh tình trạng xe lúc nhận lại (vết xước mới, km, xăng)
+    extra_km_fee DECIMAL(12, 2) DEFAULT 0,         -- Phí phụ trội số km (nếu vượt quá giới hạn km/ngày)
+    late_fee DECIMAL(12, 2) DEFAULT 0,             -- Phí trễ giờ
+    damage_fee DECIMAL(12, 2) DEFAULT 0,           -- Phí đền bù hư hỏng
     notes TEXT,
-    total_amount DECIMAL(12, 2) DEFAULT 0,
-    deposit_amount DECIMAL(12, 2) DEFAULT 0,
-    deposit_paid BOOLEAN DEFAULT FALSE,
-    late_fee DECIMAL(12, 2) DEFAULT 0,
-    damage_fee DECIMAL(12, 2) DEFAULT 0,
     cancellation_reason TEXT,
-    created_by UUID, -- ID của người tạo đơn đặt xe (nhân viên hoặc sale)
-    handover_by UUID, -- ID của nhân viên/admin thực hiện thủ tục giao xe cho khách
-    returned_by UUID, -- ID của nhân viên/admin thực hiện nhận lại xe khi khách trả
+    created_by UUID,           -- ID người tạo đơn (Sale / CTV / Admin) - Dùng tính hoa hồng
+    handover_by UUID,          -- ID nhân viên bãi làm thủ tục giao xe
+    returned_by UUID,          -- ID nhân viên bãi nhận lại xe
+    commission_amount DECIMAL(12, 2) DEFAULT 0, -- Số tiền hoa hồng chi trả cho Sale/CTV
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_booking_branch_tenant FOREIGN KEY (branch_id, tenant_id)
@@ -282,59 +309,13 @@ CREATE INDEX idx_bookings_tenant_handover_by ON bookings(tenant_id, handover_by)
 CREATE INDEX idx_bookings_tenant_returned_by ON bookings(tenant_id, returned_by);
 ```
 
-### 2.7 payments
+### 2.7 Bỏ bảng `payments` & `pricing_rules`
 
-```sql
-CREATE TABLE payments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    booking_id UUID NOT NULL,
-    method SMALLINT NOT NULL
-        CHECK (method IN (1, 2, 3)), -- Phương thức: 1: Tiền mặt (CASH), 2: Chuyển khoản (BANK_TRANSFER), 3: Ví điện tử (E_WALLET)
-    amount DECIMAL(12, 2) NOT NULL,
-    transaction_id VARCHAR(100),
-    payment_type SMALLINT DEFAULT 1
-        CHECK (payment_type IN (1, 2, 3, 4, 5)), -- Loại thanh toán: 1: Đặt cọc (DEPOSIT), 2: Tất toán (FULL), 3: Hoàn tiền (REFUND), 4: Phí trễ giờ (LATE_FEE), 5: Phí đền bù (DAMAGE_FEE)
-    paid_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    notes TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_payment_amount CHECK (amount > 0),
-    CONSTRAINT chk_transaction_id CHECK (method = 1 OR transaction_id IS NOT NULL),
-    CONSTRAINT fk_payment_booking_tenant FOREIGN KEY (booking_id, tenant_id)
-        REFERENCES bookings(id, tenant_id) ON DELETE CASCADE
-);
+> **Lý do loại bỏ:**
+> 1. `payments`: Các shop cho thuê xe tự lái vừa và nhỏ ở Việt Nam tự kiểm soát dòng tiền mặt / tài khoản ngân hàng bên ngoài. Hệ thống SaaS chỉ cần theo dõi các số liệu trên đơn hàng trong bảng `bookings` (`deposit_amount`, `is_deposit_paid`, `total_amount`, `late_fee`, `damage_fee`).
+> 2. `pricing_rules`: Công thức nhân giá tự động theo ngày lễ/cuối tuần phức tạp vượt quá nhu cầu MVP. Giá thuê xe được thiết lập trực tiếp tại bảng `vehicles` (`price_per_day`, `weekend_price_per_day`) và được ghi nhận chốt theo từng đơn tại `bookings.daily_rate`.
 
-CREATE INDEX idx_payments_tenant_id ON payments(tenant_id);
-CREATE INDEX idx_payments_booking_id ON payments(booking_id);
-CREATE INDEX idx_payments_method ON payments(tenant_id, method);
-```
-
-### 2.8 pricing_rules (đơn giản hóa MVP)
-
-```sql
-CREATE TABLE pricing_rules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    vehicle_type_id UUID NOT NULL REFERENCES vehicle_types(id),
-    day_type SMALLINT NOT NULL
-        CHECK (day_type IN (1, 2)), -- Loại ngày: 1: Ngày thường (WEEKDAY), 2: Cuối tuần (WEEKEND)
-    multiplier DECIMAL(4, 2) NOT NULL DEFAULT 1.00,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_pricing_rules_tenant_id ON pricing_rules(tenant_id);
-CREATE INDEX idx_pricing_rules_type_day ON pricing_rules(tenant_id, vehicle_type_id, day_type);
-```
-
-**MVP:** Chỉ hỗ trợ weekday (1.0) và weekend (1.2). Season/Holiday multipliers → Phase 2.
-
-### 2.9 vehicle_transfers — Dời sang Phase 2
-
-Bảng `vehicle_transfers` (điều phối xe giữa các chi nhánh) được thêm vào Phase 2 khi hệ thống phục vụ các chuỗi 50+ xe có nhu cầu điều phối liên chi nhánh. MVP chưa cần bảng này.
-
-### 2.10 users (identity — centralized, not tenant-scoped)
+### 2.8 users (identity — centralized, not tenant-scoped)
 
 ```sql
 CREATE TABLE users (
@@ -354,7 +335,7 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email ON users(email);
 ```
 
-### 2.11 user_tenants (N-N: User thuộc Tenant nào, với Role gì)
+### 2.9 user_tenants (N-N: User thuộc Tenant nào, với Role gì)
 
 ```sql
 CREATE TABLE user_tenants (
@@ -368,9 +349,10 @@ CREATE TABLE user_tenants (
 CREATE INDEX idx_user_tenants_tenant_id ON user_tenants(tenant_id);
 ```
 
-> **SUPER_ADMIN:** không có entry trong `user_tenants`. Hệ thống nhận diện SUPER_ADMIN qua flag/cột role trên chính bảng `users`, hoặc qua 1 bảng cấu hình riêng. SUPER_ADMIN bypass toàn bộ tenant isolation.
+> **SUPER_ADMIN:** không có entry trong `user_tenants`. Bypasses toàn bộ RLS.
+> **TENANT_ADMIN:** không cần entry trong `user_branches` — mặc định toàn quyền tất cả Branch trong Tenant.
 
-### 2.12 user_branches (N-N: Trong 1 Tenant, User được gán vào Branch nào)
+### 2.10 user_branches (N-N: Trong 1 Tenant, User được gán vào Branch nào)
 
 ```sql
 CREATE TABLE user_branches (
@@ -389,9 +371,7 @@ CREATE INDEX idx_user_branches_branch_id ON user_branches(branch_id);
 CREATE INDEX idx_user_branches_tenant_id ON user_branches(tenant_id);
 ```
 
-> **TENANT_ADMIN:** không cần entry trong `user_branches` — mặc định toàn quyền tất cả Branch trong Tenant.
-> **BRANCH_MANAGER và STAFF:** bắt buộc có entry để xác định phạm vi Branch được phép truy cập.
-```
+> **STAFF và SALE:** có 1 hoặc nhiều entry trong `user_branches` để xác định danh sách các chi nhánh được phép truy cập/thao tác.
 
 ---
 
@@ -423,108 +403,46 @@ CREATE INDEX idx_user_branches_tenant_id ON user_branches(tenant_id);
 | bookings | idx_bookings_tenant_created_by | tenant_id, created_by | |
 | bookings | idx_bookings_tenant_handover_by | tenant_id, handover_by | |
 | bookings | idx_bookings_tenant_returned_by | tenant_id, returned_by | |
-| payments | idx_payments_tenant_id | tenant_id | |
-| payments | idx_payments_booking_id | booking_id | |
-| payments | idx_payments_method | tenant_id, method | |
-| pricing_rules | idx_pricing_rules_tenant_id | tenant_id | |
-| pricing_rules | idx_pricing_rules_type_day | tenant_id, vehicle_type_id, day_type | |
 | users | idx_users_email | email | UNIQUE |
 | user_tenants | idx_user_tenants_tenant_id | tenant_id | |
 | user_branches | idx_user_branches_branch_id | branch_id | |
 | user_branches | idx_user_branches_tenant_id | tenant_id | |
 
-`vehicle_transfers` — dời sang Phase 2, chưa tạo indexes.
-
 ---
 
 ## 4. Multi-tenant Strategy
 
-### 4.1 Row-Level Security (RLS)
+### 4.1 Lý do duy trì `tenant_id` trên các bảng gốc/độc lập
+Trong mô hình **Shared Database (Row-Level Security)**, mặc dù về mặt lý thuyết 3NF có thể truy ngược `tenant_id` từ `vehicles` qua `vehicle_types` hay từ `bookings` qua `vehicles`, việc lưu `tenant_id` trực tiếp trên các bảng chính (`branches`, `vehicles`, `bookings`, `customers`, `user_tenants`) là **bắt buộc** vì các lý do:
+
+1. **Hiệu năng truy vấn (Index Scan)**: Cho phép truy vấn danh sách xe hoặc đơn hàng của một tenant bằng câu lệnh `WHERE tenant_id = ?` với Index Scan O(log N), tránh việc phải `JOIN` qua 2-3 bảng trung gian chỉ để lọc tenant.
+2. **Bảo mật tuyệt đối (Row-Level Security & Anti-IDOR)**: Các framework ORM (Spring Data JPA) và PostgreSQL RLS tự động chèn `WHERE tenant_id = :currentTenant` vào mọi câu SQL. Nếu bảng không có `tenant_id`, lập trình viên dễ bỏ sót `JOIN` dẫn tới lỗ hổng rò rỉ dữ liệu giữa các bãi xe.
+3. **Ràng buộc toàn vẹn dữ liệu (Composite Foreign Key)**: Đảm bảo không thể gán nhầm xe của Tenant A sang chi nhánh của Tenant B thông qua FK `(branch_id, tenant_id) REFERENCES branches(id, tenant_id)`.
+
+### 4.2 Row-Level Security (RLS) Policy
 
 ```sql
--- Enable RLS for all tables
+-- Enable RLS cho các bảng chính
 ALTER TABLE vehicles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
--- ... apply to all tenant-scoped tables
 
--- Create policy
+-- Policy lọc tenant tự động
 CREATE POLICY tenant_isolation ON vehicles
     USING (
-        -- Allow SUPER_ADMIN to bypass isolation filter
         (current_setting('app.current_user_role', true) = 'SUPER_ADMIN') OR
         (tenant_id = current_setting('app.current_tenant', true)::uuid)
     );
-```
-
-### 4.2 Application-Level Filtering
-
-```java
-// BaseRepository with automatic tenant filtering
-public interface BaseRepository<T> {
-    @Query("SELECT e FROM #{#entityName} e WHERE e.tenantId = :tenantId")
-    List<T> findAllByTenantId(@Param("tenantId") UUID tenantId);
-}
-
-// Every query automatically includes tenant_id
-```
-
-### 4.3 Tenant Context Setup
-
-```java
-// TenantContext.java
-public class TenantContext {
-    private static final ThreadLocal<UUID> currentTenant = new ThreadLocal<>();
-
-    public static void setTenantId(UUID tenantId) {
-        currentTenant.set(tenantId);
-    }
-
-    public static UUID getTenantId() {
-        return currentTenant.get();
-    }
-
-    public static void clear() {
-        currentTenant.remove();
-    }
-}
-
-// JwtAuthenticationFilter.java
-public class JwtAuthenticationFilter extends OncePerRequestFilter {
-    @Override
-    protected void doFilterInternal(HttpServletRequest request, ...) {
-        String tenantId = extractTenantId(request); // from JWT or subdomain
-        TenantContext.setTenantId(UUID.fromString(tenantId));
-        // ... continue filter chain
-    }
-}
-```
-
-### 4.4 Migration Path
-
-```
-Phase 1: Shared Database + tenant_id (Current)
-    └── Simple, cost-effective
-    └── Good for up to ~1000 tenants
-
-Phase 2: Schema-per-tenant (Future)
-    └── Better isolation
-    └── Good for ~1000-10000 tenants
-
-Phase 3: Database-per-tenant (Future)
-    └── Maximum isolation
-    └── Good for enterprise/critical tenants
 ```
 
 ---
 
 ## 5. Phase 2 Additions
 
-Các bảng sẽ được thêm ở Phase 2 khi mở rộng phục vụ chuỗi lớn:
+Các bảng mở rộng trong Phase 2 khi hệ thống phục vụ chuỗi lớn:
 
-| Bảng | Mục đích | Trigger |
-|------|----------|---------|
-| `vehicle_transfers` | Điều phối xe liên chi nhánh | Tenant có >50 xe, >3 chi nhánh |
-| `pricing_rules` (mở rộng) | Thêm season, holiday multipliers | Tenant yêu cầu định giá theo mùa/lễ |
-| `notification_logs` | Lịch sử SMS/Email/Push | Khi tích hợp đa kênh thông báo |
-| `driver_records` | Quản lý tài xế (xe có lái) | Khi mở rộng sang vertical xe có lái |
+| Bảng | Mục đích | Trigger mở rộng |
+|------|----------|-----------------|
+| `vehicle_transfers` | Điều phối xe liên chi nhánh | Chuỗi xe >50 xe, >3 chi nhánh |
+| `pricing_rules` | Tự động hóa nhân hệ số ngày lễ, Tết | Khi chủ bãi muốn tự động đổi giá theo mùa |
+| `commission_settlements` | Quyết toán hoa hồng CTV định kỳ | Khi đội ngũ CTV đạt số lượng lớn |

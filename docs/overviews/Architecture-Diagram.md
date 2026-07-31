@@ -45,10 +45,10 @@
 │  │   Service    │  │   Service    │  │   Service    │  │   Service    │            │
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘            │
 │                                                                                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │
-│  │  Customer    │  │   Booking    │  │   Payment    │  │ Notification │            │
-│  │ (OCR Module) │  │(Hold Engine) │  │   Service    │  │   (Email)    │            │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │
+│  │  Customer    │  │   Booking    │  │ Notification │            │
+│  │ (OCR Module) │  │(Hold Engine) │  │   (Email)    │            │
+│  └──────────────┘  └──────────────┘  └──────────────┘            │
 │                                                                                       │
 └────────┬──────────────────────────────────┬───────────────────────────────────┬───────┘
          │                                  │                                   │
@@ -208,14 +208,13 @@ Frontend được build thành các tập tin tĩnh HTML/JS/CSS và do **Nginx**
 > [!NOTE]
 > Để tránh trùng lặp dữ liệu và đảm bảo một nguồn sự thật duy nhất (Single Source of Truth), chi tiết sơ đồ ERD, định nghĩa bảng, kiểu dữ liệu và index chiến lược đã được thiết kế đầy đủ tại tài liệu riêng:
 > 
-> 👉 **[Database-Schema.md](file:///f:/backend-training/private-car-rental/docs/Database-Schema.md)**
+> 👉 **[Database-Schema.md](file:///f:/backend-training/car-rental-saas/docs/overviews/Database-Schema.md)**
 
 Các bảng cốt lõi phục vụ luồng nghiệp vụ chính bao gồm:
-- `tenants`, `branches`, `users`, `user_tenants`, `user_branches`
-- `vehicles`, `vehicle_types`, `pricing_rules`
-- `customers` (Lưu thông tin OCR: `id_card_number`, `driver_license_number`, ảnh đính kèm)
-- `bookings` (Lưu trạng thái đơn: `HOLD`, `CONFIRMED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED` & `hold_expires_at`)
-- `payments`
+- `tenants`, `branches`, `users`, `user_tenants`, `user_branches` (N-N phân quyền chi nhánh)
+- `vehicle_types`, `vehicles` (định giá trực tiếp theo xe qua `price_per_day`)
+- `customers` (Lưu thông tin OCR mã hóa: `id_card`, `driver_license`, ảnh đính kèm)
+- `bookings` (Quản lý trạng thái `HOLD`, `CONFIRMED`, `HANDED_OVER`, `RETURNED`, `CANCELLED`, snapshot `daily_rate`, tiền cọc `deposit_amount`, tài sản thế chấp `collateral_type`, tách biệt `created_by` (Sale/CTV) với `handover_by`/`returned_by` (Staff) và `commission_amount`)
 
 ---
 

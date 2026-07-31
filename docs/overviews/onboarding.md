@@ -24,9 +24,9 @@ Kiến trúc phân quyền của dự án là sự kết hợp giữa **RBAC (Ro
 | Vai trò | Phạm vi | Mô tả |
 | :--- | :--- | :--- |
 | **SUPER_ADMIN** | Toàn hệ thống | Tài khoản điều hành của đội ngũ phát triển SaaS. Dùng để cấu hình hệ thống, tạo Tenant mới, quản lý Subscription và duyệt thanh toán dịch vụ. Vai trò này lưu trực tiếp bằng cờ `is_super_admin = true` trong bảng trung tâm `users` và bypass toàn bộ cơ chế bảo mật Postgres RLS. |
-| **TENANT_ADMIN** | 1 Tenant | Chủ nhà xe (quy định `role = 1` trong bảng `user_tenants`). Có toàn quyền quản lý nhân sự, cấu hình bảng giá, CRUD chi nhánh (`branches`), xe và xem báo cáo doanh thu toàn hệ thống. Mặc định có quyền truy cập tất cả các chi nhánh thuộc tenant. Đây là **vai trò duy nhất** có quyền Thêm/Sửa/Tạm ngưng/Xóa Chi nhánh (triển khai theo mô hình Hybrid SaaS Quota kiểm soát `max_branches` và `max_vehicles`). |
-| **STAFF** | 1+ Chi nhánh | Nhân viên nghiệp vụ (quy định `role = 2` trong bảng `user_tenants`). Thực hiện tạo Booking, thực hiện thủ tục bàn giao xe (Check-in), nhận lại xe (Check-out) và thu tiền. Bắt buộc phải được gán vào ít nhất một chi nhánh trong bảng `user_branches` và chỉ thao tác được trên xe/booking thuộc chi nhánh đó. Read-only đối với danh mục Chi nhánh. |
-| **SALE** | 1+ Chi nhánh | Cộng tác viên/Nhân viên kinh doanh (quy định `role = 3` trong bảng `user_tenants`). Có quyền tạo booking cho khách hàng, xem trạng thái xe trống để tư vấn, nhưng **không được phép** thực hiện bàn giao hoặc nhận lại xe. Read-only đối với danh mục Chi nhánh (chỉ xem được các chi nhánh được phân công). |
+| **TENANT_ADMIN** | 1 Tenant | Chủ nhà xe (quy định `role = 1` trong bảng `user_tenants`). Có toàn quyền quản lý nhân sự, cấu hình giá xe, CRUD chi nhánh (`branches`), xe và xem báo cáo doanh thu toàn hệ thống. Mặc định có quyền truy cập tất cả các chi nhánh thuộc tenant. Đây là **vai trò duy nhất** có quyền Thêm/Sửa/Tạm ngưng/Xóa Chi nhánh (triển khai theo mô hình Hybrid SaaS Quota kiểm soát `max_branches` và `max_vehicles`). |
+| **STAFF** | 1+ Chi nhánh | Nhân viên nghiệp vụ (quy định `role = 2` trong bảng `user_tenants`). Thực hiện tạo Booking, làm thủ tục bàn giao xe (`handover_by`), nhận lại xe (`returned_by`). Bắt buộc phải được gán vào ít nhất một chi nhánh trong bảng `user_branches` và chỉ thao tác được trên xe/booking thuộc chi nhánh đó. Read-only đối với danh mục Chi nhánh. |
+| **SALE** | 1+ Chi nhánh | Cộng tác viên/Nhân viên kinh doanh (quy định `role = 3` trong bảng `user_tenants`). Có quyền tạo booking cho khách hàng, xem trạng thái xe trống để tư vấn. Khi tạo đơn, hệ thống ghi nhận cố định `created_by = sale_user_id` để tính hoa hồng chốt sale (`commission_amount`), độc lập với nhân viên làm thủ tục bàn giao xe. Bắt buộc gán vào chi nhánh qua `user_branches`. |
 
 ### 2.2 Sơ đồ Quan Hệ Phân Quyền (User-Tenant-Branch)
 
@@ -127,6 +127,41 @@ Khi có sự cố xảy ra (ví dụ: phạt nguội giao thông, tai nạn, xe 
         ```
     *   **Xử lý Ngoại lệ:**
         *   Nếu ảnh mờ không đọc được -> Trả về mã lỗi HTTP `422 Unprocessable Entity` kèm thông báo `OCR_READ_FAILED` để client gợi ý nhân viên chụp lại ảnh rõ nét hơn hoặc nhập tay.
+
+### 3.4 Quy Trình Giao & Nhận Xe Thực Tế (Handover & Return Workflows)
+
+#### A. Luồng Bàn Giao Xe (Handover Check-in)
+Khi khách hàng tới chi nhánh/bãi xe nhận chìa khóa:
+1. **Kiểm tra & Đối chiếu định danh:** Nhân viên đối chiếu CCCD và Giấy phép lái xe gốc với thông tin đã quét OCR/Autofill.
+2. **Khai báo thông tin Bàn giao (Check-in Form):**
+   - **Số km đồng hồ ban đầu (`initial_km`):** Nhập số km hiển thị trên Odometer.
+   - **Mức nhiên liệu ban đầu (`initial_fuel`):** Ghi nhận mức xăng/điện (ví dụ: `100%`, `4/4`).
+   - **Chụp ảnh hiện trạng xe (`handover_images`):** Chụp các góc xe, lốp xe, vết xước/móp cũ, bảng đồng hồ và lưu mảng đường dẫn ảnh.
+   - **Ghi nhận Tài sản thế chấp (`collateral_type`, `collateral_notes`):** Kiểm tra xe máy + cavet xe chính chủ hoặc tiền mặt thế chấp.
+   - **Trạng thái tiền cọc (`is_deposit_paid`):** Xác nhận đã nhận đủ tiền cọc giữ xe.
+3. **Kích hoạt Bàn giao:**
+   - Hệ thống ghi nhận thời điểm thực tế giao xe: `actual_handover_at = NOW()`.
+   - Lưu vết nhân viên trực tiếp bàn giao chìa khóa: `handover_by = current_user_id`.
+   - Cập nhật trạng thái đơn `bookings.status = HANDED_OVER` (3).
+   - Cập nhật trạng thái xe `vehicles.status = RENTED` (2).
+
+#### B. Luồng Nhận Lại Xe (Return Check-out)
+Khi khách hàng trả xe về bãi:
+1. **Kiểm tra tình trạng xe khi trả (Check-out Form):**
+   - **Số km đồng hồ khi trả (`final_km`):** Hệ thống tự động so sánh với `initial_km`. Nếu vượt quá hạn mức km/ngày quy định của nhà xe (ví dụ >300km/ngày), hệ thống tự động gợi ý **Phí phụ trội km (`extra_km_fee`)**.
+   - **Mức nhiên liệu khi trả (`final_fuel`):** So sánh với mức nhiên liệu ban đầu `initial_fuel`.
+   - **Chụp ảnh tình trạng xe lúc trả (`return_images`):** Chụp lại ngoại thất và bảng đồng hồ khi nhận xe.
+   - **Kiểm tra hư hỏng / va quẹt mới:** Nếu phát sinh va quẹt/hư hỏng mới, nhân viên nhập **Phí đền bù hư hỏng (`damage_fee`)**.
+2. **Tự động tính Phí Trễ Giờ (`late_fee`):**
+   - Hệ thống ghi nhận thời điểm thực tế nhận xe: `actual_return_at = NOW()`.
+   - Tự động so sánh `actual_return_at` với lịch hẹn trả `return_date + return_time`. Nếu quá hạn, hệ thống tự động tính số giờ trễ và nhân đơn giá trễ giờ để ra **Phí trễ giờ (`late_fee`)**.
+3. **Hoàn tất Nhận lại xe & Quyết toán:**
+   - Lưu vết nhân viên kiểm tra nhận lại xe: `returned_by = current_user_id`.
+   - Quyết toán tổng tiền: $\text{Số tiền còn lại} = \text{total\_amount} + \text{late\_fee} + \text{extra\_km\_fee} + \text{damage\_fee} - \text{deposit\_amount}$.
+   - Cập nhật trạng thái đơn `bookings.status = RETURNED` (4).
+   - Cập nhật trạng thái xe `vehicles.status = AVAILABLE` (1).
+   - Đồng bộ số km mới nhất sang bảng xe: `vehicles.current_km = final_km`.
+   - Trả lại tài sản thế chấp (xe máy/cavet/tiền mặt) cho khách hàng.
 
 ---
 
