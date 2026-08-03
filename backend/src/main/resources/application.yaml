@@ -1,3 +1,59 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
 spring:
   application:
     name: car-rental-backend
+
+  # 1. Cấu hình Cơ sở dữ liệu PostgreSQL
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:car_rental_db}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 300000
+      connection-timeout: 20000
+
+  # 2. Cấu hình JPA / Hibernate
+  jpa:
+    hibernate:
+      ddl-auto: validate # Không tự động tạo bảng, để Flyway quản lý
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  # 3. Cấu hình Flyway Migration
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+
+# 4. Cấu hình JWT Custom Properties
+jwt:
+  secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970} # 256-bit Key Secret (BASE64)
+  access-token-expiration-ms: 900000 # 15 phút (15 * 60 * 1000)
+  refresh-token-expiration-ms: 604800000 # 7 ngày (7 * 24 * 60 * 60 * 1000)
+
+# 5. Cấu hình Swagger / OpenAPI
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+
+# 6. Logging
+logging:
+  level:
+    root: INFO
+    com.carrental.car_rental_backend: DEBUG
+    org.hibernate.SQL: DEBUG
