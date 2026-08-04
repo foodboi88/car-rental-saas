@@ -322,18 +322,40 @@ Tất cả giao diện của hệ thống được tối ưu hóa cho **Mobile W
         *   **Tab 2: Loại xe & Giá sàn (Vehicle Types):** Danh sách Card phân khúc xe (Sedan 4 chỗ, SUV 7 chỗ...), mô tả và **Giá thuê cơ bản/ngày (`1,200,000 VNĐ`)**.
     *   *FAB Button (`+`) nổi tự động chuyển ngữ cảnh:* Ở Tab 1 bấm `+` mở Form Thêm chiếc xe mới (3 khung); ở Tab 2 bấm `+` mở Form Tạo loại xe mới.
 *   **Prompt mẫu cho AI:**
-    > *"Design a mobile-first, responsive web interface for 'Fleet Management' of a SaaS car rental platform. Top app bar features a hamburger menu, title 'Quản lý fleet', and user avatar. Sub-header displays vehicle quota 'Xe (12/15)' and package badge. Provide two tabs: 'Vehicles' and 'Vehicle Types'. Under 'Vehicles' tab, display search bar, status filter chips (Available, Rented, Maintenance), branch filter dropdown, and a list of vehicle cards (photo thumbnail, license plate badge, model, branch, odo, fuel, action menu button). Include a bottom sheet for 'Quick Odo & Maintenance Update'. Under 'Vehicle Types' tab, list categories with daily rental rates. Place a floating action button '+' that dynamically opens 'Add Vehicle' form on Tab 1 and 'Add Vehicle Type' form on Tab 2. Modern Tailwind CSS styling."*
+    > *"Design a mobile-first, responsive web interface for 'Fleet Management' of a SaaS car rental platform. Top app bar features a hamburger menu, title 'Quản lý fleet', and user avatar. Sub-header displays vehicle quota 'Xe (12/15)' and package badge. Provide two tabs: 'Vehicles' and 'Vehicle Types'. Under 'Vehicles' tab, display search bar, status filter chips (Available, Rented, Maintenance), branch filter dropdown, and a list of vehicle cards (photo thumbnail, license plate badge, model, branch, odo, fuel, action menu button). Include a bottom sheet for 'Quick Odo & Maintenance Update'. Under 'Vehicle Types' tab, list categories with daily rental rates. Place a floating action button '+' th3. **Chi tiết Quy trình Đăng nhập & Phân ngữ cảnh (Single Active Branch Context)**:
+   * **Nếu `is_super_admin == true`**:
+     * Cấp Access JWT (15 phút) với claims: `tenant_id = null`, `role = SUPER_ADMIN`, `active_branch_id = null`.
+     * Cấp Refresh JWT (7 ngày) trong HTTP-only Cookie `refresh_token`.
+     * Trả về `LoginResponse` kèm `requiresTenantSelection = false`.
+   * **Nếu `is_super_admin == false`**: Query bảng `user_tenants` lấy danh sách Tenant đang hoạt động của người dùng.
+     * *Trường hợp 0 Tenant*: Ném lỗi `AccessDeniedException` (Người dùng chưa được gắn vào nhà xe nào).
+     * *Trường hợp 1 Tenant*: Tự động chọn Tenant đó. Lấy role trong `user_tenants`, danh sách `assignedBranches` và chọn `defaultBranchId` (Chi nhánh mặc định/đầu tiên). Cấp Access JWT (`tenant_id`, `role`, `active_branch_id`) + Refresh JWT. Trả về `requiresTenantSelection = false`, kèm `activeBranchId` và `assignedBranches`.
+     * *Trường hợp 2+ Tenant*: Trả về `LoginResponse` chứa `requiresTenantSelection = true`, kèm `preAuthToken` (Hạn 5 phút, scope `PRE_AUTH`) và danh sách `tenants` (gồm `tenantId`, `tenantName`, `role`). Đợi người dùng chọn Tenant.
 
+4. **Chọn Tenant (`POST /api/v1/auth/select-tenant`)**:
+   * Header: `Authorization: Bearer <preAuthToken>`
+   * Request Body: `{ "tenantId": "uuid-tenant-selected" }`
+   * Backend xác minh user thực sự thuộc `tenantId` yêu cầu trong `user_tenants`.
+   * Lấy role & danh sách `assignedBranches`, đặt `activeBranchId = defaultBranchId`. Cấp Access JWT chính thức (`tenant_id`, `role`, `active_branch_id`) và Refresh Token (Cookie).
 
-#### MÀN HÌNH 5: Quản Lý Tài Khoản & Phân Bổ Nhân Viên (Staff & Workplace Allocation)
-*   **Mô tả:** Quản lý danh sách nhân sự. Có ô tìm kiếm **"Tìm tài khoản nhân viên bằng Email"**. 
-    *   *Logic quan trọng:* Nếu email đã tồn tại trên cơ sở dữ liệu hệ thống (do đã làm cho Tenant khác), hiển thị thông báo: *"Tài khoản đã tồn tại trong hệ thống. Bạn đang gán người dùng này vào nhà xe của mình."*. Cho phép Tenant Admin phân công vai trò tại Tenant hiện tại và tích chọn danh sách chi nhánh được gán mà không bắt người dùng phải tạo lại tài khoản hoặc đổi mật khẩu.
-*   **Prompt mẫu cho AI:**
-    > *"Design a responsive, mobile-first web page for a 'Staff Management' dashboard. It has a list of active staff members with their avatars, names, roles (styled with colorful pills), and badges of assigned branches. It also includes an active/inactive toggle switch for each person. Add an 'Add/Assign Staff' form. In the form, have a search input for 'User Email'. Below the input, show a conditional info banner: 'User already exists in the system. You are assigning them to your organization.' Next, add a Role Selection dropdown (Tenant Admin, Staff, Sale) and a Multi-select checkbox group for branch assignments."*
+5. **Đổi Chi Nhánh Làm Việc (`POST /api/v1/auth/switch-branch`)**:
+   * Header: `Authorization: Bearer <accessToken>`
+   * Request Body: `{ "branchId": "uuid-branch-selected" }`
+   * Backend xác minh `branchId` thuộc danh sách chi nhánh được gán (`user_branches`) của User tại Tenant hiện tại. Nếu hợp lệ, tái cấp (Re-issue) **Access JWT mới** chứa `active_branch_id = branchId`.
 
-### 7.3 Thiết kế Trạng thái Giao diện Phụ (Secondary UI States)
-*   **Trạng thái Trống (Empty State):** Khi danh sách không có dữ liệu -> Hiển thị hình minh họa nhẹ kèm text hướng dẫn thân thiện và nút hành động (Ví dụ: *"Chưa có xe nào được đăng ký. [Thêm xe ngay]"*).
-*   **Trạng thái Đang tải (Loading State):** Sử dụng các hiệu ứng **Skeleton** (khung xương xám chuyển động nhẹ) thay vì vòng xoay spinner truyền thống để tăng trải nghiệm mượt mà.
+#### D. Cấu trúc Token & TenantContext
+* **Access JWT Payload (15 phút)**:
+  ```json
+  {
+    "sub": "user-uuid",
+    "email": "user@example.com",
+    "role": "TENANT_ADMIN | STAFF | SALE | SUPER_ADMIN",
+    "tenant_id": "tenant-uuid-or-null",
+    "active_branch_id": "branch-uuid-or-null"
+  }
+  ```
+* **Refresh JWT (7 ngày)**: Lưu trong Cookie `HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth/refresh`.
+* **TenantContext Layer**: `JwtAuthenticationFilter` giải mã token trên mỗi request, nạp `tenant_id`, `active_branch_id` (`CURRENT_BRANCH`) và `role` vào `TenantContext` (ThreadLocal), sau đó gọi `SET LOCAL app.current_tenant = '...'` trên Postgres để kích hoạt RLS. Dọn dẹp `TenantContext.clear()` trong khối `finally`.xám chuyển động nhẹ) thay vì vòng xoay spinner truyền thống để tăng trải nghiệm mượt mà.
 *   **Phản hồi lỗi (Error Validation State):** Cảnh báo lỗi nhập liệu bằng màu đỏ (`Destructive Red` - `#EF4444`) kèm text mô tả chi tiết ngay dưới trường thông tin bị lỗi.
 
 ---
@@ -380,19 +402,26 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
    * Backend kiểm tra Email -> nếu không tìm thấy, ném lỗi `BadCredentialsException`.
    * Kiểm tra Password bằng `BCryptPasswordEncoder` -> nếu sai, ném lỗi `BadCredentialsException`.
    * Kiểm tra cờ `is_active` -> nếu false, ném lỗi `DisabledException`.
-2. **Xử lý theo vai trò**:
+2. **Chi tiết Quy trình Đăng nhập & Phân ngữ cảnh (Single Active Branch Context)**:
    * **Nếu `is_super_admin == true`**:
-     * Cấp Access JWT (15 phút) với claims: `tenant_id = null`, `role = SUPER_ADMIN`.
+     * Cấp Access JWT (15 phút) với claims: `tenant_id = null`, `role = SUPER_ADMIN`, `active_branch_id = null`.
      * Cấp Refresh JWT (7 ngày) trong HTTP-only Cookie `refresh_token`.
      * Trả về `LoginResponse` kèm `requiresTenantSelection = false`.
    * **Nếu `is_super_admin == false`**: Query bảng `user_tenants` lấy danh sách Tenant đang hoạt động của người dùng.
      * *Trường hợp 0 Tenant*: Ném lỗi `AccessDeniedException` (Người dùng chưa được gắn vào nhà xe nào).
-     * *Trường hợp 1 Tenant*: Tự động chọn Tenant đó. Lấy role trong `user_tenants` và danh sách branchIds trong `user_branches`. Cấp Access JWT (`tenant_id`, `role`, `branch_ids`) + Refresh JWT. Trả về `requiresTenantSelection = false`.
-     * *Trường hợp 2+ Tenant*: Trả về `LoginResponse` chứa `requiresTenantSelection = true`, kèm danh sách `tenants` (gồm `tenantId`, `tenantName`, `role`) và chưa cấp Access JWT chính thức.
+     * *Trường hợp 1 Tenant*: Tự động chọn Tenant đó. Lấy role trong `user_tenants`, danh sách `assignedBranches` và chọn `defaultBranchId` (Chi nhánh mặc định/đầu tiên). Cấp Access JWT (`tenant_id`, `role`, `active_branch_id`) + Refresh JWT. Trả về `requiresTenantSelection = false`, kèm `activeBranchId` và `assignedBranches`.
+     * *Trường hợp 2+ Tenant*: Trả về `LoginResponse` chứa `requiresTenantSelection = true`, kèm `preAuthToken` (Hạn 5 phút, scope `PRE_AUTH`) và danh sách `tenants` (gồm `tenantId`, `tenantName`, `role`). Đợi người dùng chọn Tenant.
+
 3. **Chọn Tenant (`POST /api/v1/auth/select-tenant`)**:
+   * Header: `Authorization: Bearer <preAuthToken>`
    * Request Body: `{ "tenantId": "uuid-tenant-selected" }`
    * Backend xác minh user thực sự thuộc `tenantId` yêu cầu trong `user_tenants`.
-   * Lấy role & branchIds tương ứng, cấp Access JWT chính thức và Refresh Token.
+   * Lấy role & danh sách `assignedBranches`, đặt `activeBranchId = defaultBranchId`. Cấp Access JWT chính thức (`tenant_id`, `role`, `active_branch_id`) và Refresh Token (Cookie).
+
+4. **Đổi Chi Nhánh Làm Việc (`POST /api/v1/auth/switch-branch`)**:
+   * Header: `Authorization: Bearer <accessToken>`
+   * Request Body: `{ "branchId": "uuid-branch-selected" }`
+   * Backend xác minh `branchId` thuộc danh sách chi nhánh được gán (`user_branches`) của User tại Tenant hiện tại. Nếu hợp lệ, tái cấp (Re-issue) **Access JWT mới** chứa `active_branch_id = branchId`.
 
 #### D. Cấu trúc Token & TenantContext
 * **Access JWT Payload (15 phút)**:
@@ -402,11 +431,11 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
     "email": "user@example.com",
     "role": "TENANT_ADMIN | STAFF | SALE | SUPER_ADMIN",
     "tenant_id": "tenant-uuid-or-null",
-    "branch_ids": ["branch-uuid-1", "branch-uuid-2"]
+    "active_branch_id": "branch-uuid-or-null"
   }
   ```
 * **Refresh JWT (7 ngày)**: Lưu trong Cookie `HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth/refresh`.
-* **TenantContext Layer**: `JwtAuthenticationFilter` giải mã token trên mỗi request, nạp `tenant_id` và `branch_ids` vào `TenantContext` (ThreadLocal), sau đó gọi `SET LOCAL app.current_tenant = '...'` trên Postgres để kích hoạt RLS. Dọn dẹp `TenantContext.clear()` trong khối `finally`.
+* **TenantContext Layer**: `JwtAuthenticationFilter` giải mã token trên mỗi request, nạp `tenant_id`, `active_branch_id` (`CURRENT_BRANCH`) và `role` vào `TenantContext` (ThreadLocal), sau đó gọi `SET LOCAL app.current_tenant = '...'` trên Postgres để kích hoạt RLS. Dọn dẹp `TenantContext.clear()` trong khối `finally`.
 
 ---
 

@@ -378,18 +378,16 @@ Tạo file `TenantContext.java`:
 ```java
 package com.carrental.car_rental_backend.security.context;
 
-import java.util.Collections;
-import java.util.List;
 import java.util.UUID;
 
 /**
- * Lưu trữ context thông tin Tenant và Branch của request hiện tại trong ThreadLocal.
+ * Lưu trữ context thông tin Tenant, Active Branch và Role của request hiện tại trong ThreadLocal.
  * Mọi request đến Spring Boot sẽ được xử lý bởi 1 Thread riêng biệt.
  */
 public class TenantContext {
 
     private static final ThreadLocal<UUID> CURRENT_TENANT = new ThreadLocal<>();
-    private static final ThreadLocal<List<UUID>> CURRENT_BRANCHES = new ThreadLocal<>();
+    private static final ThreadLocal<UUID> CURRENT_BRANCH = new ThreadLocal<>();
     private static final ThreadLocal<String> CURRENT_ROLE = new ThreadLocal<>();
 
     // --- TENANT ID ---
@@ -401,14 +399,13 @@ public class TenantContext {
         return CURRENT_TENANT.get();
     }
 
-    // --- BRANCH IDS ---
-    public static void setBranchIds(List<UUID> branchIds) {
-        CURRENT_BRANCHES.set(branchIds);
+    // --- ACTIVE BRANCH ID ---
+    public static void setBranchId(UUID branchId) {
+        CURRENT_BRANCH.set(branchId);
     }
 
-    public static List<UUID> getBranchIds() {
-        List<UUID> branches = CURRENT_BRANCHES.get();
-        return branches != null ? branches : Collections.emptyList();
+    public static UUID getBranchId() {
+        return CURRENT_BRANCH.get();
     }
 
     // --- ROLE ---
@@ -423,7 +420,7 @@ public class TenantContext {
     // --- CLEAR CONTEXT (BẮT BUỘC ĐỂ TRÁNH THREAD-LEAK TRONG THREAD POOL) ---
     public static void clear() {
         CURRENT_TENANT.remove();
-        CURRENT_BRANCHES.remove();
+        CURRENT_BRANCH.remove();
         CURRENT_ROLE.remove();
     }
 }
@@ -475,7 +472,7 @@ public class JwtProvider {
     }
 
     // Tạo Access Token
-    public String generateAccessToken(UUID userId, String email, String role, UUID tenantId, List<UUID> branchIds) {
+    public String generateAccessToken(UUID userId, String email, String role, UUID tenantId, UUID activeBranchId) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + accessTokenExpirationMs);
 
@@ -491,9 +488,8 @@ public class JwtProvider {
             builder.claim("tenant_id", tenantId.toString());
         }
 
-        if (branchIds != null && !branchIds.isEmpty()) {
-            List<String> branchStrings = branchIds.stream().map(UUID::toString).toList();
-            builder.claim("branch_ids", branchStrings);
+        if (activeBranchId != null) {
+            builder.claim("active_branch_id", activeBranchId.toString());
         }
 
         return builder.compact();
@@ -571,8 +567,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 String userIdStr = claims.getSubject();
                 String role = claims.get("role", String.class);
                 String tenantIdStr = claims.get("tenant_id", String.class);
-                @SuppressWarnings("unchecked")
-                List<String> branchIdStrs = claims.get("branch_ids", List.class);
+                String activeBranchIdStr = claims.get("active_branch_id", String.class);
 
                 // 1. Set thông tin vào TenantContext
                 if (tenantIdStr != null) {
@@ -581,9 +576,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (role != null) {
                     TenantContext.setRole(role);
                 }
-                if (branchIdStrs != null) {
-                    List<UUID> branchUuids = branchIdStrs.stream().map(UUID::fromString).toList();
-                    TenantContext.setBranchIds(branchUuids);
+                if (activeBranchIdStr != null) {
+                    TenantContext.setBranchId(UUID.fromString(activeBranchIdStr));
                 }
 
                 // 2. Set thông tin vào Spring Security Context
