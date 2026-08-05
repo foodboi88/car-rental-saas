@@ -36,6 +36,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public Endpoints (Không cần đăng nhập)
                 .requestMatchers("/api/v1/auth/**").permitAll()
+                .requestMatchers("/api/v1/branchs/**").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 // Tất cả request khác bắt buộc phải đăng nhập
                 .anyRequest().authenticated()
