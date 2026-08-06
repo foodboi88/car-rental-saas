@@ -18,7 +18,10 @@ public enum ErrorCode {
   // Business Custom Errors
   TENANT_ACCESS_DENIED("TENANT_ACCESS_DENIED", "Bạn không thuộc Tenant này", HttpStatus.FORBIDDEN),
   VEHICLE_NOT_AVAILABLE("VEHICLE_NOT_AVAILABLE", "Xe đã có lịch đặt hoặc đang bảo dưỡng", HttpStatus.CONFLICT),
-  BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST);
+  BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST),
+  VEHICLE_TYPE_NOT_FOUND("VEHICLE_TYPE_NOT_FOUND", "Không tìm thấy loại xe", HttpStatus.NOT_FOUND),
+  VEHICLE_TYPE_NAME_EXISTS("VEHICLE_TYPE_NAME_EXISTS", "Tên loại xe đã tồn tại", HttpStatus.CONFLICT),
+  VEHICLE_TYPE_IN_USE("VEHICLE_TYPE_IN_USE", "Không thể xóa loại xe đang có xe phụ thuộc", HttpStatus.CONFLICT);
 
   private final String code;
   private final String message;
