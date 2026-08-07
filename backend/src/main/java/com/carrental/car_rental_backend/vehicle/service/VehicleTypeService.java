@@ -6,8 +6,13 @@ import com.carrental.car_rental_backend.vehicle.dto.CreateVehicleTypeRequestDTO;
 import com.carrental.car_rental_backend.vehicle.dto.VehicleTypeResponseDTO;
 import com.carrental.car_rental_backend.vehicle.entity.VehicleType;
 import com.carrental.car_rental_backend.vehicle.repository.VehicleTypeRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -36,9 +41,39 @@ public class VehicleTypeService {
     return mapToResponseDTO(savedVehicleType);
   }
 
+  public Page<VehicleTypeResponseDTO> getVehicleTypes(UUID tenantId, String search, Boolean isActive, Pageable pageable) {
+    Page<VehicleType> page = vehicleTypeRepository.findByTenantIdWithFilter(tenantId, search, isActive, pageable);
+
+    List<UUID> vehicleTypeIds = page.getContent().stream()
+        .map(VehicleType::getId)
+        .toList();
+
+    Map<UUID, Long> vehicleCountByTypeId = new HashMap<>();
+    if (!vehicleTypeIds.isEmpty()) {
+      List<Object[]> rows = vehicleTypeRepository.countVehiclesGroupedByVehicleTypeId(tenantId, vehicleTypeIds);
+      for (Object[] row : rows) {
+        vehicleCountByTypeId.put((UUID) row[0], (Long) row[1]);
+      }
+    }
+
+    return page.map(vehicleType ->
+        mapToResponseDTO(vehicleType, vehicleCountByTypeId.getOrDefault(vehicleType.getId(), 0L)));
+  }
+
+  public VehicleTypeResponseDTO getVehicleTypeById(UUID tenantId, UUID id) {
+    VehicleType vehicleType = vehicleTypeRepository.findByTenantIdAndId(tenantId, id)
+        .orElseThrow(() -> new AppException(ErrorCode.VEHICLE_TYPE_NOT_FOUND));
+
+    return mapToResponseDTO(vehicleType);
+  }
+
   private VehicleTypeResponseDTO mapToResponseDTO(VehicleType vehicleType) {
     long vehicleCount = vehicleTypeRepository.countVehiclesByTenantIdAndVehicleTypeId(vehicleType.getTenantId(), vehicleType.getId());
 
+    return mapToResponseDTO(vehicleType, vehicleCount);
+  }
+
+  private VehicleTypeResponseDTO mapToResponseDTO(VehicleType vehicleType, long vehicleCount) {
     return VehicleTypeResponseDTO.builder()
         .id(vehicleType.getId())
         .tenantId(vehicleType.getTenantId())

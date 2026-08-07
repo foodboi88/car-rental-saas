@@ -8,13 +8,12 @@ import com.carrental.car_rental_backend.vehicle.dto.CreateVehicleTypeRequestDTO;
 import com.carrental.car_rental_backend.vehicle.dto.VehicleTypeResponseDTO;
 import com.carrental.car_rental_backend.vehicle.service.VehicleTypeService;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
@@ -35,6 +34,29 @@ public class VehicleTypeController {
     UUID tenantId = getTenantIdOrThrow();
     VehicleTypeResponseDTO result = vehicleTypeService.createVehicleType(tenantId, request);
     return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result, "Tạo loại xe thành công"));
+  }
+
+  @GetMapping
+  @PreAuthorize("hasAnyRole('TENANT_ADMIN', 'STAFF', 'SALE')")
+  public ResponseEntity<ApiResponse<Page<VehicleTypeResponseDTO>>>
+  getVehicleTypes(
+      @RequestParam(required = false) String search,
+      @RequestParam(required = false) Boolean isActive,
+      Pageable pageable
+  ) {
+    UUID tenantId = getTenantIdOrThrow();
+    Page<VehicleTypeResponseDTO> result = vehicleTypeService.getVehicleTypes(tenantId, search, isActive, pageable);
+    return ResponseEntity.ok(ApiResponse.success(result, "Lấy danh sách loại xe thành công"));
+  }
+
+  @GetMapping("/{id}")
+  @PreAuthorize("hasAnyRole('TENANT_ADMIN', 'STAFF', 'SALE')")
+  public ResponseEntity<ApiResponse<VehicleTypeResponseDTO>> getVehicleTypeById(
+      @PathVariable UUID id
+  ) {
+    UUID tenantId = getTenantIdOrThrow();
+    VehicleTypeResponseDTO result = vehicleTypeService.getVehicleTypeById(tenantId, id);
+    return ResponseEntity.ok(ApiResponse.success(result, "Lấy chi tiết loại xe thành công"));
   }
 
   private UUID getTenantIdOrThrow() {

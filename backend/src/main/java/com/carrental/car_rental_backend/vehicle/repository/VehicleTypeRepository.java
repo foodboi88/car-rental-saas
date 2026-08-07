@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -37,5 +38,15 @@ public interface VehicleTypeRepository extends JpaRepository<VehicleType, UUID> 
   long countVehiclesByTenantIdAndVehicleTypeId(
       @Param("tenantId") UUID tenantId,
       @Param("vehicleTypeId") UUID vehicleTypeId
+  );
+
+  // Đếm số lượng xe theo tenantId và danh sách vehicleTypeIds, nhóm theo vehicleTypeId
+  @Query(value = "SELECT vehicle_type_id, COUNT(*) FROM vehicles " +
+      "WHERE tenant_id = :tenantId AND vehicle_type_id IN :vehicleTypeIds " +
+      "GROUP BY vehicle_type_id",
+      nativeQuery = true)
+  List<Object[]> countVehiclesGroupedByVehicleTypeId(
+      @Param("tenantId") UUID tenantId,
+      @Param("vehicleTypeIds") List<UUID> vehicleTypeIds
   );
 }
