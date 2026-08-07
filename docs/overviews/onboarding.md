@@ -15,25 +15,29 @@
 
 ---
 
-## 2. Hệ Thống Vai Trò & Phân Quyền (RBAC & ABAC)
+## 2. Hệ Thống Vai Trò & Phân Quyền (Dynamic RBAC & ABAC)
 
-Kiến trúc phân quyền của dự án là sự kết hợp giữa **RBAC (Role-Based Access Control)** để phân biệt quyền hạn theo chức danh, và **ABAC (Attribute-Based Access Control)** để giới hạn phạm vi truy cập dữ liệu dựa trên thuộc tính Tenant và Chi nhánh (`branch`).
+Kiến trúc phân quyền của dự án là sự kết hợp giữa **Dynamic RBAC (Role-Based Access Control dựa trên bảng roles/permissions)** để linh hoạt phân quyền theo từng Tenant, và **ABAC (Attribute-Based Access Control)** để giới hạn phạm vi truy cập dữ liệu dựa trên thuộc tính Tenant và Chi nhánh (`branch`).
 
-### 2.1 Các Vai Trò Trong Hệ Thống
+### 2.1 Mức độ Phân Quyền Trong Hệ Thống
 
-| Vai trò | Phạm vi | Mô tả |
+| Nhóm Vai Trò | Phạm vi | Mô tả |
 | :--- | :--- | :--- |
-| **SUPER_ADMIN** | Toàn hệ thống | Tài khoản điều hành của đội ngũ phát triển SaaS. Dùng để cấu hình hệ thống, tạo Tenant mới, quản lý Subscription và duyệt thanh toán dịch vụ. Vai trò này lưu trực tiếp bằng cờ `is_super_admin = true` trong bảng trung tâm `users` và bypass toàn bộ cơ chế bảo mật Postgres RLS. |
-| **TENANT_ADMIN** | 1 Tenant | Chủ nhà xe (quy định `role = 1` trong bảng `user_tenants`). Có toàn quyền quản lý nhân sự, cấu hình giá xe, CRUD chi nhánh (`branches`), xe và xem báo cáo doanh thu toàn hệ thống. Mặc định có quyền truy cập tất cả các chi nhánh thuộc tenant. Đây là **vai trò duy nhất** có quyền Thêm/Sửa/Tạm ngưng/Xóa Chi nhánh (triển khai theo mô hình Hybrid SaaS Quota kiểm soát `max_branches` và `max_vehicles`). |
-| **STAFF** | 1+ Chi nhánh | Nhân viên nghiệp vụ (quy định `role = 2` trong bảng `user_tenants`). Thực hiện tạo Booking, làm thủ tục bàn giao xe (`handover_by`), nhận lại xe (`returned_by`). Bắt buộc phải được gán vào ít nhất một chi nhánh trong bảng `user_branches` và chỉ thao tác được trên xe/booking thuộc chi nhánh đó. Read-only đối với danh mục Chi nhánh. |
-| **SALE** | 1+ Chi nhánh | Cộng tác viên/Nhân viên kinh doanh (quy định `role = 3` trong bảng `user_tenants`). Có quyền tạo booking cho khách hàng, xem trạng thái xe trống để tư vấn. Khi tạo đơn, hệ thống ghi nhận cố định `created_by = sale_user_id` để tính hoa hồng chốt sale (`commission_amount`), độc lập với nhân viên làm thủ tục bàn giao xe. Bắt buộc gán vào chi nhánh qua `user_branches`. |
+| **SUPER_ADMIN** | Toàn hệ thống | Tài khoản điều hành của đội ngũ phát triển SaaS. Cấu hình hệ thống, tạo Tenant mới, quản lý loại xe `vehicle_types` toàn hệ thống và duyệt thanh toán dịch vụ. Vai trò này lưu bằng cờ `is_super_admin = true` trong bảng `users` và bypass toàn bộ RLS. |
+| **TENANT_ADMIN** | 1 Tenant | Chủ nhà xe (quy định bằng `code = 'TENANT_ADMIN'` trong bảng `roles`). Có toàn quyền quản lý nhân sự, phân quyền động (`roles`/`permissions`), cấu hình giá xe, CRUD chi nhánh (`branches`), xe và xem báo cáo doanh thu toàn hệ thống. Mặc định có quyền truy cập tất cả các chi nhánh thuộc tenant. |
+| **STAFF** | 1+ Chi nhánh | Nhân viên nghiệp vụ (liên kết qua `role_id` ở `user_tenants`). Thực hiện tạo Booking, làm thủ tục bàn giao xe (`handover_by`), nhận lại xe (`returned_by`). Bắt buộc phải được gán vào ít nhất một chi nhánh trong bảng `user_branches` (`status = 1: ACTIVE`) và chỉ thao tác được trên xe/booking thuộc chi nhánh đó. |
+| **SALE** | 1+ Chi nhánh | Cộng tác viên/Nhân viên kinh doanh (liên kết qua `role_id` ở `user_tenants`). Có quyền tạo booking cho khách hàng, xem trạng thái xe trống để tư vấn. Khi tạo đơn, hệ thống ghi nhận cố định `created_by = sale_user_id` để tính hoa hồng chốt sale (`commission_amount`), độc lập với nhân viên làm thủ tục bàn giao xe. |
 
-### 2.2 Sơ đồ Quan Hệ Phân Quyền (User-Tenant-Branch)
+### 2.2 Sơ đồ Quan Hệ Phân Quyền (User-Tenant-Branch & Dynamic RBAC)
 
 ```mermaid
 erDiagram
     users ||--o{ user_tenants : "N-N (Central to Tenant)"
     tenants ||--o{ user_tenants : "1-N"
+    tenants ||--o{ roles : "1-N (Tenant-defined Roles)"
+    roles ||--o{ user_tenants : "1-N (Dynamic Role Assignment)"
+    roles ||--o{ role_permissions : "1-N (Cascade Delete)"
+    permissions ||--o{ role_permissions : "1-N (Cascade Delete)"
     user_tenants ||--o{ user_branches : "N-N (Tenant to Branch mapping)"
     branches ||--o{ user_branches : "1-N"
     
@@ -49,17 +53,39 @@ erDiagram
         string name
         int plan_tier "1:FREE, 2:BASIC, 3:PRO, 4:ENTERPRISE"
     }
+
+    roles {
+        UUID id PK
+        UUID tenant_id FK
+        string name
+        string code
+    }
+
+    permissions {
+        UUID id PK
+        string code UK
+        string category
+    }
+
+    role_permissions {
+        UUID role_id PK, FK
+        UUID permission_id PK, FK
+    }
     
     user_tenants {
         UUID user_id PK, FK
         UUID tenant_id PK, FK
-        int role "1:TENANT_ADMIN, 2:STAFF, 3:SALE"
+        UUID role_id FK
     }
     
     user_branches {
         UUID user_id PK, FK
         UUID tenant_id PK, FK
         UUID branch_id PK, FK
+        int status "1:ACTIVE, 2:SUSPENDED, 3:RESIGNED"
+        timestamptz started_at
+        timestamptz ended_at
+        UUID updated_by FK
     }
 ```
 

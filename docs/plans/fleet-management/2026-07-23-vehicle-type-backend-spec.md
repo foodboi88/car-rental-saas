@@ -8,18 +8,17 @@
 
 ## 1. Tổng Quan (Overview)
 
-Tính năng **Quản lý Loại Xe (`vehicle_types`)** cung cấp các REST API cho phép Chủ nhà xe (`TENANT_ADMIN`) khai thác, cấu hình danh mục phân khúc loại xe (ví dụ: *Sedan 4 chỗ*, *SUV 7 chỗ*, *Bán tải*) cùng mức giá thuê sàn cơ bản (`base_price`). Các vai trò khác như `STAFF` và `SALE` có quyền xem thông tin danh mục.
+Tính năng **Quản lý Loại Xe (`vehicle_types`)** cung cấp danh mục phân khúc loại xe toàn hệ thống (System-Wide Catalog) do **Super Admin** khởi tạo và quản lý (ví dụ: *Sedan 4 chỗ*, *SUV 7 chỗ*, *Bán tải*, *Xe điện*). Tất cả các Tenant truy vấn danh mục loại xe này để gán thuộc tính cho từng chiếc xe thuộc sở hữu của mình (`vehicles.vehicle_type_id`).
 
 ---
 
-## 2. Phân Quyền & Multi-Tenancy (Security & Multi-Tenant Isolation)
+## 2. Phân Quyền & Access Control (Security & Dynamic RBAC)
 
-1. **Cách ly Dữ liệu Multi-Tenant**:
-   * Tất cả các request yêu cầu xác thực JWT Context chứa `tenantId`.
-   * Mọi truy vấn DB (Repository) đều phải bắt buộc lọc theo `tenant_id = :tenantId`.
-2. **Phân quyền truy cập (RBAC)**:
-   * **`TENANT_ADMIN`**: Toàn quyền CRUD (Tạo, Xem, Cập nhật, Đổi trạng thái `is_active`, Xóa loại xe).
-   * **`STAFF` & `SALE`**: Read-only (`GET /api/v1/vehicle-types`, `GET /api/v1/vehicle-types/{id}`).
+1. **System-wide Catalog**:
+   * Danh mục `vehicle_types` không chứa `tenant_id`, dùng chung cho tất cả các nhà xe trong hệ thống SaaS.
+2. **Phân quyền truy cập (Dynamic RBAC)**:
+   * **`SUPER_ADMIN`**: Toàn quyền CRUD danh mục loại xe hệ thống (`hasAuthority('vehicle_type:manage')`).
+   * **Mọi User có quyền `vehicle:read` / `vehicle:create`**: Read-only (`GET /api/v1/vehicle-types`, `GET /api/v1/vehicle-types/{id}`).
 
 ---
 
