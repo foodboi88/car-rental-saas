@@ -12,13 +12,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface VehicleTypeRepository extends JpaRepository<VehicleType, UUID> {
+  // Các method cần tìm theo tenantId tránh việc truy cập dữ liệu của tenant khác
   // Optional: Tránh việc trả về null
   Optional<VehicleType> findByTenantIdAndId(UUID tenantId, UUID id);
 
   // Ignore case để tránh việc phân biệt chữ hoa chữ thường
   boolean existsByTenantIdAndNameIgnoreCase(UUID tenantId, String name);
 
-  // IdNot để tránh việc kiểm tra chính bản thân mình khi cập nhật
+  // IdNot để tránh việc trùng với chính record đang update
   boolean existsByTenantIdAndNameIgnoreCaseAndIdNot(UUID tenantId, String name, UUID id);
 
   // Tìm kiếm với filter và phân trang

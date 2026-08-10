@@ -3,12 +3,14 @@ package com.carrental.car_rental_backend.vehicle.service;
 import com.carrental.car_rental_backend.common.exception.AppException;
 import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.vehicle.dto.CreateVehicleTypeRequestDTO;
+import com.carrental.car_rental_backend.vehicle.dto.UpdateVehicleTypeRequestDTO;
 import com.carrental.car_rental_backend.vehicle.dto.VehicleTypeResponseDTO;
 import com.carrental.car_rental_backend.vehicle.entity.VehicleType;
 import com.carrental.car_rental_backend.vehicle.repository.VehicleTypeRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.List;
@@ -23,6 +25,8 @@ public class VehicleTypeService {
     this.vehicleTypeRepository = vehicleTypeRepository;
   }
 
+  // @Transactional: Đảm bảo các thao tác được thực hiện đồng nhất, lỗi sẽ rollback toàn bộ
+  @Transactional
   public VehicleTypeResponseDTO createVehicleType(UUID tenantId, CreateVehicleTypeRequestDTO request) {
     String trimmedName = request.getName().trim();
 
@@ -41,7 +45,25 @@ public class VehicleTypeService {
     return mapToResponseDTO(savedVehicleType);
   }
 
+  @Transactional
+  public VehicleTypeResponseDTO updateVehicleType(UUID tenantId, UUID id, UpdateVehicleTypeRequestDTO request) {
+    VehicleType vehicleType = findVehicleTypeOrThrow(tenantId, id);
+
+    String trimmedName = request.getName().trim();
+    if(vehicleTypeRepository.existsByTenantIdAndNameIgnoreCaseAndIdNot(tenantId, trimmedName, id)) {
+      throw new AppException(ErrorCode.VEHICLE_TYPE_NAME_EXISTS);
+    }
+
+    vehicleType.setName(trimmedName);
+    vehicleType.setDescription(request.getDescription());
+
+    VehicleType updatedVehicleType = vehicleTypeRepository.save(vehicleType);
+    return mapToResponseDTO(updatedVehicleType);
+  }
+
   //Page: Kiểu dữ liệu đại diện cho 1 trang kết quả phân trang
+  //readOnly = true: Chỉ đọc, ko thay đổi dữ liệu, giúp tối ưu hiệu năng
+  @Transactional(readOnly = true)
   public Page<VehicleTypeResponseDTO> getVehicleTypes(UUID tenantId, String search, Boolean isActive, Pageable pageable) {
     Page<VehicleType> page = vehicleTypeRepository.findByTenantIdWithFilter(tenantId, search, isActive, pageable);
 
@@ -63,11 +85,36 @@ public class VehicleTypeService {
         mapToResponseDTO(vehicleType, vehicleCountByTypeId.getOrDefault(vehicleType.getId(), 0L)));
   }
 
+  @Transactional(readOnly = true)
   public VehicleTypeResponseDTO getVehicleTypeById(UUID tenantId, UUID id) {
-    VehicleType vehicleType = vehicleTypeRepository.findByTenantIdAndId(tenantId, id)
-        .orElseThrow(() -> new AppException(ErrorCode.VEHICLE_TYPE_NOT_FOUND));
-
+    VehicleType vehicleType = findVehicleTypeOrThrow(tenantId, id);
     return mapToResponseDTO(vehicleType);
+  }
+
+  @Transactional
+  public VehicleTypeResponseDTO changeVehicleTypeStatus(UUID tenantId, UUID id, boolean isActive) {
+    VehicleType vehicleType = findVehicleTypeOrThrow(tenantId, id);
+
+    vehicleType.setIsActive(isActive);
+    VehicleType updatedVehicleType = vehicleTypeRepository.save(vehicleType);
+    return mapToResponseDTO(updatedVehicleType);
+  }
+
+  @Transactional
+  public void deleteVehicleType(UUID tenantId, UUID id) {
+    VehicleType vehicleType = findVehicleTypeOrThrow(tenantId, id);
+
+    long vehicleCount = vehicleTypeRepository.countVehiclesByTenantIdAndVehicleTypeId(tenantId, id);
+    if (vehicleCount > 0) {
+      throw new AppException(ErrorCode.VEHICLE_TYPE_IN_USE);
+    }
+
+    vehicleTypeRepository.delete(vehicleType);
+  }
+
+  private VehicleType findVehicleTypeOrThrow(UUID tenantId, UUID id) {
+    return vehicleTypeRepository.findByTenantIdAndId(tenantId, id)
+        .orElseThrow(() -> new AppException(ErrorCode.VEHICLE_TYPE_NOT_FOUND));
   }
 
   private VehicleTypeResponseDTO mapToResponseDTO(VehicleType vehicleType) {
