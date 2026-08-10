@@ -41,13 +41,16 @@ public class VehicleTypeService {
     return mapToResponseDTO(savedVehicleType);
   }
 
+  //Page: Kiểu dữ liệu đại diện cho 1 trang kết quả phân trang
   public Page<VehicleTypeResponseDTO> getVehicleTypes(UUID tenantId, String search, Boolean isActive, Pageable pageable) {
     Page<VehicleType> page = vehicleTypeRepository.findByTenantIdWithFilter(tenantId, search, isActive, pageable);
 
+    //List ko sẵn .map() nên phải dùng stream() để chuyển đổi, sau đó chuyển ngược lại thành List
     List<UUID> vehicleTypeIds = page.getContent().stream()
-        .map(VehicleType::getId)
+        .map(VehicleType::getId) // (vehicleType -> vehicleType.getId())
         .toList();
 
+    // Đếm số xe theo từng loại xe
     Map<UUID, Long> vehicleCountByTypeId = new HashMap<>();
     if (!vehicleTypeIds.isEmpty()) {
       List<Object[]> rows = vehicleTypeRepository.countVehiclesGroupedByVehicleTypeId(tenantId, vehicleTypeIds);

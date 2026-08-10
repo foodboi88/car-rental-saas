@@ -4,6 +4,7 @@ import com.carrental.car_rental_backend.common.dto.ApiResponse;
 import com.carrental.car_rental_backend.common.exception.AppException;
 import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.security.context.TenantContext;
+import com.carrental.car_rental_backend.vehicle.constant.VehicleTypeMessage;
 import com.carrental.car_rental_backend.vehicle.dto.CreateVehicleTypeRequestDTO;
 import com.carrental.car_rental_backend.vehicle.dto.VehicleTypeResponseDTO;
 import com.carrental.car_rental_backend.vehicle.service.VehicleTypeService;
@@ -33,7 +34,7 @@ public class VehicleTypeController {
   ) {
     UUID tenantId = getTenantIdOrThrow();
     VehicleTypeResponseDTO result = vehicleTypeService.createVehicleType(tenantId, request);
-    return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result, "Tạo loại xe thành công"));
+    return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result, VehicleTypeMessage.CREATE_SUCCESS));
   }
 
   @GetMapping
@@ -46,7 +47,7 @@ public class VehicleTypeController {
   ) {
     UUID tenantId = getTenantIdOrThrow();
     Page<VehicleTypeResponseDTO> result = vehicleTypeService.getVehicleTypes(tenantId, search, isActive, pageable);
-    return ResponseEntity.ok(ApiResponse.success(result, "Lấy danh sách loại xe thành công"));
+    return ResponseEntity.ok(ApiResponse.success(result, VehicleTypeMessage.LIST_SUCCESS));
   }
 
   @GetMapping("/{id}")
@@ -56,7 +57,7 @@ public class VehicleTypeController {
   ) {
     UUID tenantId = getTenantIdOrThrow();
     VehicleTypeResponseDTO result = vehicleTypeService.getVehicleTypeById(tenantId, id);
-    return ResponseEntity.ok(ApiResponse.success(result, "Lấy chi tiết loại xe thành công"));
+    return ResponseEntity.ok(ApiResponse.success(result, VehicleTypeMessage.DETAIL_SUCCESS));
   }
 
   private UUID getTenantIdOrThrow() {
