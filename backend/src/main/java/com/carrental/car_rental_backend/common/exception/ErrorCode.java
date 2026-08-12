@@ -21,7 +21,12 @@ public enum ErrorCode {
   BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST),
   VEHICLE_TYPE_NOT_FOUND("VEHICLE_TYPE_NOT_FOUND", "Không tìm thấy loại xe", HttpStatus.NOT_FOUND),
   VEHICLE_TYPE_NAME_EXISTS("VEHICLE_TYPE_NAME_EXISTS", "Tên loại xe đã tồn tại", HttpStatus.CONFLICT),
-  VEHICLE_TYPE_IN_USE("VEHICLE_TYPE_IN_USE", "Không thể xóa loại xe đang có xe phụ thuộc", HttpStatus.CONFLICT);
+  VEHICLE_TYPE_IN_USE("VEHICLE_TYPE_IN_USE", "Không thể xóa loại xe đang có xe phụ thuộc", HttpStatus.CONFLICT),
+  VEHICLE_NOT_FOUND("VEHICLE_NOT_FOUND", "Không tìm thấy xe yêu cầu", HttpStatus.NOT_FOUND),
+  VEHICLE_LICENSE_PLATE_EXISTS("VEHICLE_LICENSE_PLATE_EXISTS", "Biển số xe đã tồn tại trong nhà xe", HttpStatus.CONFLICT),
+  VEHICLE_QUOTA_EXCEEDED("VEHICLE_QUOTA_EXCEEDED", "Đã đạt giới hạn số lượng xe của gói dịch vụ", HttpStatus.FORBIDDEN),
+  CUSTOMER_NOT_FOUND("CUSTOMER_NOT_FOUND", "Không tìm thấy khách hàng", HttpStatus.NOT_FOUND),
+  CUSTOMER_IN_USE("CUSTOMER_IN_USE", "Không thể xóa khách hàng đã có lịch sử đơn thuê", HttpStatus.CONFLICT);
 
   private final String code;
   private final String message;
