@@ -14,6 +14,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -24,6 +25,7 @@ import lombok.Setter;
 // có thể thay bằng @Data để sử dụng luôn get/set
 @Setter
 @Getter
+@Builder
 @NoArgsConstructor //tự động sinh một hàm khởi tạo không tham số
 @AllArgsConstructor //tự động sinh một hàm khởi tạo có đầy đủ các tham số
 public class Branch {
@@ -33,9 +35,16 @@ public class Branch {
     @GeneratedValue(strategy = GenerationType.UUID) // tự động tạo UUID mỗi khi save
     @Column(name = "id", nullable = false)
     private UUID id;
+
+    @Column(name = "tenant_id", columnDefinition = "uuid",  nullable = false)
+    private UUID tenantId;
+
     //ánh xạ tới column trong bảng, thể hiện tên column, và không được để null
     @Column(name = "name", nullable = false)
     private String name;
+
+    @Column(name = "code")
+    private String code;
 
     @Column(name = "phone")
     private String phone;
@@ -67,12 +76,15 @@ public class Branch {
     @Column(name = "longitude")
     private BigDecimal longitude;
 
+    @Builder.Default //Yêu cầu lombok giữ nguyên giá trị mặc định khi khởi tạo
     @Column(name = "is_central")
     private Boolean is_central = false;
 
+    @Builder.Default
     @Column(name = "is_active")
     private Boolean is_active = false;
 
+    @Builder.Default
     @Column(name = "is_deleted")
     private Boolean is_deleted = false;
 
