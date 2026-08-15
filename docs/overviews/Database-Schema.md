@@ -1,12 +1,13 @@
 # Database Schema - Car Rental SaaS
 
-**Cập nhật:** 07/08/2026 — Tối ưu hóa toàn diện Database Schema sát thực tế nghiệp vụ Việt Nam:
-- **Phân quyền động (Dynamic RBAC)**: Thêm 3 bảng `roles`, `permissions`, `role_permissions` (khóa ngoại `ON DELETE CASCADE`), thay thế cột `role` cố định bằng `role_id` ở `user_tenants`.
-- **Nâng cấp `user_branches`**: Thêm `status` (1: ACTIVE, 2: SUSPENDED, 3: RESIGNED), ngày bắt đầu/kết thúc (`started_at`, `ended_at`) và người cập nhật (`updated_by`).
-- **Chuẩn hóa `vehicle_types` System-wide**: Bỏ `tenant_id`, chuyển thành danh mục toàn hệ thống do `SUPER_ADMIN` định nghĩa.
-- **Tối ưu vị trí đỗ & Cảnh báo xe (`vehicles`)**: Thêm `parking_location` (kết hợp `branch_id` chủ quản để lưu vết đỗ kho/bãi ngoài/nhà riêng), hạn đăng kiểm (`inspection_expiry_date`) và hạn bảo hiểm (`insurance_expiry_date`).
-- **Quản lý rủi ro khách hàng (`customers`)**: Thêm phân loại rủi ro (`risk_level`: SAFE, WARNING, BLACKLIST) và lý do cảnh báo (`blacklist_reason`).
-- **Bổ sung Thanh toán ngân hàng (`bookings`) & Quản lý Phạt nguội (`traffic_fines`)**: Bổ sung hình thức chuyển khoản/tiền mặt, mã giao dịch, số tài khoản nhận tiền và theo dõi truy thu phạt nguội giao thông.
+**Cập nhật:** 15/08/2026 — Tối ưu hóa Database Schema & Hoàn thiện Nghiệp vụ Booking Thực tế:
+- **Bổ sung Cấu hình động Nhà xe (`tenant_configs`)**: Quản lý các tham số linh hoạt theo từng tenant: `hold_timeout_minutes` (thời gian giữ chỗ), `late_hourly_price` (phí phạt trễ giờ), `default_commission_rate` (tỷ lệ hoa hồng CTV).
+- **Gộp Thời gian Đặt xe (`pickup_time`, `return_time`)**: Gộp 4 trường ngày/giờ riêng lẻ thành 2 trường `TIMESTAMPTZ` chuẩn ISO-8601 (chứa đầy đủ Ngày + Giờ), tối ưu hóa tính toán số giờ thuê, tính phụ phí trễ giờ và xử lý kiểm tra trùng lịch xe (Overlapping check / GiST range).
+- **Loại bỏ Phạt nguội, Quá KM & Vạch xăng**: Hệ thống không quản lý phạt nguội (`traffic_fines`), không theo dõi số km và mức nhiên liệu để tinh gọn tối đa cho việc học Backend và tập trung vào luồng Booking.
+- **Chuẩn hóa Phụ phí Trễ giờ (`late_fee`)**: Quản lý trả trễ tính theo block giờ thực tế (1 – 4 tiếng tính lũy tiến theo `late_hourly_price` từ 80.000đ – 150.000đ/giờ), không áp dụng ân hạn, không làm tròn ngày.
+- **Chuẩn hóa Mã hợp đồng (`booking_code`)**: Định dạng chuẩn `[PREFIX]_[TENANT_CODE]_[YYMMDD]_[RANDOM_4_CHAR]` (VD: `BK_ANR_260815_8F2D`), ràng buộc `UNIQUE(tenant_id, booking_code)`.
+- **Ràng buộc Toàn vẹn cấp DB & Xử lý Mã lỗi Java**: Sử dụng Composite Foreign Key `(branch_id, tenant_id)` để PostgreSQL tự động validate tính hợp lệ của chi nhánh thuộc tenant; dùng `@RestControllerAdvice` ở Spring Boot để map mã lỗi DB thành JSON response an toàn, không lộ stacktrace.
+- **Bảo mật Dữ liệu Khách hàng (Nghị định 13/2023/NĐ-CP)**: Mã hóa đối xứng AES-256-GCM cho CCCD (`id_card`) và GPLX (`driver_license`), che mờ (masking) trên Hóa đơn/Giao diện và thiết lập Data Retention tự động xóa ảnh scan sau thời hạn bảo lưu.
 
 ---
 
@@ -14,7 +15,7 @@
 1. [ER Diagram](#1-er-diagram)
 2. [Tables & Column Comments](#2-tables--column-comments)
 3. [Indexes Summary](#3-indexes-summary)
-4. [Multi-tenant Strategy & RLS Policy](#4-multi-tenant-strategy--rls-policy)
+4. [Multi-tenant Strategy, DB Validation & Compliance](#4-multi-tenant-strategy-db-validation--compliance)
 
 ---
 
@@ -22,6 +23,7 @@
 
 ```mermaid
 erDiagram
+    tenants ||--|| tenant_configs : "has_config"
     tenants ||--o{ branches : "owns"
     tenants ||--o{ roles : "defines"
     roles ||--o{ role_permissions : "includes"
@@ -39,13 +41,9 @@ erDiagram
     branches ||--o{ bookings : "handles_booking"
     customers ||--o{ bookings : "places_booking"
     vehicles ||--o{ bookings : "booked_vehicle"
-    tenants ||--o{ traffic_fines : "has_fines"
-    vehicles ||--o{ traffic_fines : "fined_vehicle"
-    bookings ||--o{ traffic_fines : "fine_in_booking"
-    customers ||--o{ traffic_fines : "fine_to_customer"
 
     tenants {
-        uuid id PK "Ma ID nhat xe"
+        uuid id PK "Ma ID nha xe"
         string name "Ten nha xe"
         string domain UK "Domain truy cap"
         smallint plan_tier "Goi dich vu (1:FREE, 2:BASIC, 3:PRO, 4:ENTERPRISE)"
@@ -54,6 +52,15 @@ erDiagram
         string contact_phone "So dien thoai"
         jsonb settings "Cau hinh rieng (JSONB)"
         boolean is_active "Trang thai hoat dong / khoa nha xe"
+        timestamptz created_at "Thoi diem tao"
+        timestamptz updated_at "Thoi diem cap nhat"
+    }
+
+    tenant_configs {
+        uuid tenant_id PK,FK "Ma ID nha xe"
+        int hold_timeout_minutes "Thoi gian giu xe cho coc (phut)"
+        decimal late_hourly_price "Phi tre gio (VND/gio)"
+        decimal default_commission_rate "Ty le hoa hong CTV (%)"
         timestamptz created_at "Thoi diem tao"
         timestamptz updated_at "Thoi diem cap nhat"
     }
@@ -93,7 +100,7 @@ erDiagram
 
     role_permissions {
         uuid role_id PK,FK "Ma ID nhom quyen"
-        uuid permission_id PK,FK "Ma ID quyen nguyên tu"
+        uuid permission_id PK,FK "Ma ID quyen nguyen tu"
     }
 
     users {
@@ -142,7 +149,7 @@ erDiagram
         uuid branch_id FK "Ma ID chi nhanh chu quan"
         uuid vehicle_type_id FK "Ma ID loai xe"
         string license_plate "Bien so xe"
-        string model "Dong xe / Mẫu xe"
+        string model "Dong xe / Mau xe"
         string color "Mau son xe"
         int year "Nam san xuat / Doi xe"
         decimal price_per_day "Gia thue ngay thuong"
@@ -152,8 +159,6 @@ erDiagram
         date insurance_expiry_date "Han bao hiem"
         text description "Mo ta tinh trang"
         smallint status "Trang thai xe (1:AVAILABLE, 2:RENTED, 3:MAINTENANCE, 4:TRANSFERRED, 5:INACTIVE)"
-        int current_km "So km dong ho"
-        string fuel_level "Muc nhiên lieu"
         timestamptz created_at "Thoi diem tao"
         timestamptz updated_at "Thoi diem cap nhat"
     }
@@ -169,8 +174,8 @@ erDiagram
         string driver_license "So GPLX (Ma hoa AES-256)"
         jsonb id_card_images "Mang URL anh CCCD"
         jsonb driver_license_images "Mang URL anh GPLX"
-        smallint risk_level "Muc do rui ro (1:SAFE, 2:WARNING, 3:BLACKLIST)"
-        text blacklist_reason "Ly do canh bao / blacklist"
+        boolean is_risk "Co rui ro / Canh bao"
+        text risk_reason "Ly do rui ro / canh bao"
         text notes "Ghi chu thoi quen"
         timestamptz created_at "Thoi diem tao"
         timestamptz updated_at "Thoi diem cap nhat"
@@ -182,11 +187,9 @@ erDiagram
         uuid branch_id FK "Ma ID chi nhanh"
         uuid customer_id FK "Ma ID khach hang"
         uuid vehicle_id FK "Ma ID xe duoc thue"
-        string booking_code UK "Ma hop dong duy nhat"
-        date pickup_date "Ngay du kien nhan xe"
-        date return_date "Ngay du kien tra xe"
-        time pickup_time "Gio nhan xe"
-        time return_time "Gio tra xe"
+        string booking_code "Ma hop dong [PREFIX]_[TENANT]_[YYMMDD]_[RANDOM]"
+        timestamptz pickup_time "Thoi diem du kien nhan xe"
+        timestamptz return_time "Thoi diem du kien tra xe"
         timestamptz actual_handover_at "Thoi diem giao xe thuc te"
         timestamptz actual_return_at "Thoi diem nhan xe thuc te"
         smallint status "Trang thai (1:HOLD, 2:CONFIRMED, 3:HANDED_OVER, 4:RETURNED, 5:CANCELLED)"
@@ -200,41 +203,20 @@ erDiagram
         string bank_account_number "So tai khoan nhan"
         string sender_bank_name "Ten ngan hang gui (Cua khach)"
         string sender_account_number "So tai khoan gui (Cua khach)"
-        string sender_account_name "Ten chu tài khoan gui (Cua khach)"
+        string sender_account_name "Ten chu tai khoan gui (Cua khach)"
         string transfer_reference "Ma giao dich chuyen khoan"
         smallint payment_status "Trang thai TT (1:UNPAID, 2:DEPOSIT_PAID, 3:FULLY_PAID)"
         smallint collateral_type "Tai san the chap (1:XE_MAY, 2:TIEN_MAT, 3:KHAC)"
         text collateral_notes "Ghi chu tai san the chap"
-        int initial_km "So km luc giao xe"
-        int final_km "So km luc nhan xe"
-        string initial_fuel "Xang luc giao xe"
-        string final_fuel "Xang luc nhan xe"
         jsonb handover_images "Anh hien trang giao xe"
         jsonb return_images "Anh hien trang nhan xe"
-        decimal extra_km_fee "Phi phu troi km"
-        decimal late_fee "Phi tre gio"
-        decimal damage_fee "Phi den bu hu hong"
+        decimal late_fee "Phi tre gio (tinh theo late_hourly_price)"
         text notes "Ghi chu"
         text cancellation_reason "Ly do huy don"
         uuid created_by FK "ID Sale/CTV chot don"
         uuid handover_by FK "ID Nhan vien giao xe"
         uuid returned_by FK "ID Nhan vien nhan xe"
         decimal commission_amount "Hoa hong Sale/CTV"
-        timestamptz created_at "Thoi diem tao"
-        timestamptz updated_at "Thoi diem cap nhat"
-    }
-
-    traffic_fines {
-        uuid id PK "Ma ID phat nguoi"
-        uuid tenant_id FK "Ma ID nha xe"
-        uuid vehicle_id FK "Ma ID xe bi phat"
-        uuid booking_id FK "Ma ID don thue tuong ung"
-        uuid customer_id FK "Ma ID khach hang vi pham"
-        timestamptz violation_date "Thoi diem vi pham"
-        decimal fine_amount "So tien phat nguoi"
-        text violation_location "Dia diem vi pham"
-        text description "Chi tiet loi vi pham"
-        smallint status "Trang thai (1:PENDING, 2:RECOVERED_FROM_CUSTOMER, 3:PAID_BY_TENANT, 4:DISPUTED)"
         timestamptz created_at "Thoi diem tao"
         timestamptz updated_at "Thoi diem cap nhat"
     }
@@ -256,7 +238,7 @@ CREATE TABLE tenants (
     logo_url VARCHAR(500),                                       -- Đường dẫn ảnh logo của nhà xe
     contact_email VARCHAR(255),                                  -- Email liên hệ chính của nhà xe
     contact_phone VARCHAR(20),                                   -- Số điện thoại liên hệ chính của nhà xe
-    settings JSONB DEFAULT '{}',                                 -- Cấu hình hệ thống riêng của tenant (JSONB)
+    settings JSONB DEFAULT '{}',                                 -- Cấu hình hệ thống mở rộng (JSONB)
     is_active BOOLEAN DEFAULT TRUE,                              -- Trạng thái hoạt động (TRUE: Active, FALSE: Khóa / Tạm dừng dịch vụ)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm khởi tạo tài khoản tenant
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật thông tin tenant gần nhất
@@ -265,7 +247,20 @@ CREATE TABLE tenants (
 CREATE UNIQUE INDEX idx_tenants_domain ON tenants(domain);
 ```
 
-### 2.2 branches (Chi nhánh / Bãi xe)
+### 2.2 tenant_configs (Cấu hình Động theo Nhà xe - Quan hệ 1-1 với tenants)
+
+```sql
+CREATE TABLE tenant_configs (
+    tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE, -- Mã ID nhà xe chủ quản (PK, FK tenants - 1-1)
+    hold_timeout_minutes INTEGER NOT NULL DEFAULT 30,             -- Thời gian hold giữ chỗ chờ cọc (mặc định: 30 phút)
+    late_hourly_price DECIMAL(12, 2) NOT NULL DEFAULT 100000,     -- Đơn giá phạt trễ giờ (mặc định: 100.000 VNĐ/giờ)
+    default_commission_rate DECIMAL(5, 2) NOT NULL DEFAULT 5.00,  -- Tỷ lệ hoa hồng mặc định cho Sale/CTV (mặc định: 5.00%)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tạo bản ghi cấu hình
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật cấu hình gần nhất
+);
+```
+
+### 2.3 branches (Chi nhánh / Bãi xe)
 
 ```sql
 CREATE TABLE branches (
@@ -286,7 +281,7 @@ CREATE TABLE branches (
 CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
 ```
 
-### 2.3 roles (Danh mục Nhóm quyền trong Tenant)
+### 2.4 roles (Danh mục Nhóm quyền trong Tenant)
 
 ```sql
 CREATE TABLE roles (
@@ -304,7 +299,7 @@ CREATE INDEX idx_roles_tenant_id ON roles(tenant_id);
 CREATE UNIQUE INDEX idx_roles_tenant_code ON roles(tenant_id, code);
 ```
 
-### 2.4 permissions (Danh mục Quyền nguyên tử toàn hệ thống)
+### 2.5 permissions (Danh mục Quyền nguyên tử toàn hệ thống)
 
 ```sql
 CREATE TABLE permissions (
@@ -318,7 +313,7 @@ CREATE TABLE permissions (
 CREATE UNIQUE INDEX idx_permissions_code ON permissions(code);
 ```
 
-### 2.5 role_permissions (Bảng liên kết N-N Nhóm quyền & Quyền)
+### 2.6 role_permissions (Bảng liên kết N-N Nhóm quyền & Quyền)
 
 ```sql
 CREATE TABLE role_permissions (
@@ -330,7 +325,7 @@ CREATE TABLE role_permissions (
 CREATE INDEX idx_role_permissions_permission_id ON role_permissions(permission_id);
 ```
 
-### 2.6 users (Tài khoản người dùng trung tâm)
+### 2.7 users (Tài khoản người dùng trung tâm)
 
 ```sql
 CREATE TABLE users (
@@ -350,7 +345,7 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email ON users(email);
 ```
 
-### 2.7 user_tenants (N-N: Người dùng thuộc Tenant nào, Role nào)
+### 2.8 user_tenants (N-N: Người dùng thuộc Tenant nào, Role nào)
 
 ```sql
 CREATE TABLE user_tenants (
@@ -366,7 +361,7 @@ CREATE INDEX idx_user_tenants_tenant_id ON user_tenants(tenant_id);
 CREATE INDEX idx_user_tenants_role_id ON user_tenants(role_id);
 ```
 
-### 2.8 user_branches (N-N: Người dùng gán vào Chi nhánh nào trong Tenant)
+### 2.9 user_branches (N-N: Người dùng gán vào Chi nhánh nào trong Tenant)
 
 ```sql
 CREATE TABLE user_branches (
@@ -390,7 +385,7 @@ CREATE INDEX idx_user_branches_tenant_id ON user_branches(tenant_id);
 CREATE INDEX idx_user_branches_updated_by ON user_branches(updated_by);
 ```
 
-### 2.9 vehicle_types (Danh mục Loại xe System-wide — Super Admin quản lý)
+### 2.10 vehicle_types (Danh mục Loại xe System-wide — Super Admin quản lý)
 
 ```sql
 CREATE TABLE vehicle_types (
@@ -405,7 +400,7 @@ CREATE TABLE vehicle_types (
 CREATE INDEX idx_vehicle_types_name ON vehicle_types(name);
 ```
 
-### 2.10 vehicles (Thông tin Xe cho thuê)
+### 2.11 vehicles (Thông tin Xe cho thuê)
 
 ```sql
 CREATE TABLE vehicles (
@@ -425,8 +420,6 @@ CREATE TABLE vehicles (
     description TEXT,                                            -- Mô tả thêm về tình trạng xe
     status SMALLINT NOT NULL DEFAULT 1                           -- Trạng thái xe: 1: Sẵn sàng (AVAILABLE), 2: Đang thuê (RENTED), 3: Bảo dưỡng (MAINTENANCE), 4: Điều phối (TRANSFERRED), 5: Tạm ngưng (INACTIVE)
         CHECK (status IN (1, 2, 3, 4, 5)),
-    current_km INTEGER DEFAULT 0,                                -- Số km đồng hồ hiện tại
-    fuel_level VARCHAR(20) DEFAULT 'full',                       -- Mức nhiên liệu hiện tại (full, 3/4, 1/2...)
     images JSONB DEFAULT '[]',                                   -- Danh sách ảnh thực tế của xe (JSONB)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm thêm xe vào hệ thống
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm cập nhật thông tin xe gần nhất
@@ -442,7 +435,7 @@ CREATE INDEX idx_vehicles_license_plate ON vehicles(tenant_id, license_plate);
 CREATE UNIQUE INDEX idx_vehicles_tenant_license ON vehicles(tenant_id, license_plate);
 ```
 
-### 2.11 customers (Khách hàng thuê xe & Quản lý rủi ro)
+### 2.12 customers (Khách hàng thuê xe & Quản lý rủi ro)
 
 ```sql
 CREATE TABLE customers (
@@ -452,13 +445,12 @@ CREATE TABLE customers (
     phone VARCHAR(20),                                           -- Số điện thoại liên hệ
     email VARCHAR(255),                                          -- Email khách hàng
     address TEXT,                                                -- Địa chỉ hộ khẩu / thường trú
-    id_card VARCHAR(20),                                         -- Số CCCD / CMND (Mã hóa AES-256)
-    driver_license VARCHAR(20),                                  -- Số Giấy phép lái xe (Mã hóa AES-256)
-    id_card_images JSONB DEFAULT '[]',                           -- Mảng URL ảnh CCCD lưu trên S3 (JSONB)
-    driver_license_images JSONB DEFAULT '[]',                    -- Mảng URL ảnh GPLX lưu trên S3 (JSONB)
-    risk_level SMALLINT NOT NULL DEFAULT 1                       -- Mức độ rủi ro: 1: SAFE (An toàn), 2: WARNING (Cảnh báo), 3: BLACKLIST (Danh sách đen)
-        CHECK (risk_level IN (1, 2, 3)),
-    blacklist_reason TEXT,                                       -- Mô tả chi tiết lý do đưa vào danh sách đen/cảnh báo
+    id_card VARCHAR(255),                                        -- Số CCCD / CMND (Mã hóa đối xứng AES-256-GCM)
+    driver_license VARCHAR(255),                                 -- Số Giấy phép lái xe (Mã hóa đối xứng AES-256-GCM)
+    id_card_images JSONB DEFAULT '[]',                           -- Mảng URL ảnh CCCD lưu trên S3/MinIO (JSONB)
+    driver_license_images JSONB DEFAULT '[]',                    -- Mảng URL ảnh GPLX lưu trên S3/MinIO (JSONB)
+    is_risk BOOLEAN NOT NULL DEFAULT FALSE,                      -- Cờ đánh dấu khách hàng có rủi ro (TRUE: Có rủi ro/Cảnh báo, FALSE: An toàn)
+    risk_reason TEXT,                                            -- Mô tả chi tiết lý do rủi ro / cảnh báo (nợ tiền, làm hỏng xe, chậm trả...)
     notes TEXT,                                                  -- Ghi chú thói quen/lịch sử thuê của khách
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm khởi tạo hồ sơ
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm cập nhật hồ sơ gần nhất
@@ -468,10 +460,10 @@ CREATE TABLE customers (
 CREATE INDEX idx_customers_tenant_id ON customers(tenant_id);
 CREATE INDEX idx_customers_phone ON customers(tenant_id, phone);
 CREATE INDEX idx_customers_email ON customers(tenant_id, email);
-CREATE INDEX idx_customers_risk_level ON customers(tenant_id, risk_level);
+CREATE INDEX idx_customers_is_risk ON customers(tenant_id, is_risk);
 ```
 
-### 2.12 bookings (Đơn hàng thuê xe & Thanh toán)
+### 2.13 bookings (Đơn hàng thuê xe & Thanh toán)
 
 ```sql
 CREATE TABLE bookings (
@@ -480,16 +472,19 @@ CREATE TABLE bookings (
     branch_id UUID NOT NULL,                                     -- Mã ID chi nhánh tiếp nhận đơn hàng (FK branches)
     customer_id UUID NOT NULL,                                   -- Mã ID khách hàng thuê xe (FK customers)
     vehicle_id UUID,                                             -- Mã ID xe được thuê (FK vehicles)
-    booking_code VARCHAR(20) UNIQUE NOT NULL,                    -- Mã hợp đồng thuê xe duy nhất (VD: BK-20260807-001)
-    pickup_date DATE NOT NULL,                                   -- Ngày dự kiến bắt đầu nhận xe
-    return_date DATE NOT NULL,                                   -- Ngày dự kiến hoàn trả xe
-    pickup_time TIME,                                            -- Giờ dự kiến nhận xe
-    return_time TIME,                                            -- Giờ dự kiến trả xe
+    
+    -- Mã hợp đồng: [PREFIX]_[TENANT_CODE]_[YYMMDD]_[RANDOM_4_CHAR] (VD: BK_ANR_260815_8F2D)
+    booking_code VARCHAR(50) NOT NULL,                           -- Mã hợp đồng thuê xe duy nhất trong phạm vi tenant
+    
+    -- Khung thời gian thuê xe dự kiến (chứa cả Ngày + Giờ, chuẩn TIMESTAMPTZ)
+    pickup_time TIMESTAMP WITH TIME ZONE NOT NULL,               -- Thời điểm dự kiến nhận xe
+    return_time TIMESTAMP WITH TIME ZONE NOT NULL,               -- Thời điểm dự kiến trả xe
+    
     actual_handover_at TIMESTAMP WITH TIME ZONE,                 -- Thời điểm thực tế giao chìa khóa cho khách
-    actual_return_at TIMESTAMP WITH TIME ZONE,                   -- Thời điểm thực tế nhận lại xe (tự động tính trễ giờ)
+    actual_return_at TIMESTAMP WITH TIME ZONE,                   -- Thời điểm thực tế nhận lại xe (tính trễ giờ thực tế)
     status SMALLINT NOT NULL DEFAULT 1                           -- Trạng thái đơn: 1: HOLD, 2: CONFIRMED, 3: HANDED_OVER, 4: RETURNED, 5: CANCELLED
         CHECK (status IN (1, 2, 3, 4, 5)),
-    hold_expires_at TIMESTAMP WITH TIME ZONE,                    -- Thời điểm hết hạn giữ xe tạm nếu chưa cọc
+    hold_expires_at TIMESTAMP WITH TIME ZONE,                    -- Thời điểm hết hạn giữ xe tạm (lấy từ tenant_configs.hold_timeout_minutes)
     daily_rate DECIMAL(12, 2) NOT NULL DEFAULT 0,                -- Đơn giá thuê/ngày chốt tại thời điểm đặt xe (VNĐ/ngày)
     total_amount DECIMAL(12, 2) DEFAULT 0,                       -- Tổng giá trị hợp đồng thuê xe (VNĐ)
     deposit_amount DECIMAL(12, 2) DEFAULT 0,                     -- Số tiền cọc giữ xe (VNĐ)
@@ -507,15 +502,11 @@ CREATE TABLE bookings (
     collateral_type SMALLINT DEFAULT 1                           -- Tài sản thế chấp: 1: XE_MAY (Xe + Cavet gốc), 2: TIEN_MAT, 3: KHAC
         CHECK (collateral_type IN (1, 2, 3)),
     collateral_notes TEXT,                                       -- Ghi chú tài sản thế chấp (VD: Xe Wave BKS 29X1-12345 + Cavet chính chủ)
-    initial_km INTEGER,                                          -- Số km đồng hồ lúc bàn giao xe
-    final_km INTEGER,                                            -- Số km đồng hồ lúc nhận lại xe
-    initial_fuel VARCHAR(20),                                    -- Mức nhiên liệu ban đầu lúc bàn giao
-    final_fuel VARCHAR(20),                                      -- Mức nhiên liệu khi khách trả xe
-    handover_images JSONB DEFAULT '[]',                          -- Ảnh hiện trạng xe lúc bàn giao (vết xước, km, xăng) dạng JSONB
-    return_images JSONB DEFAULT '[]',                            -- Ảnh hiện trạng xe lúc nhận lại (vết xước mới, km, xăng) dạng JSONB
-    extra_km_fee DECIMAL(12, 2) DEFAULT 0,                       -- Phí phụ trội số km vượt giới hạn (VNĐ)
-    late_fee DECIMAL(12, 2) DEFAULT 0,                           -- Phí trễ giờ trả xe (VNĐ)
-    damage_fee DECIMAL(12, 2) DEFAULT 0,                         -- Phí đền bù hư hỏng (VNĐ)
+    handover_images JSONB DEFAULT '[]',                          -- Ảnh hiện trạng xe lúc bàn giao (vết xước, ngoại quan) dạng JSONB
+    return_images JSONB DEFAULT '[]',                            -- Ảnh hiện trạng xe lúc nhận lại (vết xước mới, ngoại quan) dạng JSONB
+    
+    -- Phụ phí trễ giờ: Trễ từ 1 - 4 tiếng tính phí theo từng giờ (theo tenant_configs.late_hourly_price), không ân hạn, không làm tròn ngày
+    late_fee DECIMAL(12, 2) DEFAULT 0,                           -- Phí trễ giờ trả xe thực tế (VNĐ)
     notes TEXT,                                                  -- Ghi chú bổ sung đơn hàng
     cancellation_reason TEXT,                                    -- Lý do hủy đơn (nếu status = CANCELLED)
     created_by UUID,                                             -- ID người tạo đơn (Sale / CTV / Admin) - Dùng tính hoa hồng
@@ -524,6 +515,8 @@ CREATE TABLE bookings (
     commission_amount DECIMAL(12, 2) DEFAULT 0,               -- Số tiền hoa hồng chi trả cho Sale/CTV chốt đơn (VNĐ)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tạo đơn hàng
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm cập nhật đơn hàng gần nhất
+    
+    -- RÀNG BUỘC TOÀN VẸN CẤP DB (Composite FK & Unique Constraints)
     CONSTRAINT fk_booking_branch_tenant FOREIGN KEY (branch_id, tenant_id)
         REFERENCES branches(id, tenant_id),
     CONSTRAINT fk_booking_customer_tenant FOREIGN KEY (customer_id, tenant_id)
@@ -536,6 +529,7 @@ CREATE TABLE bookings (
         REFERENCES user_tenants(user_id, tenant_id) ON DELETE SET NULL (handover_by),
     CONSTRAINT fk_booking_returned_by_tenant FOREIGN KEY (returned_by, tenant_id)
         REFERENCES user_tenants(user_id, tenant_id) ON DELETE SET NULL (returned_by),
+    CONSTRAINT unique_booking_tenant_code UNIQUE (tenant_id, booking_code),
     CONSTRAINT unique_booking_tenant UNIQUE (id, tenant_id)
 );
 
@@ -544,92 +538,63 @@ CREATE INDEX idx_bookings_branch_id ON bookings(branch_id);
 CREATE INDEX idx_bookings_customer_id ON bookings(customer_id);
 CREATE INDEX idx_bookings_vehicle_id ON bookings(vehicle_id);
 CREATE INDEX idx_bookings_status ON bookings(tenant_id, status);
-CREATE INDEX idx_bookings_dates ON bookings(tenant_id, pickup_date, return_date);
-CREATE INDEX idx_bookings_code ON bookings(booking_code);
+CREATE INDEX idx_bookings_times ON bookings(tenant_id, pickup_time, return_time);
+CREATE INDEX idx_bookings_tenant_code ON bookings(tenant_id, booking_code);
 CREATE INDEX idx_bookings_payment_status ON bookings(tenant_id, payment_status);
-```
-
-### 2.13 traffic_fines (Theo dõi & Truy thu Phạt nguội Giao thông)
-
-```sql
-CREATE TABLE traffic_fines (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã ID bản ghi phạt nguội (UUID PK)
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Mã ID nhà xe chủ quản (FK tenants)
-    vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE, -- Mã ID xe bị phạt nguội (FK vehicles)
-    booking_id UUID REFERENCES bookings(id) ON DELETE SET NULL,   -- Mã ID đơn thuê tương ứng với thời gian vi phạm (FK bookings)
-    customer_id UUID REFERENCES customers(id) ON DELETE SET NULL, -- Mã ID khách hàng cầm lái thời điểm vi phạm (FK customers)
-    violation_date TIMESTAMP WITH TIME ZONE NOT NULL,            -- Thời điểm thực tế phát sinh vi phạm giao thông
-    fine_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,               -- Số tiền phạt nguội theo thông báo CSGT (VNĐ)
-    violation_location TEXT,                                     -- Địa điểm phát sinh vi phạm giao thông
-    description TEXT,                                            -- Chi tiết lỗi vi phạm (vượt đèn đỏ, chạy quá tốc độ...)
-    status SMALLINT NOT NULL DEFAULT 1                           -- Trạng thái: 1: PENDING (Chờ xử lý), 2: RECOVERED_FROM_CUSTOMER (Đã thu tiền khách), 3: PAID_BY_TENANT (Nhà xe đã nộp), 4: DISPUTED (Đang khiếu nại)
-        CHECK (status IN (1, 2, 3, 4)),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm nhập thông tin phạt nguội
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật phạt nguội gần nhất
-);
-
-CREATE INDEX idx_traffic_fines_tenant_id ON traffic_fines(tenant_id);
-CREATE INDEX idx_traffic_fines_vehicle_id ON traffic_fines(vehicle_id);
-CREATE INDEX idx_traffic_fines_booking_id ON traffic_fines(booking_id);
-CREATE INDEX idx_traffic_fines_customer_id ON traffic_fines(customer_id);
-CREATE INDEX idx_traffic_fines_status ON traffic_fines(tenant_id, status);
 ```
 
 ---
 
 ## 3. Indexes Summary
 
-| Bảng | Tên Index | Các cột | Loại Index |
-|------|-----------|---------|------------|
-| tenants | idx_tenants_domain | domain | UNIQUE |
-| branches | idx_branches_tenant_id | tenant_id | Normal |
-| roles | idx_roles_tenant_id | tenant_id | Normal |
-| roles | idx_roles_tenant_code | tenant_id, code | UNIQUE |
-| permissions | idx_permissions_code | code | UNIQUE |
-| role_permissions | idx_role_permissions_permission_id | permission_id | Normal |
-| users | idx_users_email | email | UNIQUE |
-| user_tenants | idx_user_tenants_tenant_id | tenant_id | Normal |
-| user_tenants | idx_user_tenants_role_id | role_id | Normal |
-| user_branches | idx_user_branches_branch_id | branch_id | Normal |
-| user_branches | idx_user_branches_tenant_id | tenant_id | Normal |
-| user_branches | idx_user_branches_updated_by | updated_by | Normal |
-| vehicle_types | idx_vehicle_types_name | name | UNIQUE |
-| vehicles | idx_vehicles_tenant_id | tenant_id | Normal |
-| vehicles | idx_vehicles_branch_id | branch_id | Normal |
-| vehicles | idx_vehicles_status | tenant_id, status | Normal |
-| vehicles | idx_vehicles_license_plate | tenant_id, license_plate | Normal |
-| vehicles | idx_vehicles_tenant_license | tenant_id, license_plate | UNIQUE |
-| customers | idx_customers_tenant_id | tenant_id | Normal |
-| customers | idx_customers_phone | tenant_id, phone | Normal |
-| customers | idx_customers_email | tenant_id, email | Normal |
-| customers | idx_customers_risk_level | tenant_id, risk_level | Normal |
-| bookings | idx_bookings_tenant_id | tenant_id | Normal |
-| bookings | idx_bookings_branch_id | branch_id | Normal |
-| bookings | idx_bookings_customer_id | customer_id | Normal |
-| bookings | idx_bookings_vehicle_id | vehicle_id | Normal |
-| bookings | idx_bookings_status | tenant_id, status | Normal |
-| bookings | idx_bookings_dates | tenant_id, pickup_date, return_date | Normal |
-| bookings | idx_bookings_code | booking_code | UNIQUE |
-| bookings | idx_bookings_payment_status | tenant_id, payment_status | Normal |
-| traffic_fines | idx_traffic_fines_tenant_id | tenant_id | Normal |
-| traffic_fines | idx_traffic_fines_vehicle_id | vehicle_id | Normal |
-| traffic_fines | idx_traffic_fines_booking_id | booking_id | Normal |
-| traffic_fines | idx_traffic_fines_customer_id | customer_id | Normal |
-| traffic_fines | idx_traffic_fines_status | tenant_id, status | Normal |
+| Bảng | Tên Index | Các cột | Loại Index | Mục đích |
+|------|-----------|---------|------------|----------|
+| tenants | idx_tenants_domain | domain | UNIQUE | Tra cứu nhanh định danh domain/subdomain tenant |
+| tenant_configs | (Primary Key) | tenant_id | PRIMARY KEY | Quan hệ 1-1 với tenants, lấy tham số cấu hình nhanh |
+| branches | idx_branches_tenant_id | tenant_id | Normal | Lọc chi nhánh theo nhà xe |
+| roles | idx_roles_tenant_id | tenant_id | Normal | Lọc danh sách nhóm quyền theo tenant |
+| roles | idx_roles_tenant_code | tenant_id, code | UNIQUE | Đảm bảo mã role không trùng trong 1 tenant |
+| permissions | idx_permissions_code | code | UNIQUE | Tra cứu quyền nguyên tử theo mã định danh |
+| role_permissions | idx_role_permissions_permission_id | permission_id | Normal | Tối ưu kiểm tra quan hệ quyền |
+| users | idx_users_email | email | UNIQUE | Đăng nhập tập trung hệ thống |
+| user_tenants | idx_user_tenants_tenant_id | tenant_id | Normal | Quét thành viên thuộc tenant |
+| user_tenants | idx_user_tenants_role_id | role_id | Normal | Quét người dùng theo role |
+| user_branches | idx_user_branches_branch_id | branch_id | Normal | Quét nhân viên trực tại chi nhánh |
+| user_branches | idx_user_branches_tenant_id | tenant_id | Normal | Lọc gán chi nhánh trong phạm vi tenant |
+| user_branches | idx_user_branches_updated_by | updated_by | Normal | Lịch sử cập nhật nhân sự chi nhánh |
+| vehicle_types | idx_vehicle_types_name | name | UNIQUE | Tra cứu loại xe system-wide |
+| vehicles | idx_vehicles_tenant_id | tenant_id | Normal | Lọc danh sách xe theo nhà xe |
+| vehicles | idx_vehicles_branch_id | branch_id | Normal | Lọc danh sách xe theo bãi |
+| vehicles | idx_vehicles_status | tenant_id, status | Normal | Tìm xe sẵn sàng cho thuê (`AVAILABLE`) |
+| vehicles | idx_vehicles_license_plate | tenant_id, license_plate | Normal | Tra cứu nhanh biển số xe |
+| vehicles | idx_vehicles_tenant_license | tenant_id, license_plate | UNIQUE | Đảm bảo biển số xe không trùng trong cùng 1 nhà xe |
+| customers | idx_customers_tenant_id | tenant_id | Normal | Lọc khách hàng của tenant |
+| customers | idx_customers_phone | tenant_id, phone | Normal | Tra cứu lịch sử khách qua SĐT |
+| customers | idx_customers_email | tenant_id, email | Normal | Tra cứu khách qua Email |
+| customers | idx_customers_is_risk | tenant_id, is_risk | Normal | Lọc/Cảnh báo khách hàng có rủi ro |
+| bookings | idx_bookings_tenant_id | tenant_id | Normal | Quét toàn bộ đơn hàng của nhà xe |
+| bookings | idx_bookings_branch_id | branch_id | Normal | Quét đơn hàng tiếp nhận tại chi nhánh |
+| bookings | idx_bookings_customer_id | customer_id | Normal | Lịch sử thuê xe của khách hàng |
+| bookings | idx_bookings_vehicle_id | vehicle_id | Normal | Lịch sử lăn bánh của từng xe |
+| bookings | idx_bookings_status | tenant_id, status | Normal | Lọc đơn theo trạng thái (HOLD/CONFIRMED...) |
+| bookings | idx_bookings_times | tenant_id, pickup_time, return_time | Normal | Kiểm tra xung đột lịch xe (Overlapping check) |
+| bookings | idx_bookings_tenant_code | tenant_id, booking_code | UNIQUE | Tra cứu mã hợp đồng duy nhất trong tenant |
+| bookings | idx_bookings_payment_status | tenant_id, payment_status | Normal | Báo cáo doanh thu & đối soát thanh toán |
 
 ---
 
-## 4. Multi-tenant Strategy & RLS Policy
+## 4. Multi-tenant Strategy, DB Validation & Compliance
 
 ### 4.1 Row-Level Security (RLS) Policy
 Trong môi trường Shared Database, PostgreSQL RLS tự động chèn bộ lọc `tenant_id` vào mọi truy vấn SQL:
 
 ```sql
 -- Kích hoạt RLS cho các bảng tenant-scoped
+ALTER TABLE tenant_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vehicles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE traffic_fines ENABLE ROW LEVEL SECURITY;
 ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
 
 -- Policy cô lập dữ liệu theo Tenant
@@ -639,3 +604,55 @@ CREATE POLICY tenant_isolation ON vehicles
         (tenant_id = current_setting('app.current_tenant', true)::uuid)
     );
 ```
+
+---
+
+### 4.2 Validate cấp DB & Xử lý Mã lỗi ở Java Backend
+
+#### 1. Ràng buộc toàn vẹn tầng Database (Composite Foreign Key)
+Để đảm bảo **không bao giờ có lỗi logic** (ví dụ: Đơn booking thuộc Tenant A nhưng lại gắn `branch_id` của Tenant B):
+- Tất cả các bảng con đều có ràng buộc Composite FK `(branch_id, tenant_id) REFERENCES branches(id, tenant_id)`.
+- Cơ chế này được PostgreSQL kiểm tra và bảo đảm 100% tại cấp Database mà không phụ thuộc hoàn toàn vào code Java.
+
+#### 2. Xử lý Exception sạch sẽ trong Java Spring Boot
+Khi Database ném lỗi vi phạm ràng buộc (Unique Violation `23505`, Foreign Key Violation `23503`), hệ thống tuyệt đối **không quăng nguyên stacktrace SQL hay lỗi thô ra client** để tránh rủi ro lộ cấu trúc cơ sở dữ liệu.
+
+Sử dụng `@RestControllerAdvice` để bắt `DataIntegrityViolationException` và chuyển đổi thành ApiResponse chuẩn:
+
+```java
+@RestControllerAdvice
+@Slf4j
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException ex) {
+        // Log chi tiết nội bộ cho Developer tra cứu vết
+        log.error("Database constraint violation detected: ", ex);
+        
+        // Trả về JSON sạch sẽ, chuẩn bảo mật cho Client
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+            ApiResponse.error(
+                "DATA_INTEGRITY_CONFLICT", 
+                "Dữ liệu gửi lên không hợp lệ hoặc xảy ra xung đột dữ liệu (thời gian đặt xe bị trùng, chi nhánh không khớp)."
+            )
+        );
+    }
+}
+```
+
+---
+
+### 4.3 Bảo mật CCCD, GPLX (Nghị định 13/2023/NĐ-CP) & Invoicing
+
+Nhằm tuân thủ **Nghị định 13/2023/NĐ-CP về Bảo vệ Dữ liệu Cá nhân** tại Việt Nam:
+
+1. **Mục đích lưu trữ hợp pháp**:
+   - Nhà xe lưu giữ bản chụp CCCD/GPLX nhằm bảo vệ tài sản (phòng ngừa rủi ro trộm cắp xe, tai nạn bỏ trốn) $\rightarrow$ Phục vụ hợp đồng kinh tế và cung cấp chứng cứ cho Cơ quan Điều tra khi có sự cố.
+2. **Mã hóa Dữ liệu (Database Encryption)**:
+   - Các cột nhạy cảm `id_card` và `driver_license` trong bảng `customers` được mã hóa đối xứng bằng thuật toán **AES-256-GCM** (sử dụng JPA `@Convert` / `AttributeConverter` trong Spring Boot hoặc extension `pgcrypto` trong PostgreSQL).
+   - Khóa bí mật (Secret Key) được lưu trong biến môi trường / Vault, không hardcode trong mã nguồn.
+3. **Che mờ Dữ liệu (Data Masking) trên Hóa đơn & Màn hình**:
+   - Trên Hóa đơn (Invoice), màn hình Dashboard và danh sách: Chỉ hiển thị định dạng che mờ: `001099******` hoặc `****4567`.
+   - Chỉ người dùng có thẩm quyền (`TENANT_ADMIN` khi xuất biên bản giao xe chính thức hoặc làm việc với công an) mới được cấp quyền xem dữ liệu giải mã đầy đủ.
+4. **Chính sách Tự động Dọn dẹp (Data Retention)**:
+   - File ảnh chụp CCCD/GPLX gốc (`id_card_images`, `driver_license_images`): Hệ thống thiết lập Background Cronjob tự động xóa tệp nhị phân trên S3/MinIO sau **60 – 90 ngày** kể từ khi hợp đồng kết thúc thành công (`status = RETURNED`) và đã hoàn tất thanh toán cọc.
