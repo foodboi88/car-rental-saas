@@ -267,12 +267,63 @@
 ### 3. File `JwtAuthenticationFilter.java`
 - **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/security/jwt/JwtAuthenticationFilter.java`
 - **Kế thừa:** `OncePerRequestFilter`
+- **Annotations:** `@Slf4j`, `@Component`, `@RequiredArgsConstructor`
+- **Dependencies cần Inject:**
+  - `JwtProvider jwtProvider`: Dùng để soi, kiểm tra và giải mã token.
+  - `CustomUserDetailsService customUserDetailsService`: Dùng để tra cứu danh tính và danh sách quyền động từ Database.
 - **💡 Vai trò thực tế:** Là **"Chú bảo vệ trực tại cửa tòa nhà"**. Mọi request HTTP gửi lên server đều phải đi qua filter này đầu tiên:
   1. Bảo vệ kiểm tra xem request có mang theo vé `Authorization: Bearer <token>` không.
-  2. Nếu có vé hợp lệ: Gọi `CustomUserDetailsService` tra cứu danh sách quyền mới nhất từ DB, nạp thông tin người dùng vào `SecurityContextHolder` và nạp `tenantId` vào `TenantContext`.
+  2. Nếu có vé hợp lệ: Giải mã vé, lấy định danh, nạp ngữ cảnh vào `TenantContext` và nạp quyền động vào `SecurityContextHolder`.
   3. Cho phép request đi tiếp vào bên trong Controller.
-  4. **Khối `finally`:** Khi request xử lý xong và chuẩn bị trả response về, bảo vệ sẽ gọi `TenantContext.clear()` để dọn sạch dữ liệu tạm, tránh rò rỉ thông tin sang người khác.
+  4. **Khối `finally`:** Khi request xử lý xong và chuẩn bị trả response về, bảo vệ sẽ gọi `TenantContext.clear()` để dọn sạch dữ liệu tạm, tránh rò rỉ thông tin sang request/thread khác.
 
+#### 🛠️ Chi tiết các mảnh logic cần lắp ráp trong Filter:
+
+1. **Hàm phụ trợ `parseBearerToken(HttpServletRequest request)`:**
+   - **Mục đích:** Tách chuỗi token thô ra khỏi Header HTTP.
+   - **Logic:**
+     - Đọc Header `Authorization` từ `request.getHeader("Authorization")`.
+     - Kiểm tra nếu chuỗi bắt đầu bằng `"Bearer "` (`StringUtils.hasText(header) && header.startsWith("Bearer ")`).
+     - Cắt bỏ 7 ký tự đầu (`"Bearer ".length()`) để lấy chuỗi token JWT thuần túy. Nếu không có thì trả về `null`.
+
+2. **Hàm xử lý chính `doFilterInternal(...)`:**
+   - **Bước 1 - Lấy và kiểm tra vé:**
+     - Gọi `parseBearerToken(request)` lấy token.
+     - Kiểm tra: `if (StringUtils.hasText(token) && jwtProvider.validateToken(token))`.
+   - **Bước 2 - Trích xuất Claims từ vé:**
+     - `Claims claims = jwtProvider.parseClaims(token);`
+     - Lấy ra:
+       - `userIdStr = claims.getSubject()`
+       - `role = claims.get("role", String.class)`
+       - `tenantIdStr = claims.get("tenant_id", String.class)`
+       - `activeBranchIdStr = claims.get("active_branch_id", String.class)`
+   - **Bước 3 - Nạp ngữ cảnh vào `TenantContext` (Ngăn tủ đồ tạm thời):**
+     - Nếu `tenantIdStr != null` $\rightarrow$ `TenantContext.setTenantId(UUID.fromString(tenantIdStr))`.
+     - Nếu `activeBranchIdStr != null` $\rightarrow$ `TenantContext.setBranchId(UUID.fromString(activeBranchIdStr))`.
+     - Nếu `role != null` $\rightarrow$ `TenantContext.setRole(role)`.
+   - **Bước 4 - Nạp thông tin bảo mật vào `SecurityContextHolder` (Bản chất quyền động):**
+     > ⚠️ **Lưu ý cốt tử về Quyền động (Dynamic RBAC):**  
+     > Trong token chỉ lưu `role` cơ bản (ví dụ: `STAFF`). Danh sách quyền hạn chi tiết (`CAR_CREATE`, `BOOKING_APPROVE`...) **không lưu trong token** (để tránh phình to kích thước và đảm bảo thu hồi quyền tức thì khi sếp đổi quyền trong DB).  
+     > Vì vậy, ta phải gọi `CustomUserDetailsService` để lấy `UserPrincipal` có chứa danh sách quyền mới nhất từ DB!
+     - **Nếu có cả `userIdStr` và `tenantIdStr`:**
+       1. Gọi: `UserPrincipal userPrincipal = customUserDetailsService.loadUserByIdAndTenantId(UUID.fromString(userIdStr), UUID.fromString(tenantIdStr));`
+       2. Tạo đối tượng Authentication:  
+          `var authentication = new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());`  
+          *(Lưu ý: Đưa toàn bộ `userPrincipal` vào làm principal, và `userPrincipal.getAuthorities()` chứa cả `ROLE_...` lẫn các quyền động `permissions`)*.
+       3. Gắn thêm thông tin request: `authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));`
+       4. Lưu vào Context: `SecurityContextHolder.getContext().setAuthentication(authentication);`
+     - **Nếu user là `SUPER_ADMIN` (không có `tenantId`):**
+       1. Gọi: `UserPrincipal userPrincipal = customUserDetailsService.loadSuperAdminById(UUID.fromString(userIdStr));` (hoặc cấp quyền `ROLE_SUPER_ADMIN`).
+       2. Nạp tương tự vào `SecurityContextHolder`.
+   - **Bước 5 - Cho phép request đi tiếp:**
+     - Gọi `filterChain.doFilter(request, response);`
+   - **Bước 6 - Dọn dẹp trong khối `finally`:**
+     - `TenantContext.clear();` (Bắt buộc phải gọi để tránh tình trạng Thread Pool tái sử dụng thread mang thông tin của tenant cũ sang tenant khác!).
+
+> 💡 **Chiến lược lắp ráp (Lộ trình code):**  
+> Vì `JwtAuthenticationFilter` phụ thuộc vào `CustomUserDetailsService`, bạn có 2 lựa chọn:  
+> - **Lựa chọn 1 (Chuẩn bài):** Tạm thời giữ đoạn code gán quyền mock (`Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + role))`) trong Filter để qua được Giai đoạn 3 (cấu hình xong `SecurityConfig`). Sau đó khi sang Giai đoạn 4, ta code `CustomUserDetailsService` và quay lại hoàn thiện Filter.  
+> - **Lựa chọn 2 (Làm trước dependency):** Nhảy sang Giai đoạn 4 viết `CustomUserDetailsService` trước, rồi quay lại tiêm vào `JwtAuthenticationFilter`.
 ---
 
 ### 4. Xử lý Lỗi Ngoại Lệ Bảo Mật (401 & 403)

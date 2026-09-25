@@ -7,11 +7,14 @@ import java.util.UUID;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import com.carrental.car_rental_backend.auth.service.CustomUserDetailsService;
 import com.carrental.car_rental_backend.security.context.TenantContext;
+import com.carrental.car_rental_backend.security.principal.UserPrincipal;
 
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
@@ -26,6 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter{
   private final JwtProvider jwtProvider;
+  private final CustomUserDetailsService customUserDetailsService;
 
   @Override
   protected void doFilterInternal(
@@ -44,18 +48,35 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
         String tenantIdStr = claims.get("tenant_id", String.class);
         String activeBranchIdStr = claims.get("active_branch_id", String.class);
 
+        UUID tenantUUID = null;
+        UUID activeBranchUUID = null;
+        UUID userUUID = null;
+
         if (tenantIdStr != null) {
-          TenantContext.setTenantId(UUID.fromString(tenantIdStr));
+          tenantUUID = UUID.fromString(tenantIdStr);
+          TenantContext.setTenantId(tenantUUID);
         }
         if (activeBranchIdStr != null) {
-          TenantContext.setBranchId(UUID.fromString(activeBranchIdStr));
+          activeBranchUUID = UUID.fromString(activeBranchIdStr);
+          TenantContext.setBranchId(activeBranchUUID);
+        }
+        if(userIdStr != null) {
+          userUUID = UUID.fromString(userIdStr);
         }
         if (role != null) {
           TenantContext.setRole(role);
         }
 
-        var authorities = Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + role));
-        var authentication = new UsernamePasswordAuthenticationToken(userIdStr, null, authorities);
+        UsernamePasswordAuthenticationToken authentication = null;
+        UserPrincipal userPrincipal = null;
+
+        if(StringUtils.hasText(userIdStr) && StringUtils.hasText(tenantIdStr)){
+          userPrincipal = this.customUserDetailsService.loadUserByIdAndTenantId(userUUID, tenantUUID);
+        }else{
+          userPrincipal = this.customUserDetailsService.loadSuperAdminById(userUUID);
+        }
+        authentication = new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
         SecurityContextHolder.getContext().setAuthentication(authentication);
       }
       filterChain.doFilter(request, response);
