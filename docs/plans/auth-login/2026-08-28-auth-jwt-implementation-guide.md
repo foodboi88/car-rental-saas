@@ -301,46 +301,90 @@
      - Nếu `tenantIdStr != null` $\rightarrow$ `TenantContext.setTenantId(UUID.fromString(tenantIdStr))`.
      - Nếu `activeBranchIdStr != null` $\rightarrow$ `TenantContext.setBranchId(UUID.fromString(activeBranchIdStr))`.
      - Nếu `role != null` $\rightarrow$ `TenantContext.setRole(role)`.
-   - **Bước 4 - Nạp thông tin bảo mật vào `SecurityContextHolder` (Bản chất quyền động):**
-     > ⚠️ **Lưu ý cốt tử về Quyền động (Dynamic RBAC):**  
-     > Trong token chỉ lưu `role` cơ bản (ví dụ: `STAFF`). Danh sách quyền hạn chi tiết (`CAR_CREATE`, `BOOKING_APPROVE`...) **không lưu trong token** (để tránh phình to kích thước và đảm bảo thu hồi quyền tức thì khi sếp đổi quyền trong DB).  
-     > Vì vậy, ta phải gọi `CustomUserDetailsService` để lấy `UserPrincipal` có chứa danh sách quyền mới nhất từ DB!
-     - **Nếu có cả `userIdStr` và `tenantIdStr`:**
-       1. Gọi: `UserPrincipal userPrincipal = customUserDetailsService.loadUserByIdAndTenantId(UUID.fromString(userIdStr), UUID.fromString(tenantIdStr));`
-       2. Tạo đối tượng Authentication:  
-          `var authentication = new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());`  
-          *(Lưu ý: Đưa toàn bộ `userPrincipal` vào làm principal, và `userPrincipal.getAuthorities()` chứa cả `ROLE_...` lẫn các quyền động `permissions`)*.
-       3. Gắn thêm thông tin request: `authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));`
-       4. Lưu vào Context: `SecurityContextHolder.getContext().setAuthentication(authentication);`
-     - **Nếu user là `SUPER_ADMIN` (không có `tenantId`):**
-       1. Gọi: `UserPrincipal userPrincipal = customUserDetailsService.loadSuperAdminById(UUID.fromString(userIdStr));` (hoặc cấp quyền `ROLE_SUPER_ADMIN`).
-       2. Nạp tương tự vào `SecurityContextHolder`.
-   - **Bước 5 - Cho phép request đi tiếp:**
-     - Gọi `filterChain.doFilter(request, response);`
+   - **Bước 4 - Nạp thông tin bảo mật vào `SecurityContextHolder` (Bản chất 3 trạng thái Token):**
+     > ⚠️ **Lưu ý cốt tử về Quyền động (Dynamic RBAC) & Trạng thái Chưa chọn Tenant (Pre-Tenant):**  
+     > Trong hệ thống SaaS đa người thuê, một Token gửi lên có thể rơi vào 1 trong 3 trạng thái:  
+     > 1. **Full-Auth (Đã chọn Nhà xe):** Có đủ `userId` và `tenantId` $\rightarrow$ Nạp toàn bộ quyền động từ DB.  
+     > 2. **Super Admin:** Không có `tenantId`, nhưng mang cờ/vai trò `SUPER_ADMIN` $\rightarrow$ Nạp quyền quản trị sàn.  
+     > 3. **Pre-Tenant (Chưa chọn Nhà xe):** Người dùng thuộc $\ge 2$ nhà xe vừa đăng nhập xong, cầm vé tạm chỉ có `userId` $\rightarrow$ Nạp `UserPrincipal` với danh sách quyền rỗng (`Collections.emptyList()`). Người này được phép gọi API `select-tenant`, nhưng sẽ bị chặn 403 ngay nếu cố gọi các API nghiệp vụ (`/cars`, `/bookings`...) vì quyền đang rỗng!
+     
+     - **Triển khai 3 nhánh rẽ:**
+       - **Nhánh 1: Nếu có `tenantIdStr` (Đã chọn Nhà xe):**
+         1. Gọi: `UserPrincipal userPrincipal = customUserDetailsService.loadUserByIdAndTenantId(userUUID, tenantUUID);`
+         2. Tạo `authentication = new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());`
+       - **Nhánh 2: Nếu không có `tenantIdStr` VÀ `role` là `"SUPER_ADMIN"`:**
+         1. Gọi: `UserPrincipal userPrincipal = customUserDetailsService.loadSuperAdminById(userUUID);`
+         2. Tạo `authentication = new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());`
+       - **Nhánh 3: Nếu không có `tenantIdStr` (User thường chưa chọn Nhà xe):**
+         1. Gọi: `UserPrincipal userPrincipal = customUserDetailsService.loadUserById(userUUID);` *(với `authorities` rỗng)*
+         2. Tạo `authentication = new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());`
+       
+       - Sau khi tạo xong `authentication` ở nhánh tương ứng:
+         1. Gắn thông tin request: `authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));`
+         2. Lưu vào Context: `SecurityContextHolder.getContext().setAuthentication(authentication);`
+
+   - **Bước 5 - Chiếc lưới bảo hiểm `try - catch` tại Filter:**
+     > 🛡️ **Nguyên tắc an toàn:** Không bao giờ chủ động `throw new AppException(...)` trong Filter vì `GlobalExceptionHandler` (@RestControllerAdvice) nằm ở tầng Controller nên không thể bắt được lỗi ở tầng Filter (sẽ bị văng lỗi 500 của Tomcat).  
+     > Hãy bọc toàn bộ khối xử lý bên trong `try { ... } catch (Exception ex) { ... }`:  
+     > - Nếu xảy ra sự cố ngoài ý muốn (DB mất kết nối, user vừa bị xóa khỏi DB...): Ghi `log.error(...)` và gọi `SecurityContextHolder.clearContext()` để đảm bảo người này không mang thẻ xác thực.  
+     > - Sau khối try-catch, **luôn luôn gọi `filterChain.doFilter(request, response);`** để chuyển giao cho Vệ sĩ `AuthorizationFilter` phía sau phán quyết văn minh!
+
    - **Bước 6 - Dọn dẹp trong khối `finally`:**
      - `TenantContext.clear();` (Bắt buộc phải gọi để tránh tình trạng Thread Pool tái sử dụng thread mang thông tin của tenant cũ sang tenant khác!).
 
-> 💡 **Chiến lược lắp ráp (Lộ trình code):**  
-> Vì `JwtAuthenticationFilter` phụ thuộc vào `CustomUserDetailsService`, bạn có 2 lựa chọn:  
-> - **Lựa chọn 1 (Chuẩn bài):** Tạm thời giữ đoạn code gán quyền mock (`Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + role))`) trong Filter để qua được Giai đoạn 3 (cấu hình xong `SecurityConfig`). Sau đó khi sang Giai đoạn 4, ta code `CustomUserDetailsService` và quay lại hoàn thiện Filter.  
-> - **Lựa chọn 2 (Làm trước dependency):** Nhảy sang Giai đoạn 4 viết `CustomUserDetailsService` trước, rồi quay lại tiêm vào `JwtAuthenticationFilter`.
 ---
 
-### 4. Xử lý Lỗi Ngoại Lệ Bảo Mật (401 & 403)
+### 4. Xử lý Lỗi Ngoại Lệ Bảo Mật ở Tầng Filter (401 & 403)
 
-- **`JwtAuthenticationEntryPoint.java` (Bắt lỗi 401 - Chưa có vé):**
-  - **💡 Vai trò:** Khi người dùng chưa đăng nhập hoặc token đã hết hạn mà cố tình gọi API bảo mật $\rightarrow$ Trả về JSON chuẩn `401 Unauthorized` kèm thông báo *"Bạn cần đăng nhập để thực hiện thao tác này"*.
-- **`CustomAccessDeniedHandler.java` (Bắt lỗi 403 - Đi nhầm phòng cấm):**
-  - **💡 Vai trò:** Khi nhân viên thường (`STAFF`) cố tình gọi API của Giám đốc (`TENANT_ADMIN`) $\rightarrow$ Trả về JSON chuẩn `403 Forbidden` kèm thông báo *"Bạn không có quyền thực hiện chức năng này"*.
+> 💡 **Tại sao cần 2 Class này mà không dùng `GlobalExceptionHandler`?**  
+> `GlobalExceptionHandler` chỉ bắt được lỗi sinh ra bên trong hàm Controller. Các lỗi chặn cổng do Spring Security phát hiện (chưa login hoặc thiếu quyền) xảy ra ở tầng Filter, bắt buộc phải dùng 2 trạm gác chuẩn của Spring Security:
+
+#### A. File `JwtAuthenticationEntryPoint.java` (Bắt lỗi 401 - Chưa có vé / Vé hỏng)
+- **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/security/exception/JwtAuthenticationEntryPoint.java`
+- **Triển khai:** `public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint`
+- **Annotations:** `@Component`, `@RequiredArgsConstructor`
+- **Dependency tiêm:** `private final ObjectMapper objectMapper;`
+- **💡 Vai trò thực tế:** Là **"Chiếc loa báo động 401"**. Khi người dùng chưa đăng nhập hoặc token hết hạn mà cố vào các API yêu cầu `authenticated()` $\rightarrow$ Vệ sĩ `AuthorizationFilter` chặn lại và đá sang EntryPoint này để in ra JSON chuẩn cho Client.
+- **Quy trình xử lý hàm `commence(...)`:**
+  1. `response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);` (Mã 401)
+  2. `response.setContentType(MediaType.APPLICATION_JSON_VALUE);` (application/json)
+  3. `response.setCharacterEncoding("UTF-8");`
+  4. Tạo body JSON: `ApiResponse<Void> apiResponse = ApiResponse.error(ErrorCode.UNAUTHORIZED.getCode(), "Bạn cần đăng nhập để thực hiện thao tác này hoặc Token đã hết hạn");`
+  5. Dùng `objectMapper.writeValue(response.getOutputStream(), apiResponse);` ghi chuỗi JSON trả về cho Client.
+
+#### B. File `CustomAccessDeniedHandler.java` (Bắt lỗi 403 - Đi nhầm phòng cấm)
+- **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/security/exception/CustomAccessDeniedHandler.java`
+- **Triển khai:** `public class CustomAccessDeniedHandler implements AccessDeniedHandler`
+- **Annotations:** `@Component`, `@RequiredArgsConstructor`
+- **Dependency tiêm:** `private final ObjectMapper objectMapper;`
+- **💡 Vai trò thực tế:** Là **"Còi cảnh báo 403"**. Khi người dùng đã đăng nhập (ví dụ: `STAFF`), nhưng cố tình gọi API đòi hỏi quyền của Quản trị viên (`TENANT_ADMIN` hoặc `@PreAuthorize("hasAuthority('CAR_DELETE')")`) $\rightarrow$ Bắn ra JSON chuẩn 403.
+- **Quy trình xử lý hàm `handle(...)`:**
+  1. `response.setStatus(HttpServletResponse.SC_FORBIDDEN);` (Mã 403)
+  2. `response.setContentType(MediaType.APPLICATION_JSON_VALUE);`
+  3. `response.setCharacterEncoding("UTF-8");`
+  4. Tạo body JSON: `ApiResponse<Void> apiResponse = ApiResponse.error(ErrorCode.FORBIDDEN.getCode(), "Bạn không có quyền thực hiện thao tác này");`
+  5. Dùng `objectMapper.writeValue(response.getOutputStream(), apiResponse);` ghi chuỗi JSON trả về.
 
 ---
 
-### 5. File `SecurityConfig.java`
+### 5. File `SecurityConfig.java` (Lắp ráp Bản nội quy an ninh tòa nhà)
 - **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/security/config/SecurityConfig.java`
-- **💡 Vai trò thực tế:** Là **"Bản nội quy an ninh toàn bộ tòa nhà"**. Quy định:
-  - Cửa nào được mở tự do không cần vé (`/api/v1/auth/**`, `/swagger-ui/**`).
-  - Cửa nào bắt buộc phải có vé (`anyRequest().authenticated()`).
-  - Chỉ định `JwtAuthenticationFilter` đứng gác ở vị trí đầu tiên.
+- **💡 Phân biệt 2 cấp độ bảo vệ:**
+  - **Cấp 1 - Vệ sĩ vòng ngoài (`AuthorizationFilter`):** Kiểm tra xem người này **ĐÃ ĐĂNG NHẬP CHƯA** dựa vào cấu hình `authenticated()` trong file này.
+  - **Cấp 2 - Vệ sĩ vòng trong (Method Security AOP):** Kiểm tra **CÓ ĐỦ QUYỀN CỤ THỂ KHÔNG** dựa vào `@PreAuthorize("hasAuthority(...)")` trên đầu hàm Controller. (Nhờ annotation `@EnableMethodSecurity`).
+- **Nội dung cấu hình chuẩn trong `filterChain(HttpSecurity http)`:**
+  1. `csrf` disable, `cors` mặc định, `sessionCreationPolicy` là `STATELESS`.
+  2. Phân loại URL chính xác trong `authorizeHttpRequests`:
+     - **Cửa mở tự do (`permitAll()`):** Chỉ dành cho `/api/v1/auth/login`, `/api/v1/auth/refresh-token`, và Swagger docs (`/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html`).
+     - **Cửa yêu cầu đăng nhập (`authenticated()`):** `.anyRequest().authenticated()` (Tất cả các API còn lại, bao gồm `/select-tenant`, `/me`, `/cars/**`...).
+  3. Đăng ký bộ xử lý lỗi ngoại lệ tầng Filter:
+     ```java
+     .exceptionHandling(exception -> exception
+         .authenticationEntryPoint(jwtAuthenticationEntryPoint)
+         .accessDeniedHandler(customAccessDeniedHandler)
+     )
+     ```
+  4. Đặt Filter soát vé lên đầu: `.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)`.
 
 ---
 
@@ -349,13 +393,24 @@
 ---
 
 ### 1. `CustomUserDetailsService.java`
-- **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/auth/service/CustomUserDetailsService.java`
-- **Annotation:** `@Service`, `@RequiredArgsConstructor`
-- **💡 Vai trò thực tế:** Là **"Bộ phận nhân sự tra cứu hồ sơ"**. Khi có `userId` và `tenantId`, Service này sẽ:
-  1. Tìm `User` trong DB (kiểm tra tài khoản có bị khóa không).
-  2. Tìm vai trò `Role` của user tại `Tenant` đó.
-  3. Lấy toàn bộ danh sách `permissions` của vai trò đó.
-  4. Đóng gói tất cả thành một đối tượng `UserPrincipal` hoàn chỉnh.
+- **Đường dẫn Interface:** `backend/src/main/java/com/carrental/car_rental_backend/auth/service/CustomUserDetailsService.java`
+- **Đường dẫn Implementation:** `backend/src/main/java/com/carrental/car_rental_backend/auth/service/impl/CustomUserDetailsServiceImpl.java`
+- **Annotations:** `@Service`, `@RequiredArgsConstructor`, `@Transactional`
+- **Dependencies tiêm:** `UserRepository`, `UserTenantRepository`, `RoleRepository`, `PermissionRepository`
+- **💡 Vai trò thực tế:** Là **"Bộ phận nhân sự tra cứu hồ sơ"**, phục vụ 3 kịch bản:
+  1. **`loadUserByIdAndTenantId(UUID userId, UUID tenantId)` (Dành cho User đã vào Nhà xe):**
+     - Tìm User trong DB $\rightarrow$ nếu không thấy hoặc `!isActive` $\rightarrow$ ném `AppException(RESOURCE_NOT_FOUND)`.
+     - Tìm `UserTenant` $\rightarrow$ nếu không thấy $\rightarrow$ ném `AppException(UNAUTHORIZED)`.
+     - Tìm Role theo `userTenant.getRoleId()`.
+     - Lấy danh sách mã quyền qua `permissionRepository.findAllPermissionCodeByRoleId(roleId)`.
+     - Đóng gói và trả về `UserPrincipal.create(user.get(), tenantId, role.getCode(), permissions)`.
+  2. **`loadSuperAdminById(UUID userId)` (Dành cho Super Admin):**
+     - Tìm User trong DB $\rightarrow$ kiểm tra `isActive`.
+     - Kiểm tra `!user.get().getIsSuperAdmin()` $\rightarrow$ ném `AppException(FORBIDDEN, "User không phải SUPER ADMIN")`.
+     - Đóng gói và trả về `UserPrincipal.create(user.get(), null, "SUPER_ADMIN", null)`.
+  3. **`loadUserById(UUID userId)` (Dành cho Pre-Tenant User - Chưa chọn Nhà xe):**
+     - Tìm User trong DB $\rightarrow$ kiểm tra `isActive`.
+     - Đóng gói và trả về `UserPrincipal.create(user.get(), null, null, Collections.emptyList())` (danh sách quyền rỗng để chỉ gọi được API chọn nhà xe).
 
 ---
 
