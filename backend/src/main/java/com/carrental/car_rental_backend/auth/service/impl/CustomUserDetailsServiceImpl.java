@@ -6,7 +6,6 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
-import com.carrental.car_rental_backend.account.entity.Permission;
 import com.carrental.car_rental_backend.account.entity.Role;
 import com.carrental.car_rental_backend.account.entity.User;
 import com.carrental.car_rental_backend.account.entity.UserTenant;
@@ -15,6 +14,7 @@ import com.carrental.car_rental_backend.account.repository.RoleRepository;
 import com.carrental.car_rental_backend.account.repository.UserRepository;
 import com.carrental.car_rental_backend.account.repository.UserTenantRepository;
 import com.carrental.car_rental_backend.auth.service.CustomUserDetailsService;
+import com.carrental.car_rental_backend.common.constant.RoleConstant;
 import com.carrental.car_rental_backend.common.exception.AppException;
 import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.security.principal.UserPrincipal;
@@ -71,6 +71,15 @@ public class CustomUserDetailsServiceImpl implements CustomUserDetailsService {
 
     if(!user.get().getIsSuperAdmin()) throw new AppException(ErrorCode.FORBIDDEN, "User không phải SUPER ADMIN");
     
-    return UserPrincipal.create(user.get(), null, "SUPER_ADMIN", null);
+    return UserPrincipal.create(user.get(), null, RoleConstant.SUPER_ADMIN, null);
   }
+
+  @Override
+  public UserPrincipal loadUserById(UUID userId) {
+    Optional<User> user = this.userRepository.findById(userId);
+    if(user.isEmpty() || !user.get().getIsActive()) throw new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy người dùng hoặc tài khoản đã bị khóa");    
+    return UserPrincipal.create(user.get(), null, null, null);
+  }
+
+  
 }
