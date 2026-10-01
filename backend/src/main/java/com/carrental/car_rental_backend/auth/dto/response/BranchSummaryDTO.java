@@ -14,5 +14,5 @@ import lombok.NoArgsConstructor;
 public class BranchSummaryDTO {
   private UUID branchId;
   private String branchName;
-  private String branchCode; 
+  private String address; 
 }

@@ -51,6 +51,9 @@ public class User {
   @Column(name = "is_super_admin")
   private Boolean isSuperAdmin;
 
+  @Column(name = "last_login_at")
+  private Instant lastLoginAt;
+
   @CreationTimestamp
   @Column(name = "created_at")
   private Instant createdAt;

@@ -104,6 +104,7 @@ public class AuthServiceImpl implements AuthService{
         item -> BranchSummaryDTO.builder()
         .branchId(item.getId())
         .branchName(item.getName())
+        .address(item.getAddress())
         .build()
       ).toList();
       List<String> listPermission = this.permissionRepository.findAllPermissionCodeByRoleId(role.get().getId());
