@@ -38,14 +38,14 @@ public class JwtProvider {
     this.refreshTokenExpirationMs = refreshTokenExpirationMs;
   }
 
-  public String generateAccessToken(UUID userId, String email, String role, UUID tenantId, UUID activeBranchId) {
+  public String generateAccessToken(UUID userId, String email, String roleCode, UUID tenantId, UUID activeBranchId) {
     Date now = new Date();
     Date expiryDate = new Date(now.getTime() + accessTokenExpirationMs);
     
     var builder = Jwts.builder()
       .subject(userId.toString())
       .claim("email", email)
-      .claim("role", role)
+      .claim("role", roleCode)
       .issuedAt(now)
       .expiration(expiryDate)
       .signWith(key);
@@ -102,6 +102,10 @@ public class JwtProvider {
       log.error("JWT Token không hợp lệ: {}", ex.getMessage());
     }
     return false;
+  }
+
+  public long getAccessTokenExpirationInSeconds() {
+    return this.accessTokenExpirationMs / 1000;
   }
   
 }

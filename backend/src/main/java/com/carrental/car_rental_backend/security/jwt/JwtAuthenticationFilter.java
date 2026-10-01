@@ -9,7 +9,6 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
-
 import com.carrental.car_rental_backend.auth.service.CustomUserDetailsService;
 import com.carrental.car_rental_backend.common.constant.RoleConstant;
 import com.carrental.car_rental_backend.security.context.TenantContext;
@@ -44,9 +43,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
           Claims claims = this.jwtProvider.parseClaims(token);
 
           String userIdStr = claims.getSubject();
-          String role = claims.get("role", String.class);
           String tenantIdStr = claims.get("tenant_id", String.class);
           String activeBranchIdStr = claims.get("active_branch_id", String.class);
+          String role = claims.get("role", String.class);
 
           UUID tenantUUID = null;
           UUID activeBranchUUID = null;
@@ -60,7 +59,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
             activeBranchUUID = UUID.fromString(activeBranchIdStr);
             TenantContext.setBranchId(activeBranchUUID);
           }
-          if(userIdStr != null) {
+          if (userIdStr != null) {
             userUUID = UUID.fromString(userIdStr);
           }
           if (role != null) {
@@ -70,18 +69,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
           UsernamePasswordAuthenticationToken authentication = null;
           UserPrincipal userPrincipal = null;
 
-          if(StringUtils.hasText(userIdStr) && StringUtils.hasText(tenantIdStr)){
+          if (StringUtils.hasText(userIdStr) && StringUtils.hasText(tenantIdStr)) {
             userPrincipal = this.customUserDetailsService.loadUserByIdAndTenantId(userUUID, tenantUUID);
-          }else if( !StringUtils.hasText(tenantIdStr) && RoleConstant.SUPER_ADMIN.equals(role)){
+          } else if (RoleConstant.SUPER_ADMIN.equals(role)){
             userPrincipal = this.customUserDetailsService.loadSuperAdminById(userUUID);
-          }else{
+          } else {
             userPrincipal = this.customUserDetailsService.loadUserById(userUUID);
           }
           authentication = new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());
           authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
           SecurityContextHolder.getContext().setAuthentication(authentication);
         }
-      } catch(Exception exception) {
+      } catch (Exception exception) {
         log.error("Không thể xác thực người dùng: {}", exception.getMessage());
         SecurityContextHolder.clearContext();
       }
