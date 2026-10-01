@@ -19,8 +19,8 @@ public class UserInfoResponseDTO {
   private String phone;
   private UUID tenantId;
   private String tenantName;
-  private String role;
-  private List<String> permissions;
+  private String roleCode; // Cần trường này để xác định hiển thị giao diện cho nhân viên/quản lý
+  private List<String> permissions; // Trả về cho client để ẩn hiện chức năng
   private UUID activeBranchId;
   private List<BranchSummaryDTO> assignedBranches;
 }

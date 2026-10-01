@@ -14,7 +14,6 @@ import lombok.NoArgsConstructor;
 public class AuthResponseDTO {
   private String accessToken;
   private String refreshToken;
-  private String tokenType;
   private long expiresIn;
   private UserInfoResponseDTO user;
   private List<TenantSummaryDTO> availableTenants;
