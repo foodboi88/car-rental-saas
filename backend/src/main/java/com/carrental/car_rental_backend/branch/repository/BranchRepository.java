@@ -15,4 +15,5 @@ public interface BranchRepository extends JpaRepository<Branch, UUID> {
     WHERE user_branches.user_id = :userId and user_branches.tenant_id = :tenantId
   """, nativeQuery = true)
   List<Branch> findAllAssignedBranchesByUserIdTenantId(@Param("userId") UUID userId, @Param("tenantId") UUID tenantId);
+  List<Branch> findByTenantId(UUID tenantId);
 }

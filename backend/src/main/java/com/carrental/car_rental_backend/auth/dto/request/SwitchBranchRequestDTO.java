@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class SelectTenantRequestDTO {
-  @NotNull(message = "Vui lòng chọn tenant")
-  private UUID tenantId;
+public class SwitchBranchRequestDTO {
+  @NotNull(message = "Vui lòng chọn chi nhánh")
+  private UUID activeBranchId;
 }

@@ -6,6 +6,7 @@ public final class RoleConstant {
   }
   // Mã Role logic
   public static final String SUPER_ADMIN = "SUPER_ADMIN";
+  public static final String TENANT_ADMIN = "TENANT_ADMIN";
   // Tiền tố chuẩn của Spring Security nếu cần dùng
   public static final String PREFIX_ROLE = "ROLE_";
   public static final String ROLE_SUPER_ADMIN = PREFIX_ROLE + SUPER_ADMIN;
