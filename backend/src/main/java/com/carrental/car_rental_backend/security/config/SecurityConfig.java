@@ -40,7 +40,7 @@ public class SecurityConfig {
             .addFilterBefore(this.jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth
                 // Public Endpoints (Không cần đăng nhập)
-                .requestMatchers("/api/v1/auth/**").permitAll()
+                .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh-token").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 // Tất cả request khác bắt buộc phải đăng nhập
                 .anyRequest().authenticated()

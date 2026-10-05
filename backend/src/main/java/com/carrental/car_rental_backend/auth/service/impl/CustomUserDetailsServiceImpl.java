@@ -27,22 +27,10 @@ import lombok.RequiredArgsConstructor;
 @Transactional
 public class CustomUserDetailsServiceImpl implements CustomUserDetailsService {
 
-  private UserRepository userRepository;
-  private UserTenantRepository userTenantRepository;
-  private RoleRepository roleRepository;
-  private PermissionRepository permissionRepository;
-
-  public CustomUserDetailsServiceImpl(
-    UserRepository userRepository,
-    UserTenantRepository userTenantRepository,
-    RoleRepository roleRepository,
-    PermissionRepository permissionRepository
-  ){
-    this.userRepository = userRepository;
-    this.userTenantRepository = userTenantRepository;
-    this.roleRepository = roleRepository;
-    this.permissionRepository = permissionRepository;
-  }
+  private final UserRepository userRepository;
+  private final UserTenantRepository userTenantRepository;
+  private final RoleRepository roleRepository;
+  private final PermissionRepository permissionRepository;
 
   @Override
   public UserPrincipal loadUserByIdAndTenantId(UUID userId, UUID tenantId) {

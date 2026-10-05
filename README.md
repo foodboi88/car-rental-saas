@@ -185,3 +185,6 @@ Stop-Process -Name java -Force
 ```
 mvn flyway:repair "-Dflyway.url=jdbc:postgresql://localhost:5432/car_rental" "-Dflyway.user=postgres" "-Dflyway.password=password"
 ```
+
+## Mặc định mật khẩu
+Hieudvt@123

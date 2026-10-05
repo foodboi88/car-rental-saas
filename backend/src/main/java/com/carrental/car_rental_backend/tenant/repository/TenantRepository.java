@@ -11,7 +11,7 @@ import com.carrental.car_rental_backend.tenant.entity.Tenant;
 
 public interface TenantRepository extends JpaRepository<Tenant, UUID>{
   @Query(value = """
-    SELECT * FROM tenants
+    SELECT tenants.* FROM tenants
     INNER JOIN user_tenants ON tenants.id = user_tenants.tenant_id
     WHERE user_tenants.user_id = :userId
   """, nativeQuery = true)

@@ -13,7 +13,7 @@ public interface RoleRepository extends JpaRepository<Role, UUID> {
   Optional<Role> findByCode(String roleCode);
 
   @Query(value = """
-    SELECT * FROM roles
+    SELECT roles.* FROM roles
     INNER JOIN user_tenants ON roles.id = user_tenants.role_id
     WHERE user_tenants.user_id = :userId and user_tenants.tenant_id = :tenantId
   """, nativeQuery = true)
