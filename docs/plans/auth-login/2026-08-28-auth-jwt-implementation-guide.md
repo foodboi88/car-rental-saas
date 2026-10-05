@@ -452,6 +452,7 @@
 - **Các API Endpoints:**
   - `POST /api/v1/auth/login`: Tiếp nhận đăng nhập.
   - `POST /api/v1/auth/select-tenant`: Tiếp nhận lựa chọn nhà xe làm việc.
+  - `POST /api/v1/auth/switch-branch`: Tiếp nhận lựa chọn hoặc chuyển đổi chi nhánh làm việc.
   - `POST /api/v1/auth/refresh-token`: Tiếp nhận yêu cầu làm mới token.
   - `GET /api/v1/auth/me`: Trả về thông tin của chính người dùng đang đăng nhập.
 

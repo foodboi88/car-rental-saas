@@ -718,5 +718,64 @@ CREATE INDEX idx_branches_status ON branches(tenant_id, status);
    * *Tab 1: Thông tin chi tiết*: Hiển thị đầy đủ thông tin mã, tên, SĐT, địa chỉ 4 phần, giờ hoạt động, trạng thái, ngày tạo.
    * *Tab 2: Danh sách xe*: Danh sách Card các xe đang gán cho chi nhánh, hiển thị kèm trạng thái xe (*Sẵn sàng, Đang thuê, Bảo dưỡng*).
 
+---
+
+## 6. Hướng Dẫn Kiểm Thử Cục Bộ & Dữ Liệu Seed (Local Verification Guide)
+
+### 6.1 Dữ liệu Tài khoản Mẫu Đã Cấu Hình Sẵn (Seed Credentials)
+
+> 🔑 **Mật khẩu dùng chung cho tất cả tài khoản:** `Hieudvt@123`
+
+| Email | Vai trò | Phạm vi Nhà xe | Chi nhánh được gán | Mục đích kiểm thử |
+| :--- | :--- | :--- | :--- | :--- |
+| `superadmin@carrental.vn` | `SUPER_ADMIN` | Toàn hệ thống | Không giới hạn | Kiểm tra luồng bypass tenant, quản trị cấp cao nhất |
+| `minh.admin@rentcarhanoi.vn` | `TENANT_ADMIN` | RentCar Hà Nội | Toàn bộ 3 chi nhánh (*Central HN, Cầu Giấy, Đống Đa*) | Kiểm tra luồng chủ xe tự do switch vào bất kỳ chi nhánh nào |
+| `lan.staff@rentcarhanoi.vn` | `STAFF` | RentCar Hà Nội | 2 chi nhánh (*Central HN, Cầu Giấy*) | Kiểm tra luồng nhân viên bị giới hạn (vào Đống Đa bị 403) |
+| `multi.user@carrental.vn` | `STAFF` | Hà Nội & Sài Gòn | Đa nhà xe | Kiểm tra luồng chọn nhà xe (`select-tenant`) trước khi vào chi nhánh |
+| `mai.admin@saigonauto.vn` | `TENANT_ADMIN` | Sài Gòn Auto | Toàn bộ chi nhánh Sài Gòn | Kiểm tra chống tấn công chéo nhà xe (IDOR) |
+| `locked.user@rentcarhanoi.vn` | `STAFF` | RentCar Hà Nội | Đã bị khóa (`is_active = false`) | Kiểm tra chặn đăng nhập tài khoản bị khóa (401) |
+
+### 6.2 Các Bước Kiểm Thử API Trên Swagger UI (`/swagger-ui/index.html`)
+
+1. **Khởi động server:** Di chuyển vào `backend/` và chạy `mvn spring-boot:run`.
+2. **Mở Swagger:** Truy cập `http://localhost:8080/swagger-ui/index.html`.
+3. **Thực hiện chuỗi kiểm thử:**
+   - **Bước 1:** Gọi `POST /api/v1/auth/login` với `minh.admin@rentcarhanoi.vn` $\rightarrow$ Copy chuỗi `accessToken` nhận được.
+   - **Bước 2:** Bấm nút **Authorize** ở góc phải Swagger, dán token vào ô `Value` (Swagger sẽ tự thêm tiền tố `Bearer`).
+   - **Bước 3:** Gọi tiếp các API cần quyền như `POST /api/v1/auth/switch-branch` hoặc `POST /api/v1/auth/select-tenant`.
+
+---
+
+## 7. Cấu Trúc Mã Nguồn Backend Thực Tế (Backend Source Tree)
+
+```
+backend/src/main/java/com/carrental/car_rental_backend/
+├── account/                    # Phân hệ quản lý User, Role & Phân quyền
+│   ├── entity/                 # User, Role, Permission, UserTenant, UserBranch
+│   └── repository/             # UserRepository, RoleRepository, PermissionRepository...
+├── auth/                       # Phân hệ Xác thực & Phân cấp Ngữ cảnh
+│   ├── controller/             # AuthController (REST Endpoints)
+│   ├── dto/                    # Request/Response DTOs (Login, SelectTenant, SwitchBranch...)
+│   └── service/                # AuthService, CustomUserDetailsService & Impl
+├── branch/                     # Phân hệ Chi nhánh
+│   ├── entity/                 # Branch entity (Chuẩn hóa V6)
+│   └── repository/             # BranchRepository
+├── common/                     # Thư viện dùng chung
+│   ├── constant/               # RoleConstant (SUPER_ADMIN, TENANT_ADMIN, STAFF, SALE)
+│   ├── dto/                    # ApiResponse<T> envelope wrapper
+│   ├── enums/                  # BaseEnum, PlanTierTenant, UserBranchStatus & Converters
+│   └── exception/              # AppException, ErrorCode, GlobalExceptionHandler
+├── config/                     # Cấu hình OpenAPI (Swagger) & Jackson
+├── security/                   # Tầng Bảo mật Spring Security
+│   ├── auth_filter_level_exception/ # JwtAuthenticationEntryPoint (401), CustomAccessDeniedHandler (403)
+│   ├── config/                 # SecurityConfig (Filter chain, public/private matcher)
+│   ├── context/                # TenantContext (ThreadLocal tenant_id, branch_id, role)
+│   ├── jwt/                    # JwtProvider, JwtAuthenticationFilter
+│   └── principal/              # UserPrincipal (UserDetails implementation)
+└── tenant/                     # Phân hệ Nhà xe
+    ├── entity/                 # Tenant entity
+    └── repository/             # TenantRepository
+```
+
 
 
