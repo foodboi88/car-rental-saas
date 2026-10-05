@@ -220,34 +220,94 @@ Các bảng cốt lõi phục vụ luồng nghiệp vụ chính bao gồm:
 
 ## 6. Security & Multi-Tenant Architecture
 
+### 6.1 Sơ đồ Tuần tự Luồng Xác thực Phân tầng (Authentication & Context Lifecycle)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as Client (Swagger / Angular)
+    participant Filter as JwtAuthenticationFilter
+    participant Ctx as TenantContext & SecurityContext
+    participant Ctrl as AuthController
+    participant Svc as AuthServiceImpl
+    participant DB as PostgreSQL Database
+
+    Note over Client, DB: 1. LUỒNG ĐĂNG NHẬP (POST /api/v1/auth/login)
+    Client ->> Ctrl: POST /login { email, password }
+    Ctrl ->> Svc: login(requestDto)
+    Svc ->> DB: Query User by email & verify password (BCrypt)
+    alt Là Super Admin
+        Svc -->> Ctrl: Cấp JWT { role: "SUPER_ADMIN", tenant_id: null }
+    else User thuộc đúng 1 Tenant
+        Svc ->> DB: Lấy vai trò, permissions & danh sách chi nhánh
+        Svc -->> Ctrl: Cấp JWT { role: roleCode, tenant_id: tenantId } + assignedBranches
+    else User thuộc nhiều Tenant (>1)
+        Svc ->> DB: Lấy danh sách Tenant đang active
+        Svc -->> Ctrl: Cấp Pre-tenant JWT { role: null, tenant_id: null } + availableTenants
+    end
+    Ctrl -->> Client: 200 OK + ApiResponse<AuthResponseDTO>
+
+    Note over Client, DB: 2. LUỒNG CHỌN NHÀ XE (POST /api/v1/auth/select-tenant)
+    Client ->> Filter: POST /select-tenant + Header: Bearer <Pre-tenant Token>
+    Filter ->> Filter: Validate JWT Signature & Expiration
+    Filter ->> Ctx: Nạp UserPrincipal vào SecurityContext
+    Filter ->> Ctrl: Forward request
+    Ctrl ->> Svc: selectTenant(userPrincipal.id, tenantId)
+    Svc ->> DB: Kiểm tra User có được gán vào tenantId không (Chống IDOR)
+    Svc ->> DB: Lấy vai trò, permissions và danh sách chi nhánh
+    Svc -->> Ctrl: Cấp JWT nâng cấp { role: roleCode, tenant_id: tenantId }
+    Ctrl -->> Client: 200 OK + assignedBranches & permissions
+
+    Note over Client, DB: 3. LUỒNG CHỌN CHI NHÁNH (POST /api/v1/auth/switch-branch)
+    Client ->> Filter: POST /switch-branch + Header: Bearer <Token có tenant_id>
+    Filter ->> Ctx: TenantContext.setTenantId(tenantUUID)
+    Filter ->> Ctrl: Forward request
+    Ctrl ->> Svc: switchBranch(userId, activeBranchId)
+    Svc ->> DB: Kiểm tra branch thuộc tenant & đang active
+    alt Role là TENANT_ADMIN
+        Note over Svc: Bypass kiểm tra user_branches (Chủ xe vào mọi chi nhánh)
+    else Role là Nhân viên (STAFF)
+        Svc ->> DB: Kiểm tra user_branches(userId, activeBranchId)
+    end
+    Svc -->> Ctrl: Cấp JWT hoàn chỉnh { role, tenant_id, active_branch_id }
+    Ctrl -->> Client: 200 OK (Mở khóa toàn bộ chức năng nghiệp vụ chi nhánh)
+
+    Note over Client, DB: 4. DỌN DẸP NGỮ CẢNH (FILTER FINALLY)
+    Filter ->> Ctx: TenantContext.clear() (Chống rò rỉ dữ liệu giữa các luồng Tomcat)
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Request Authorization & Tenant Context                 │
-│                                                                              │
-│   Request + JWT Header ──► JwtAuthFilter                                     │
-│                                │                                             │
-│                                ▼                                             │
-│                          Validate JWT                                        │
-│                                │                                             │
-│                                ▼                                             │
-│                   ┌──────────────────────────┐                               │
-│                   │ Extract Claims:          │                               │
-│                   │ - tenant_id              │                               │
-│                   │ - assigned_branch_ids    │                               │
-│                   │ - user_id, role          │                               │
-│                   └────────────┬─────────────┘                               │
-│                                │                                             │
-│                                ▼                                             │
-│                   TenantContext.set(tenant_id)                               │
-│                                │                                             │
-│                                ▼                                             │
-│                   Service Layer / JPA Query                                  │
-│                                │                                             │
-│                                ▼                                             │
-│                   WHERE tenant_id = :currentTenantId                         │
-│                     AND branch_id IN (:assignedBranchIds)                    │
-└─────────────────────────────────────────────────────────────────────────────┘
+
+### 6.2 Cấu trúc Tầng Lọc Bảo mật (Spring Security Filter Chain)
+
 ```
+Incoming Request
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 JwtAuthenticationFilter                     │
+│  - Trích xuất "Authorization: Bearer <token>"                │
+│  - Kiểm tra tính hợp lệ qua JwtProvider                     │
+│  - Bóc tách claims: tenant_id, active_branch_id, role       │
+│  - Nạp TenantContext (ThreadLocal)                          │
+│  - Nạp Authentication vào SecurityContextHolder             │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+            ┌──────────────────┴──────────────────┐
+            ▼                                     ▼
+   (Token không hợp lệ)                   (Token hợp lệ)
+┌──────────────────────────────┐       ┌──────────────────────────────┐
+│  JwtAuthenticationEntryPoint │       │    Controller Layer          │
+│  - Trả về 401 Unauthorized   │       │  - @PreAuthorize, @Valid     │
+│  - Bọc JSON ApiResponse      │       │  - @AuthenticationPrincipal  │
+└──────────────────────────────┘       └──────────────┬───────────────┘
+                                                      │
+                                                      ▼
+                                       ┌──────────────────────────────┐
+                                       │  CustomAccessDeniedHandler   │
+                                       │  - Trả về 403 Forbidden      │
+                                       │  - Khi sai quyền (Role/Scope)│
+                                       └──────────────────────────────┘
+```
+
 
 ---
 
