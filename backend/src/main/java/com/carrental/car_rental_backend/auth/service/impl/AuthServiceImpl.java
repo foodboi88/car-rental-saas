@@ -29,6 +29,7 @@ import com.carrental.car_rental_backend.auth.service.AuthService;
 import com.carrental.car_rental_backend.branch.entity.Branch;
 import com.carrental.car_rental_backend.branch.repository.BranchRepository;
 import com.carrental.car_rental_backend.common.constant.RoleConstant;
+import com.carrental.car_rental_backend.common.constant.TokenType;
 import com.carrental.car_rental_backend.common.exception.AppException;
 import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.security.context.TenantContext;
@@ -266,6 +267,8 @@ public class AuthServiceImpl implements AuthService{
   public AuthResponseDTO refreshToken(RefreshTokenRequestDTO request) {
     if (!this.jwtProvider.validateToken(request.getRefreshToken())) throw new AppException(ErrorCode.BAD_REQUEST, "Refesh Token không hợp lệ !");
     Claims claims = this.jwtProvider.parseClaims(request.getRefreshToken());
+    String tokenType = claims.get(TokenType.CLAIM_TOKEN_TYPE, String.class);
+    if (!tokenType.equals(TokenType.TOKEN_TYPE_REFRESH)) throw new AppException(ErrorCode.UNAUTHORIZED);
     UUID userUUID = UUID.fromString(claims.getSubject());
     Optional<User> user = this.userRepository.findById(userUUID);
     if (user.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin User !");

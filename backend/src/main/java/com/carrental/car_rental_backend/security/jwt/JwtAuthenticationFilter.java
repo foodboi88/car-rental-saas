@@ -9,8 +9,13 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+
 import com.carrental.car_rental_backend.auth.service.CustomUserDetailsService;
 import com.carrental.car_rental_backend.common.constant.RoleConstant;
+import com.carrental.car_rental_backend.common.constant.TokenType;
+import com.carrental.car_rental_backend.common.exception.AppException;
+import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.security.context.TenantContext;
 import com.carrental.car_rental_backend.security.principal.UserPrincipal;
 
@@ -28,6 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 public class JwtAuthenticationFilter extends OncePerRequestFilter{
   private final JwtProvider jwtProvider;
   private final CustomUserDetailsService customUserDetailsService;
+  private final HandlerExceptionResolver handlerExceptionResolver; 
 
   @Override
   protected void doFilterInternal(
@@ -46,6 +52,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
           String tenantIdStr = claims.get("tenant_id", String.class);
           String activeBranchIdStr = claims.get("active_branch_id", String.class);
           String role = claims.get("role", String.class);
+          String tokenType = claims.get(TokenType.CLAIM_TOKEN_TYPE, String.class);
+
+          if (!TokenType.TOKEN_TYPE_ACCESS.equals(tokenType)) throw new AppException(ErrorCode.UNAUTHORIZED);
 
           UUID tenantUUID = null;
           UUID activeBranchUUID = null;
@@ -81,8 +90,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
           SecurityContextHolder.getContext().setAuthentication(authentication);
         }
       } catch (Exception exception) {
-        log.error("Không thể xác thực người dùng: {}", exception.getMessage());
+        this.handlerExceptionResolver.resolveException(request, response, null, exception);
         SecurityContextHolder.clearContext();
+        TenantContext.clear();
+        return;
       }
       
       filterChain.doFilter(request, response);
