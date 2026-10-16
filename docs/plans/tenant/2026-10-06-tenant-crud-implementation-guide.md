@@ -8,6 +8,46 @@
 
 ---
 
+## ⚡ TÓM TẮT TRONG 1 PHÚT
+
+**Module làm gì:** Super Admin tạo nhà xe (kèm cấu hình, 3 vai trò và các chủ nhà xe), xem, sửa, khóa, xóa mềm nhà xe, thêm và xem chủ nhà xe. Chỉ Super Admin gọi được.
+
+**8 API** dưới `/api/v1/tenants`:
+
+| Việc | API |
+| :--- | :--- |
+| Tạo nhà xe (kèm chủ) | `POST /` |
+| Danh sách (tìm, lọc, phân trang) | `GET /` |
+| Xem một nhà xe | `GET /{id}` |
+| Sửa thông tin | `PUT /{id}` |
+| Khóa hoặc mở khóa | `PATCH /{id}/status` |
+| Xóa (xóa mềm) | `DELETE /{id}` |
+| Xem chủ nhà xe | `GET /{id}/admins` |
+| Thêm chủ nhà xe | `POST /{id}/admins` |
+
+**Sáu giai đoạn làm:**
+
+| GĐ | Làm gì | File chính |
+| :-: | :--- | :--- |
+| 1 | Sửa entity, thêm bảng cấu hình | `Tenant`, `TenantConfig` |
+| 2 | DTO vào và ra | `CreateTenantRequestDTO`, `TenantResponseDTO`... |
+| 3 | Truy vấn và bản mẫu 3 vai trò | `TenantRepository`, `TenantRoleRepository`, `DefaultRole` |
+| 4 | Logic nghiệp vụ | `TenantServiceImpl` |
+| 5 | API | `TenantController` |
+| 6 | Kiểm thử | 44 test đơn vị, 42 test tích hợp |
+
+**Bốn điều phải nhớ:**
+1. **Tạo nhà xe là một giao dịch:** nhà xe, cấu hình, 3 vai trò (22 dòng quyền) và các chủ cùng thành công hoặc cùng hoàn lại. Kiểm tra hết rồi mới ghi.
+2. **Xóa là xóa mềm** (`is_active = false`), vì xóa thật kéo theo xóa sạch dữ liệu nhà xe.
+3. **Email đã có tài khoản thì chỉ liên kết**, không đổi mật khẩu và họ tên.
+4. **Cấu hình vận hành do chủ nhà xe tự sửa**, module này chỉ tạo dòng mặc định.
+
+**Trạng thái:** code và test xong trên nhánh `feature/huynq7-tenant`, chưa gộp vào `main`. Còn lại và việc cần báo người khác: xem [Phụ thuộc người khác](#-phụ-thuộc-người-khác) và [Ngoài phạm vi](#-ngoài-phạm-vi).
+
+> Muốn hiểu **vì sao** thì đọc tiếp Bức tranh toàn cảnh. Muốn **tự code** thì đi theo Giai đoạn 0 đến 6. Phần Service (Giai đoạn 4) đã gộp lời giải thích vào từng hàm.
+
+---
+
 ## 🏛️ BỨC TRANH TOÀN CẢNH
 
 Sản phẩm là phần mềm cho thuê xe **bán cho các nhà xe**. Mỗi nhà xe là một khách hàng của nền tảng, gọi là **tenant**. Có hai tầng người dùng:
@@ -45,14 +85,11 @@ tenants (1 dòng)   tenant_configs (1 dòng)  roles (3) + role_permissions (22) 
 | Cấu hình vận hành (`tenant_configs`) | **Chủ nhà xe tự sửa**, Super Admin không sửa | Quyết định của bạn. Module này chỉ **tạo** dòng mặc định, không có API sửa cấu hình |
 | Super Admin xem nhân viên | **Chỉ chủ nhà xe**; nhân viên và Sale chỉ là con số | Dữ liệu người làm thuộc nhà xe; API chỉ có xem chủ nhà xe |
 
-### Role có liên quan gì ở đây
-- **Kiểm tra quyền gọi API tenant: không dùng bảng `roles`.** Quyền Super Admin lấy từ cờ `is_super_admin` (xem Giai đoạn 5).
-- Bảng `roles` liên quan tới **nhân viên bên trong nhà xe** và tới việc gán chủ nhà xe (`user_tenants.role_id`).
-
 ---
 
 ## 🗺️ MỤC LỤC
 
+- [Tóm tắt trong 1 phút](#-tóm-tắt-trong-1-phút)
 - [Giai đoạn 0: Chuẩn bị](#giai-đoạn-0-chuẩn-bị)
 - [Giai đoạn 1: Entity](#giai-đoạn-1-sửa-entity-thêm-tenantconfig)
 - [Giai đoạn 2: DTO](#giai-đoạn-2-dto)
@@ -144,7 +181,7 @@ Thêm chủ nhà xe về sau (`POST /tenants/{id}/admins`) dùng lại chính `A
 ### Lưu ý
 - `@NotBlank` chỉ dùng cho `String`. Enum, `Boolean`, `UUID` dùng `@NotNull`.
 - DTO dùng `Boolean` (hoa) để phân biệt "không gửi" với `false`; entity `Tenant` là `boolean` nguyên thủy, khi map phải gọi đúng tên getter/setter.
-- `planTier` trong JSON theo **tên enum** (`"FREE"`, `"BASIC"`, `"PRO"`, `"ENTERPRISE"`). Suy luận từ mặc định của Jackson, xác nhận khi test Swagger.
+- `planTier` trong JSON theo **tên enum** (`"FREE"`, `"BASIC"`, `"PRO"`, `"ENTERPRISE"`). Đã xác nhận bằng test tích hợp (gửi `"BASIC"`, `"PRO"` đều được nhận).
 - Giới hạn `@Size` khớp cột DB: `name`, `domain` `varchar(255)` NOT NULL; `logo_url` `varchar(500)`; `contact_phone` `varchar(20)`; `contact_email` `varchar(255)`.
 
 **Kiểm tra:** `mvn clean compile`. Nhớ dòng `package` khớp thư mục.
@@ -262,6 +299,17 @@ Các câu SQL này đã được chạy thử trong một transaction rồi hoà
 - **`IN (:permissionCodes)`** nhận `Collection<String>`. **Danh sách rỗng gây lỗi SQL**, nên `TENANT_ADMIN` (danh sách rỗng) phải dùng `grantAllPermissions`.
 - **Đừng dùng `RoleRepository.findByCode`** (nhiều tenant cùng `code`, nổ `IncorrectResultSize`). Dùng `findByTenantIdAndCode`.
 
+### 📖 Giải thích bằng lời: sinh vai trò cho nhà xe mới
+**Chuyện cần giải quyết.** Mỗi thành viên của một nhà xe (`user_tenants`) bắt buộc có một vai trò, và vai trò là của **riêng từng nhà xe** (bảng `roles` có `tenant_id`). Nên nhà xe vừa tạo xong mà chưa có vai trò thì không ai gán được cho ai, kể cả chủ nhà xe. Vì vậy lúc tạo nhà xe phải sinh luôn 3 vai trò.
+
+**Cách làm, từng bước:**
+1. Với mỗi vai trò trong `DefaultRole` (TENANT_ADMIN, STAFF, SALE), chèn một dòng vào `roles` với `tenant_id` của nhà xe mới (`insertSystemRole`). Các câu này là SQL dạng "chèn từ truy vấn" (`INSERT ... SELECT`): DB tự nối vai trò với quyền, không phải kéo từng quyền về Java rồi lưu lại. Hai lưu ý sống còn (`tenant_id` và `flushAutomatically`) nằm ở danh sách "Điểm khó" ngay phía trên.
+2. Rồi nối vai trò đó với các quyền của nó trong `role_permissions`:
+   - **TENANT_ADMIN:** nối với **mọi** dòng trong bảng `permissions` (hiện 11 quyền). Danh sách quyền để rỗng trong `DefaultRole` có nghĩa là "tất cả", và có hệ quả hay: sau này thêm quyền mới vào bảng `permissions` thì chủ của các nhà xe **tạo từ đó trở đi** tự có luôn quyền mới.
+   - **STAFF:** đúng 7 quyền (đọc, tạo, xác nhận cọc, giao, nhận, hủy đơn; xem xe).
+   - **SALE:** đúng 4 quyền (đọc, tạo, hủy đơn; xem xe).
+3. Tổng cộng 3 dòng `roles` và 11 + 7 + 4 = **22 dòng `role_permissions`** cho mỗi nhà xe. Đó là dòng nối nhỏ, chỉ sinh một lần lúc tạo nhà xe.
+
 ### 5. Hai repository của module account (chỉ **dùng**, không sửa) và truy vấn xem chủ nhà xe
 `UserRepository` (có `findByEmail`) và `UserTenantRepository` (có `findByUserIdAndTenantId`, `findByUserId`).
 
@@ -290,45 +338,106 @@ Các entity không có quan hệ `@ManyToOne` (chỉ lưu id), nên dùng `JOIN 
 
 - **Interface:** `tenant/service/TenantService`; **Implementation:** `tenant/service/impl/TenantServiceImpl`
 - **Annotations:** `@Service`, `@RequiredArgsConstructor`, `@Slf4j`, `@Transactional` ở lớp
-- **Dependencies:** `TenantRepository`, `TenantConfigRepository`, `TenantRoleRepository`, `UserRepository`, `UserTenantRepository`, `PasswordEncoder` (bean đã có ở `SecurityConfig`, `AuthServiceImpl` cũng đang tiêm)
+- **Dependencies:** `TenantRepository`, `TenantConfigRepository`, `TenantRoleRepository`, `TenantAdminQueryRepository`, `UserRepository`, `UserTenantRepository`, `PasswordEncoder` (bean đã có ở `SecurityConfig`, `AuthServiceImpl` cũng đang tiêm), `ObjectMapper` (kiểm tra `settings` là JSON)
 - **Lỗi nghiệp vụ:** ném `AppException(ErrorCode, "...")`. Thêm vào `ErrorCode`: `TENANT_DOMAIN_ALREADY_EXISTS` (`HttpStatus.CONFLICT`) và `TENANT_ADMIN_ALREADY_ASSIGNED` (`HttpStatus.CONFLICT`)
 
-### 🔹 `assignTenantAdmin(UUID tenantId, UUID adminRoleId, AdminAssignmentRequestDTO admin)`
-Hàm dùng chung cho lúc tạo tenant **và** lúc thêm chủ về sau. Ban đầu viết là hàm `private` trong `TenantServiceImpl`; khi module account cần dùng thì tách ra lớp chung (xem [phụ thuộc](#-phụ-thuộc-người-khác)). Quy tắc:
-1. Chuẩn hóa email (`trim`, `toLowerCase`), tra `userRepository.findByEmail`.
-2. **Email mới:** bắt buộc `fullName` không rỗng và `password` hợp lệ, thiếu thì `BAD_REQUEST` nêu rõ trường nào. Tạo `User` với `passwordHash = passwordEncoder.encode(password)`, **`isActive(true)`**, **`isSuperAdmin(false)`**.
-3. **Email có sẵn:** bỏ qua `fullName` và `password` gửi lên. Từ chối nếu tài khoản bị khóa hoặc là Super Admin.
-4. Nếu người đó **đã là thành viên của tenant này** (`findByUserIdAndTenantId`): đã là `TENANT_ADMIN` thì ném `TENANT_ADMIN_ALREADY_ASSIGNED`; đang là STAFF/SALE thì từ chối ("chưa hỗ trợ nâng quyền"), vì khóa chính chỉ cho một role mỗi nhà xe.
-5. Lưu `UserTenant` (`userId`, `tenantId`, `roleId = adminRoleId`, `joinedAt = Instant.now()`).
-6. Trả về `accountCreated` (đã tạo tài khoản mới hay chỉ liên kết).
+### Hai nguyên tắc chạy xuyên suốt
 
-### 🔹 `createTenant(CreateTenantRequestDTO request, UUID actorId)`
-1. Chuẩn hóa `domain` (`trim`, `toLowerCase`). `existsByDomain(domain)` đúng thì ném `TENANT_DOMAIN_ALREADY_EXISTS`.
-2. Kiểm tra danh sách `admins`: có ít nhất 1 người, **email không trùng nhau** (so sánh sau khi chuẩn hóa).
-3. **Kiểm tra từng chủ nhà xe trước khi ghi bất cứ thứ gì** (email mới thiếu họ tên hoặc mật khẩu; tài khoản có sẵn bị khóa hoặc là Super Admin). Lỗi người dùng thì dừng ngay, chưa tốn thao tác ghi.
-4. Nếu có `settings`, kiểm tra là JSON hợp lệ (`ObjectMapper.readTree`), sai thì `BAD_REQUEST`. Không có thì `"{}"`.
-5. Lưu `Tenant` (`.isActive(true)`, `planTier` mặc định FREE) bằng `saveAndFlush`.
-6. Lưu `TenantConfig` với `tenantId` vừa có và giá trị **truyền tường minh**: `holdTimeoutMinutes(30)`, `lateHourlyPrice(new BigDecimal("100000"))`, `defaultCommissionRate(new BigDecimal("5.00"))`.
-7. Tạo 3 role: lặp `DefaultRole.values()`, gọi `insertSystemRole`, rồi `grantAllPermissions` (nếu `grantsAllPermissions()`) hoặc `grantPermissions`.
-8. Lấy role chủ nhà xe: `findByTenantIdAndCode(tenantId, RoleConstant.TENANT_ADMIN)`.
-9. Với mỗi chủ nhà xe: gọi `assignTenantAdmin`.
-10. `log.info(...)` ghi `actorId`, `tenantId`, số chủ nhà xe, mỗi người đã tạo mới hay chỉ liên kết. **Không log mật khẩu.**
-11. Trả `CreateTenantResponseDTO`.
+**1. Service là nơi quyết định.** DTO chỉ kiểm hình dạng, Controller chỉ nhận rồi chuyển. Service trả lời ba câu mà chỉ nó đủ thông tin: việc này có hợp lệ theo luật nghiệp vụ không (cần hỏi DB), phải làm những việc gì theo thứ tự nào, và nếu hỏng giữa chừng thì có hoàn lại không.
 
-> Cả 11 bước nằm trong **một transaction**. Lỗi giữa chừng thì toàn bộ rollback: không để lại nhà xe thiếu role, hay tài khoản chủ mồ côi.
+**2. Cả lớp chạy trong một giao dịch (`@Transactional`)**, giống một lần chuyển khoản: hoặc mọi thao tác ghi cùng thành công, hoặc không cái nào có hiệu lực. Hàm ném lỗi runtime (`AppException` thuộc loại này) thì mọi thứ đã ghi trong hàm đó bị hoàn lại. Hàm chỉ đọc đánh dấu `readOnly` cho nhẹ.
 
-### 🔹 `addTenantAdmin(UUID tenantId, AdminAssignmentRequestDTO admin, UUID actorId)` và `listTenantAdmins(UUID tenantId)`
-- `addTenantAdmin`: tenant phải tồn tại (`RESOURCE_NOT_FOUND`) và **đang hoạt động**; lấy role `TENANT_ADMIN` của tenant, rồi gọi `assignTenantAdmin`. Log hành động.
-- `listTenantAdmins`: trả các chủ nhà xe của tenant (tên, email, trạng thái, ngày tham gia). **Không có hàm xem nhân viên hay Sale**: Super Admin chỉ thấy chủ nhà xe, nhân viên chỉ là con số trong màn chi tiết.
+Có **ba lớp kiểm tra**, mỗi lớp một việc:
 
-### 🔹 `getTenantById`, `listTenants`, `updateTenant`, `changeStatus`, `deleteTenant`
-- `getTenantById(UUID id)`: không có thì `AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy nhà xe")`.
-- `listTenants(String keyword, Boolean isActive, Pageable pageable)`: `keyword` thành `"%" + keyword.trim().toLowerCase() + "%"` (hoặc `"%"` nếu rỗng), gọi `search`, map sang DTO.
-- `updateTenant(UUID id, UpdateTenantRequestDTO, UUID actorId)`: tìm tenant; nếu đổi `domain` thì chuẩn hóa, khác giá trị cũ thì `existsByDomainAndIdNot`; `updatedAt` tự đổi nhờ `@UpdateTimestamp` (dùng `saveAndFlush` để phản hồi có giá trị mới). **Không đụng `tenant_configs`.**
-  - **Trường bắt buộc** (`name`, `domain`, `planTier`): luôn ghi đè.
-  - **Trường tùy chọn** (`settings`, `logoUrl`, `contactEmail`, `contactPhone`): **không gửi hoặc `null` thì giữ giá trị cũ**; gửi chuỗi rỗng hoặc toàn dấu cách thì xóa (`logoUrl`, `contactEmail`, `contactPhone` thành `null`; `settings` thành `{}`); gửi giá trị thì ghi đè. `settings` không phải JSON hợp lệ thì `400`. Lý do: tránh lỡ xóa dữ liệu khi client chỉ muốn đổi tên hay gói.
-  - Đã kiểm chứng qua HTTP thật 6 trường hợp: không gửi, gửi `null`, gửi giá trị mới, gửi `{}`, gửi chuỗi rỗng, gửi JSON sai.
-- `changeStatus` / `deleteTenant` (xóa mềm): đặt `isActive`. **Không gọi `repository.delete`.** Làm **idempotent**: tenant đã khóa mà xóa tiếp vẫn thành công.
+| Lớp | Hỏi gì | Ví dụ |
+| :--- | :--- | :--- |
+| **DTO** (`@Valid`) | Dữ liệu đúng hình dạng không? Không cần DB | Domain đúng mẫu, email đúng dạng, mật khẩu từ 8 ký tự có chữ và số |
+| **Service** | Việc này có được phép không? Cần DB hoặc luật riêng | Domain đã dùng chưa, tài khoản có bị khóa không, `settings` có là JSON không |
+| **Database** | Chốt chặn cuối khi code sót | `domain` và `email` unique, khóa ngoại |
+
+Service lặp lại vài luật của DTO (danh sách chủ rỗng, email rỗng) vì có thể được gọi từ nơi không qua `@Valid`. Quy tắc: lặp lại thứ làm hỏng dữ liệu nếu sai, không lặp lại thứ chỉ là định dạng.
+
+---
+
+### 🔹 `createTenant(CreateTenantRequestDTO request, UUID actorId)`: như mở một cửa hàng mới
+
+Bạn không giao chìa khóa trước khi có cửa hàng, nhân viên và nội quy. Hàm làm theo đúng thứ tự đó, và **kiểm tra hết rồi mới ghi**. Ví dụ xuyên suốt: tạo "Bình An Car" với hai chủ, `chu1@binhan.vn` (chưa có tài khoản) và `minh.admin@rentcarhanoi.vn` (đã có tài khoản ở nhà xe khác).
+
+**Giai đoạn kiểm tra: chưa ghi gì vào DB**
+1. **Domain:** làm gọn (`trim`, `toLowerCase`), `existsByDomain(domain)` đúng thì ném `TENANT_DOMAIN_ALREADY_EXISTS` (**409**).
+2. **`settings`:** nếu có thì phải là JSON hợp lệ (`ObjectMapper.readTree`), sai thì **400**. Không có thì lưu `"{}"`.
+3. **Cả danh sách chủ** (`prepareAdmins`): có ít nhất 1 người, email không trùng nhau (so sau khi chuẩn hóa), từng người qua `prepareAdmin` (xem hàm bên dưới). Một người sai là dừng cả việc tạo.
+
+*Vì sao kiểm tra hết trước:* nếu chủ thứ hai bị khóa mà vẫn tạo nhà xe rồi mới phát hiện, ta phải hoàn lại. Dừng sớm thì rẻ và không để lại dấu vết.
+
+**Giai đoạn ghi: theo thứ tự, mỗi bước cần bước trước**
+4. **Nhà xe:** lưu `Tenant` bằng `saveAndFlush`, `.isActive(true)`, `planTier` mặc định FREE nếu không chọn.
+5. **Cấu hình:** lưu `TenantConfig` với giá trị **truyền tường minh**: `holdTimeoutMinutes(30)`, `lateHourlyPrice(new BigDecimal("100000"))`, `defaultCommissionRate(new BigDecimal("5.00"))`.
+6. **3 vai trò:** lặp `DefaultRole.values()`, gọi `insertSystemRole`, rồi `grantAllPermissions` (nếu `grantsAllPermissions()`) hoặc `grantPermissions`. Ra 3 dòng `roles` và 22 dòng `role_permissions` (giải thích ở Giai đoạn 3).
+7. **Vai trò chủ:** `findByTenantIdAndCode(tenantId, RoleConstant.TENANT_ADMIN)` để lấy vai trò vừa sinh.
+8. **Gán từng chủ:** gọi `assignTenantAdmin`.
+9. **Log và trả:** `log.info(...)` ghi `actorId`, tên và id nhà xe, số chủ. **Không log mật khẩu.** Trả `CreateTenantResponseDTO`.
+
+**Kết quả trong DB cho ví dụ:** 1 nhà xe, 1 cấu hình, 3 vai trò, 22 dòng quyền, 1 tài khoản mới (`chu1`), 2 thành viên. `minh.admin` giờ thuộc hai nhà xe nên lúc đăng nhập sẽ thấy màn chọn nhà xe.
+
+> **Rollback:** cả 9 bước nằm trong một giao dịch. Bước 1 đến 3 chặn lỗi do người dùng gửi sai; giao dịch lo lỗi bất ngờ ở bước ghi (DB lỗi, mất kết nối). Test hiện chứng minh được "kiểm tra trước thì không ghi gì"; chưa có test gây lỗi giữa bước ghi để chứng minh rollback.
+
+### 🔹 Gán chủ nhà xe: `prepareAdmin` rồi `assignTenantAdmin`
+
+Phần lõi dùng chung cho lúc tạo nhà xe **và** lúc thêm chủ về sau. Tách hai bước để **kiểm tra xong hết rồi mới ghi**. Cả hai ban đầu là hàm `private` trong `TenantServiceImpl`; khi module account cần dùng thì tách ra lớp chung (xem [phụ thuộc](#-phụ-thuộc-người-khác)).
+
+**Kiểm tra, chưa ghi: `prepareAdmin(AdminAssignmentRequestDTO, Set<String> seenEmails)`** trả `PreparedAdmin(email, fullName, password, existingUser)`:
+1. Chuẩn hóa email (`trim`, `toLowerCase`). Rỗng thì `BAD_REQUEST`; đã gặp trong danh sách (`seenEmails`) thì `BAD_REQUEST`.
+2. `userRepository.findByEmail`. **Email có sẵn:** từ chối nếu tài khoản bị khóa hoặc là Super Admin; bỏ qua `fullName` và `password` gửi lên.
+3. **Email mới:** bắt buộc có `fullName` và `password`, thiếu thì `BAD_REQUEST` nêu rõ trường nào.
+
+**Ghi: `assignTenantAdmin(UUID tenantId, UUID adminRoleId, PreparedAdmin admin)`:**
+1. **Email mới:** tạo `User` với `passwordHash = passwordEncoder.encode(password)`, **`isActive(true)`**, **`isSuperAdmin(false)`**. **Email có sẵn:** gọi `ensureNotAlreadyMember`.
+2. Lưu `UserTenant` (`userId`, `tenantId`, `roleId = adminRoleId`, `joinedAt = Instant.now()`).
+3. Trả `AdminResult(email, accountCreated)`.
+
+**Mỗi tình huống ra kết quả gì.** Quy tắc quan trọng nhất: *email đã có tài khoản thì chỉ liên kết, không đổi mật khẩu và họ tên.* Nếu cho ghi đè, ai biết email của người ở nhà xe khác có thể đặt lại mật khẩu của họ khi "tạo nhà xe" và chiếm tài khoản.
+
+| Tình huống | Kết quả | Vì sao |
+| :--- | :--- | :--- |
+| Email mới, đủ họ tên và mật khẩu | Tạo tài khoản và liên kết (`accountCreated = true`) | Cần tài khoản để đăng nhập |
+| Email mới, thiếu họ tên hoặc mật khẩu | **400** | Không tạo được tài khoản dùng được |
+| Email có sẵn, đang hoạt động, chưa thuộc nhà xe này | Chỉ liên kết (`accountCreated = false`), bỏ qua họ tên và mật khẩu gửi lên | Tránh chiếm tài khoản |
+| Email có sẵn nhưng tài khoản bị khóa | **400** | Không gán quyền cho người đã bị khóa |
+| Email có sẵn là Super Admin | **400** | Nhánh đăng nhập Super Admin chạy trước, người này sẽ không vào được nhà xe |
+| Đã là chủ của nhà xe này | **409** `TENANT_ADMIN_ALREADY_ASSIGNED` | Gán trùng |
+| Đang là nhân viên (STAFF, SALE) của nhà xe này | **400** ("chưa hỗ trợ nâng quyền") | Khóa chính `user_tenants` chỉ cho một vai trò mỗi nhà xe |
+| Hai email giống nhau trong cùng danh sách (kể cả khác hoa thường) | **400** | Tránh gán hai lần |
+
+### 🔹 `addTenantAdmin` và `listTenantAdmins`
+- **`addTenantAdmin(UUID tenantId, AdminAssignmentRequestDTO admin, UUID actorId)`:** nhà xe phải tồn tại (**404**) và **đang hoạt động** (đang khóa thì **400**). Lấy vai trò `TENANT_ADMIN` **của nhà xe này**, kiểm tra người được thêm bằng `prepareAdmin`, rồi `assignTenantAdmin`. Nếu nhà xe không có vai trò này (dữ liệu hỏng, ví dụ nhà xe tạo tay không qua API) thì báo lỗi hệ thống. Log hành động.
+- **`listTenantAdmins(UUID tenantId)`:** kiểm tra nhà xe tồn tại, rồi lấy các thành viên có vai trò TENANT_ADMIN xếp theo ngày tham gia. Chỉ trả id, email, họ tên, trạng thái, ngày tham gia, **không có mật khẩu**. Không có hàm xem nhân viên hay Sale: Super Admin chỉ thấy chủ nhà xe, nhân viên chỉ là con số trong màn chi tiết.
+
+### 🔹 `getTenantById` và `listTenants`
+- **`getTenantById(UUID id)`:** không có thì `AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy nhà xe")`.
+- **`listTenants(String keyword, Boolean isActive, Pageable pageable)`:** từ khóa trống thì thành `"%"` (tìm tất cả), có thì `"%" + keyword.trim().toLowerCase() + "%"` và tìm trong **tên hoặc domain**. `isActive` không gửi thì không lọc, gửi `true` hay `false` thì chỉ lấy nhà xe đang hoạt động hoặc đã khóa. Phân trang do Controller dựng sẵn (Giai đoạn 5). Từ khóa luôn là một chuỗi, không bao giờ `null`, vì PostgreSQL báo lỗi hàm `lower` khi gặp `null`.
+
+### 🔹 `updateTenant(UUID id, UpdateTenantRequestDTO, UUID actorId)`: sửa mà không lỡ xóa
+Các bước: tìm nhà xe; xử lý `domain`; ghi đè các trường theo bảng dưới; `saveAndFlush` (để `updatedAt`, tự đổi nhờ `@UpdateTimestamp`, đã có giá trị mới khi trả về). **Không đụng `tenant_configs`**, vì cấu hình do chủ nhà xe tự sửa. Ngày tạo giữ nguyên.
+
+**Domain:** làm gọn như lúc tạo. **Không đổi** thì không kiểm tra trùng (nếu không sẽ báo trùng với chính nó). **Đổi** thì `existsByDomainAndIdNot`: không được trùng nhà xe **khác**.
+
+**Trường bắt buộc** (`name`, `domain`, `planTier`) luôn được ghi đè; DTO đã chặn việc thiếu. **Trường tùy chọn** (`logoUrl`, `contactEmail`, `contactPhone`, `settings`) có ba cách gửi:
+
+| Cách gửi | Kết quả | Ví dụ, `contactEmail` đang là `a@x.vn` |
+| :--- | :--- | :--- |
+| **Không gửi** (hoặc `null`) | **Giữ giá trị cũ** | Vẫn `a@x.vn` |
+| **Chuỗi rỗng** hoặc toàn dấu cách | **Xóa** (thành trống; riêng `settings` về `{}`) | Thành trống |
+| **Có giá trị** | **Ghi đè** | Thành giá trị mới |
+
+*Vì sao:* client chỉ muốn đổi tên hay gói thì không nên vô tình xóa email, điện thoại chỉ vì quên gửi lại. Muốn xóa thật thì gửi chuỗi rỗng có chủ ý. `settings` không phải JSON hợp lệ thì **400**. Đã kiểm chứng qua HTTP thật 6 trường hợp: không gửi, `null`, giá trị mới, `{}`, chuỗi rỗng, JSON sai.
+
+### 🔹 `changeStatus` và `deleteTenant`
+- **`changeStatus`:** đổi cột `is_active`. Nhà xe **đã ở đúng trạng thái yêu cầu** thì trả luôn, không ghi. Nhờ vậy gọi lại nhiều lần không lỗi, không đổi ngày cập nhật, không đầy log (**idempotent**: gọi nhiều lần cho cùng kết quả như gọi một lần).
+- **`deleteTenant`:** chính là `changeStatus(false)`, **không gọi `repository.delete`**. Gần như mọi bảng nối tới `tenants` bằng `ON DELETE CASCADE`, xóa thật là xóa sạch chi nhánh, xe, khách, đơn thuê, không hoàn tác.
+- **Hậu quả của việc khóa:** người của nhà xe không đăng nhập hay chọn nhà xe được; không thêm được chủ mới; dữ liệu còn nguyên nên mở khóa lại là dùng tiếp. Lưu ý: người đang cầm token còn hạn có thể chưa bị chặn ngay, do lỗi bộ lọc JWT của module auth (xem [phụ thuộc](#-phụ-thuộc-người-khác)).
+
+> **Một ca còn hở:** hai người tạo cùng domain **cùng lúc** đều qua bước kiểm tra, rồi unique của DB chặn một người; người đó có thể nhận lỗi 500 thay vì 409. Khả năng thấp vì chỉ Super Admin tạo nhà xe. Cách sửa: bắt `DataIntegrityViolationException` và đổi sang 409.
 
 ---
 
@@ -350,7 +459,7 @@ Hàm dùng chung cho lúc tạo tenant **và** lúc thêm chủ về sau. Ban đ
 | `/api/v1/tenants/{id}/admins` | `GET` | | `200` + danh sách chủ nhà xe |
 | `/api/v1/tenants/{id}/admins` | `POST` | `AdminAssignmentRequestDTO` | `201 Created` |
 
-Khuôn mỗi hàm giống `AuthController`: `ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(data, "Tạo nhà xe thành công !"))`. Nhớ `@Valid @RequestBody`, `@PathVariable UUID id`.
+Khuôn mỗi hàm giống `AuthController`: `ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(data, "Tạo nhà xe thành công !"))`. Nhớ `@Valid @RequestBody`, `@PathVariable UUID id`. Controller **không chứa luật nghiệp vụ**: lấy id người gọi từ token (để ghi log ai làm), gọi một hàm Service, bọc kết quả vào `ApiResponse` với mã đúng (201 cho tạo mới, 200 cho còn lại).
 
 ### Hai API gán người vào nhà xe: tách riêng, dùng chung phần lõi
 | | API gán chủ nhà xe (module này) | API tạo nhân viên (`POST /api/v1/accounts`, module account, người khác làm) |
@@ -376,6 +485,7 @@ Request + Bearer token
 - Chủ nhà xe, nhân viên, Sale mang `ROLE_TENANT_ADMIN`, `ROLE_STAFF`, `ROLE_SALE` nên bị **403**. Chưa đăng nhập hoặc token sai thì **401**.
 - `@EnableMethodSecurity` đã bật ở `SecurityConfig`; trước module này chưa có `@PreAuthorize` nào. **Đã kiểm chứng ở Giai đoạn 6:** không token thì 401, token chủ nhà xe thì 403 (mã `AUTH_FORBIDDEN`) cho cả `GET`, `POST`, `DELETE`, token Super Admin thì qua.
 - `GlobalExceptionHandler` đã có handler `AccessDeniedException` nên 403 trả đúng khuôn `ApiResponse`.
+- **Thứ tự cần biết:** Spring kiểm tra dạng body (`@Valid`) **trước** khi kiểm tra quyền (`@PreAuthorize`), nên người không có quyền gửi body sai sẽ nhận **400** chứ chưa phải 403.
 
 ---
 
@@ -388,12 +498,12 @@ UPDATE users SET is_super_admin = true WHERE email = '<email-super-admin>';
 ```
 Đăng nhập lại để nhận token `SUPER_ADMIN` (không có tenant). Lưu ý:
 - **Đừng** để tài khoản này vừa là Super Admin vừa thuộc một nhà xe: nhánh Super Admin chạy trước ở `login`, nên người đó **không vào được nhà xe**. Đã gặp thật khi một tài khoản vừa là Super Admin vừa là chủ nhà xe Sài Gòn Auto.
-- Khi cần một chủ nhà xe sẵn có cho kịch bản 5, dùng một tài khoản khác với tài khoản Super Admin.
-- Trên máy tác giả, tài khoản `huynq7@vnpay.vn` đã là Super Admin. Muốn trả lại: `UPDATE users SET is_super_admin = false WHERE email = '<email-super-admin>';`
+- Khi cần một chủ nhà xe sẵn có cho kịch bản 2, dùng một tài khoản khác với tài khoản Super Admin.
+- Trên máy tác giả có một tài khoản đã được bật cờ Super Admin bằng lệnh trên. Muốn trả lại: `UPDATE users SET is_super_admin = false WHERE email = '<email-super-admin>';`
 - Lâu dài cần cách tạo Super Admin chính thức (migration hoặc lệnh khởi tạo, mật khẩu lấy từ biến môi trường), xem mục "Việc cần xác nhận".
 
-### B. Kiểm thử qua Swagger
-Đăng nhập, bấm **Authorize** dán access token. Mẫu body tạo tenant với hai chủ:
+### B. Thử tay qua Swagger
+Phần lớn kịch bản đã có test tự động (mục C2). Mục này để bạn **nhìn tận mắt** trên Swagger khi cần. Đăng nhập, bấm **Authorize** dán access token. Mẫu body tạo tenant với hai chủ:
 ```json
 {
   "name": "Bình An Car",
@@ -411,27 +521,14 @@ UPDATE users SET is_super_admin = true WHERE email = '<email-super-admin>';
 | # | Kịch bản | Kết quả đúng |
 | :-: | :--- | :--- |
 | 1 | Token chủ nhà xe (`minh.admin`) gọi `POST /tenants` | **403** |
-| 2 | Super Admin `POST` với 1 chủ, email mới | **201**, `accountCreated = true` |
-| 3 | Kiểm tra DB (SQL bên dưới) | 1 tenant, 1 config (30 / 100000 / 5.00), 3 role, 22 dòng quyền, đúng số chủ nhà xe |
-| 4 | **Đăng nhập bằng tài khoản chủ vừa tạo** | Token `role = TENANT_ADMIN`, vào thẳng tenant mới, 11 quyền, danh sách chi nhánh rỗng |
-| 5 | `POST` với **2 chủ** (một mới, một đã có tài khoản như body mẫu) | **201**; chủ có sẵn **không** tạo user mới, `password_hash` **không đổi**; user đó giờ có 2 nhà xe, đăng nhập thấy màn chọn nhà xe |
-| 6 | `POST` với `adminEmail` trùng nhau trong danh sách, hoặc danh sách rỗng | **400**, không tạo gì |
-| 7 | Email mới thiếu `fullName`, hoặc mật khẩu yếu (`"abc"`) | **400**, không tạo gì (kiểm tra trước khi ghi) |
-| 8 | Một chủ là tài khoản bị khóa hoặc là Super Admin | Từ chối, **không tạo tenant** (kiểm tra rollback) |
-| 9 | `POST` cùng `domain` lần nữa | **409** `TENANT_DOMAIN_ALREADY_EXISTS` |
-| 10 | `POST /tenants/{id}/admins` thêm chủ thứ 3 (email mới, email có sẵn) | **201**, `GET /tenants/{id}/admins` thấy đủ |
-| 11 | Thêm lại chính người đã là chủ (khác hoa thường) | **409** `TENANT_ADMIN_ALREADY_ASSIGNED` |
-| 12 | Thêm người đang là STAFF/SALE của nhà xe đó | Từ chối ("chưa hỗ trợ nâng quyền") |
-| 13 | Thêm chủ cho nhà xe đã khóa | Từ chối |
-| 14 | `PUT` đổi tên, plan (không gửi `settings`, `logoUrl`, `contactEmail`, `contactPhone`) | `updated_at` đổi, `created_at` giữ nguyên, **bốn trường tùy chọn giữ nguyên**, `tenant_configs` không đổi |
-| 15 | `PUT` đổi `domain` sang domain đã dùng | **409** |
-| 16 | `DELETE` tenant | `is_active = false`; role, user, `user_tenants` **vẫn còn** |
-| 17 | `DELETE` lần 2 | vẫn thành công (idempotent) |
-| 18 | Chủ nhà xe của tenant đã khóa đăng nhập | Bị từ chối ("tạm ngưng hoạt động") nếu nhà xe chỉ có 1 tenant |
-| 19 | `GET /tenants/{id}` id không tồn tại | **404** |
-| 20 | `GET /tenants?keyword=...&isActive=false&page=0&size=10` | đúng danh sách lọc, có tổng số trang |
+| 2 | Super Admin `POST` với **2 chủ** (body mẫu) | **201**; chủ có sẵn **không** tạo user mới, `password_hash` **không đổi**; DB đúng như SQL bên dưới; chủ mới đăng nhập được với `role = TENANT_ADMIN` và 11 quyền; chủ có sẵn nay thuộc 2 nhà xe nên thấy màn chọn nhà xe |
+| 3 | Một chủ là tài khoản bị khóa hoặc là Super Admin | Từ chối, **không tạo nhà xe** |
+| 4 | `POST` cùng `domain` lần nữa | **409** `TENANT_DOMAIN_ALREADY_EXISTS` |
+| 5 | `PUT` đổi tên, plan (không gửi `settings`, `logoUrl`, `contactEmail`, `contactPhone`) | `updated_at` đổi, `created_at` giữ nguyên, **bốn trường tùy chọn giữ nguyên**, `tenant_configs` không đổi |
+| 6 | `DELETE` hai lần, rồi chủ nhà xe đăng nhập | `is_active = false`, role, user, `user_tenants` **vẫn còn**; lần 2 vẫn thành công; đăng nhập bị từ chối ("tạm ngưng hoạt động") nếu nhà xe chỉ có 1 tenant |
+| 7 | `GET /tenants?keyword=...&isActive=false&page=0&size=10` | Đúng danh sách lọc, có tổng số trang |
 
-**SQL kiểm chứng kịch bản 3** (thay `<domain>`):
+**SQL kiểm chứng nhà xe vừa tạo** (kịch bản 2, thay `<domain>`):
 ```sql
 SELECT
   (SELECT count(*) FROM tenants t WHERE t.domain = '<domain>' AND t.is_active)                       AS tenants,
@@ -447,24 +544,33 @@ SELECT email, is_active, is_super_admin FROM users WHERE email = 'chu1@binhan.vn
 ```
 
 ### C. Unit test service (Mockito)
-Viết `TenantServiceImplTest`, mỗi kịch bản một test, tên mô tả (`should_throw_conflict_when_domain_already_exists`), cấu trúc Arrange, Act, Assert, không dùng vòng lặp hay if trong test:
-- tạo thành công với 1 chủ email mới (lưu config, 3 role, user với `isActive = true`, `user_tenants` role TENANT_ADMIN, mật khẩu đã băm),
-- tạo với 2 chủ (một mới, một có sẵn: không gọi `encode` cho người có sẵn),
-- email trùng trong danh sách, tài khoản có sẵn bị khóa, tài khoản Super Admin,
-- email mới thiếu họ tên hoặc mật khẩu,
-- trùng domain,
-- lỗi ở bước tạo role hoặc gán chủ thì không lưu thêm gì (kiểm tra hành vi rollback bằng mock ném lỗi),
-- thêm chủ trùng, thêm người đang là STAFF, thêm chủ cho nhà xe đã khóa,
-- sửa trùng domain, xóa hai lần, tenant không tồn tại,
-- sửa nhà xe: trường tùy chọn (`settings`, `logoUrl`, `contactEmail`, `contactPhone`) không gửi thì giữ giá trị cũ, gửi giá trị thì ghi đè, gửi chuỗi rỗng thì xóa, `settings` sai JSON thì 400.
-
-**Hiện thực:** `src/test/java/.../tenant/service/impl/TenantServiceImplTest.java`, **44 test** (Mockito, `@Spy ObjectMapper` thật, không cần DB). Mỗi test một kịch bản, bố cục Arrange, Act, Assert, dùng hàm phụ để dựng dữ liệu và stub thay vì vòng lặp hay `if` trong test.
+**Hiện thực:** `src/test/java/.../tenant/service/impl/TenantServiceImplTest.java`, **44 test** (Mockito, `@Spy ObjectMapper` thật, không cần DB): tạo nhà xe (21), xem và danh sách (3), sửa (11), khóa và xóa mềm (3), chủ nhà xe (6). Mỗi test một kịch bản, tên mô tả (`should_throw_conflict_when_domain_already_exists`), bố cục Arrange, Act, Assert, dùng hàm phụ để dựng dữ liệu và stub thay vì vòng lặp hay `if` trong test. **Chưa có test gây lỗi giữa bước ghi để chứng minh rollback**; test hiện chứng minh được việc kiểm tra trước khi ghi.
 
 **Cách kiểm tra test có giá trị:** cố ý phá code rồi xem test có báo đỏ không (đã làm với: bỏ `.isActive(true)` khi tạo nhà xe, đổi xóa mềm thành xóa cứng, làm hỏng nhánh gán toàn quyền, đưa `settings` về hành vi luôn ghi đè). Cả bốn lỗi đều bị đúng test bắt.
 
+### C2. Test tích hợp (Testcontainers)
+Chạy **cả ứng dụng thật** (Spring, Security, JPA, Flyway) trên một **PostgreSQL thật do Testcontainers dựng** (`postgres:15`), gọi API qua `java.net.http.HttpClient`, rồi đếm dòng trong DB. Khác test đơn vị ở chỗ đi qua đủ các tầng (bộ lọc JWT, controller, service, repository, DB).
+
+- **Cần Docker đang chạy.** Test dựng container riêng với cổng ngẫu nhiên, **không đụng DB dev**, xóa khi xong. Lần đầu tải image `postgres:15` nên chậm.
+- **Thêm vào `pom.xml`** (phạm vi `test`): `spring-boot-testcontainers`, `testcontainers-junit-jupiter`, `testcontainers-postgresql`. Đây là file chung của nhóm nên báo trước.
+- **Lớp nền:** `src/test/java/.../support/ApiIntegrationTestSupport.java`. Container khởi động **một lần** cho mọi lớp test (mẫu singleton, `@ServiceConnection` tự nối vào ứng dụng). Có sẵn hàm gọi API, đăng nhập, tạo nhà xe, đếm dòng. Mỗi test tự tạo dữ liệu với hậu tố ngẫu nhiên nên không phụ thuộc thứ tự.
+- **Super Admin:** DB mới chạy migration **chưa có** Super Admin, nên trước mỗi test lớp nền tự `INSERT` một tài khoản (`ON CONFLICT DO NOTHING`).
+- **Chạy riêng:** `mvn test -Dtest='*IntegrationTest'`. `mvn test` thường cũng chạy chúng (chưa tách bằng plugin Failsafe).
+
+| Lớp test | Số test | Phủ gì |
+| :--- | :-: | :--- |
+| `TenantApiIntegrationTest` | 10 | Tạo nhà xe (đếm 1 tenant, 1 config, 3 role, 22 quyền, 1 thành viên; phản hồi không có mật khẩu), 409 trùng domain, chủ mới đăng nhập đủ quyền, khóa thì login 403, mở khóa đăng nhập lại, xóa mềm hai lần, chủ không hợp lệ thì DB không có gì, 400 kèm lỗi theo trường |
+| `TenantUpdateAndListIntegrationTest` | 8 | `PUT` giữ cũ hoặc xóa trường tùy chọn, 409 domain nhà xe khác, `created_at` giữ còn `updated_at` đổi, tìm theo từ khóa, lọc `isActive`, giới hạn `size` 100, 404 |
+| `TenantAdminIntegrationTest` | 7 | Thêm chủ (email mới, email có sẵn chỉ liên kết và không đổi mật khẩu hay tên), 409 đã là chủ, 400 nhà xe khóa, tài khoản khóa, Super Admin, danh sách chủ không lộ mật khẩu |
+| `TenantAccessControlIntegrationTest` | 17 | Cả 8 API: không token 401, chủ nhà xe 403; chủ nhà xe không khóa được nhà xe khác |
+
+**Kiểm tra test có giá trị:** phá code rồi xem test có đỏ không. Bỏ một quyền của STAFF thì test đếm 22 dòng báo đỏ (21 thay vì 22). Bỏ `@PreAuthorize` ở controller, bỏ điều kiện giữ trường cũ của `PUT`, bỏ kiểm tra "đã là chủ" thì **12 test báo đỏ** ở ba lớp. Đã hoàn lại code sau mỗi lần thử.
+
+**Lưu ý khi viết test phân quyền:** Spring kiểm tra **dạng body trước khi kiểm tra quyền** (`@Valid` chạy trước `@PreAuthorize`), nên body sai trả 400 chứ chưa phải 403. Test phân quyền phải gửi body hợp lệ.
+
 ### D. Kiểm tra cuối
-- `mvn test` xanh: **45 test** (44 test của service và 1 test nạp context), `mvn clean` rồi chạy lại ứng dụng không lỗi Flyway.
-- Đã chạy thật qua HTTP với JWT thật (33 bước trong các kịch bản ở mục B, cộng 6 trường hợp `PUT`), dữ liệu thử được xóa sau đó, số liệu DB trùng khớp trước và sau.
+- `mvn clean test` xanh: **87 test** (44 test đơn vị của service, 42 test tích hợp, 1 test nạp context), 0 lỗi. Cần Docker chạy cho test tích hợp. `mvn clean` rồi chạy lại ứng dụng không lỗi Flyway.
+- Trước khi có test tích hợp, đã chạy thật qua HTTP với JWT thật (33 bước, cộng 6 trường hợp `PUT`), dữ liệu thử được xóa sau đó, số liệu DB trùng khớp trước và sau.
 - Lỗi có sẵn không thuộc module: `GET /tenants/{id}` với id không phải UUID trả **500** (nên là 400) vì `GlobalExceptionHandler` chưa xử lý lỗi sai kiểu tham số đường dẫn.
 
 ---
@@ -485,13 +591,17 @@ Các điểm docs không quy định. Prototype đã chọn hướng làm, nên 
 ## 🔗 PHỤ THUỘC NGƯỜI KHÁC
 
 1. **Tài khoản Super Admin để test:** xem Giai đoạn 6A. Hỏi người làm auth xem họ định seed Super Admin ở migration nào.
-2. **Khóa tenant chỉ chặn ở thời điểm đăng nhập và chọn tenant.**
+2. **Khóa tenant chưa chặn hết người đang dùng.** Đọc lại code auth (chưa chạy thử từng điểm):
    - `AuthServiceImpl.login` (nhánh 1 tenant) và `selectTenant` đã kiểm tra `tenant.isActive`; `refresh-token` cấp token **không có nhà xe**, nên người dùng phải gọi `select-tenant` (nơi có kiểm tra) và sẽ bị chặn.
-   - Nhưng `JwtAuthenticationFilter` không kiểm tra `tenants.is_active` mỗi request, nên người đang cầm access token còn hạn vẫn làm việc tiếp cho đến hết token, **tối đa 15 phút**.
+   - Nhưng `JwtAuthenticationFilter` không kiểm tra `tenants.is_active` mỗi request, **và `switch-branch` chỉ kiểm tra nhà xe có tồn tại, không kiểm tra còn hoạt động**. Người đang cầm access token có nhà xe cứ gọi `switch-branch` trước khi token hết hạn là nhận cặp token mới, nên **khóa nhà xe không cắt được họ** (không chỉ tối đa 15 phút như tưởng ban đầu).
+   - Ngược lại, khóa **tài khoản** (`users.is_active=false`) có hiệu lực ngay ở request kế tiếp, vì bộ lọc nạp người dùng từ DB mỗi request.
    - Đây là phần của module auth, nhắn người phụ trách. Module tenant vẫn hoàn chỉnh.
 3. **`GlobalExceptionHandler` trả 500 cho tham số đường dẫn sai kiểu** (ví dụ `GET /tenants/abc`). Nên 400. Là phần của người làm module chung, báo họ thêm handler cho `MethodArgumentTypeMismatchException`.
 4. **Dùng chung entity và repository của module account** (`User`, `UserTenant`, `UserRepository`, `UserTenantRepository`). Chỉ **dùng**, không sửa. Nếu người làm account đổi tên field hay method thì code của bạn sẽ lỗi biên dịch, nên báo họ biết.
 5. **Phần lõi "tìm hoặc tạo tài khoản rồi liên kết"** dùng chung với API tạo nhân viên của module account. Ban đầu viết trong `TenantServiceImpl`; khi module account bắt đầu làm API nhân viên, hai bên thống nhất rút ra một lớp chung để quy tắc không lệch.
+6. **`/auth/refresh-token` không kiểm tra loại token** (token không có claim `token_type`): một access token 15 phút đổi được lấy refresh token 7 ngày mới. Ngược lại refresh token dùng như access chỉ vào được các API "chỉ cần đăng nhập" như `select-tenant`.
+7. **Khóa bí mật JWT có giá trị mặc định cứng** trong `application.yaml` (`${JWT_SECRET:...}`), đọc theo UTF-8 dù comment ghi Base64. Môi trường chạy quên đặt `JWT_SECRET` thì ai có repo cũng ký được token giả.
+8. **`switch-branch` không lọc `user_branches` theo `status` và `ended_at`**: nhân viên đã nghỉ vẫn chọn được chi nhánh.
 
 ---
 
@@ -536,4 +646,5 @@ Các điểm docs không quy định. Prototype đã chọn hướng làm, nên 
 - **Hạn mức theo gói dịch vụ** (số chi nhánh, xe, nhân sự): chưa có chỗ lưu.
 - **Nhật ký thao tác (audit log) dạng bảng:** hiện chỉ log ra file.
 - **Row-Level Security:** tài liệu mô tả nhưng DB chưa có policy nào.
+- **Chặn đặt trùng giờ cùng một xe:** DB chưa có ràng buộc loại trừ (`EXCLUDE USING gist` trên `vehicle_id` và khoảng `pickup_time` đến `return_time`, chỉ tính đơn HOLD, CONFIRMED, HANDED_OVER). Không thuộc module tenant, nhưng nên có trước khi viết module booking, cần migration V7.
 - **Tạo, sửa, khóa nhân viên của nhà xe:** module account.
