@@ -230,6 +230,8 @@ public class AuthServiceImpl implements AuthService{
     if (tenant.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin Nhà xe !");
     Tenant tenantInfo = tenant.get();
 
+    if (!tenantInfo.isActive()) throw new AppException(ErrorCode.FORBIDDEN, "Nhà xe của bạn đang chọn đã bị khóa");
+
     Optional<Role> role = this.roleRepository.findRoleByUserIdAndTenantId(currentUserId, tenantUUID);
     if (role.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Người dùng chưa được phân quyền ở nhà xe này");
     Role roleInfo = role.get();
