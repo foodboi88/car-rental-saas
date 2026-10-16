@@ -25,7 +25,7 @@ import com.carrental.car_rental_backend.auth.dto.request.LoginRequestDTO;
 import com.carrental.car_rental_backend.auth.dto.request.RefreshTokenRequestDTO;
 import com.carrental.car_rental_backend.auth.dto.request.SelectTenantRequestDTO;
 import com.carrental.car_rental_backend.auth.dto.request.SwitchBranchRequestDTO;
-import com.carrental.car_rental_backend.auth.dto.response.AuthResponseDTO;
+import com.carrental.car_rental_backend.auth.dto.response.AuthServiceResult;
 import com.carrental.car_rental_backend.auth.dto.response.BranchSummaryDTO;
 import com.carrental.car_rental_backend.auth.dto.response.TenantSummaryDTO;
 import com.carrental.car_rental_backend.auth.dto.response.UserInfoResponseDTO;
@@ -62,7 +62,7 @@ public class AuthServiceImpl implements AuthService{
 
   @Override
   @Transactional
-  public AuthResponseDTO login(LoginRequestDTO request) {
+  public AuthServiceResult login(LoginRequestDTO request) {
     Optional<User> user = this.userRepository.findByEmail(request.getEmail());
     if (user.isEmpty() || !this.passwordEncoder.matches(request.getPassword(), user.get().getPasswordHash())) throw new AppException(ErrorCode.UNAUTHORIZED, "Sai tài khoản hoặc mật khẩu !");
     User userInfo = user.get();
@@ -75,7 +75,7 @@ public class AuthServiceImpl implements AuthService{
     if(Boolean.TRUE.equals(userInfo.getIsSuperAdmin())){
       String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), RoleConstant.SUPER_ADMIN, null, null, currentSessionId);
       String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId(), currentSessionId);
-      return AuthResponseDTO.builder()
+      return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(null)
@@ -120,7 +120,7 @@ public class AuthServiceImpl implements AuthService{
       List<BranchSummaryDTO> listBranchSummaryDTO = this.getBranchSummaryDTOListFromUserIdAndTenantId(userInfo.getId(), tenantInfo.getId(), roleInfo.getCode());
       List<String> listPermission = this.permissionRepository.findAllPermissionCodeByRoleId(roleInfo.getId());
 
-      return AuthResponseDTO.builder()
+      return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(listTenant)
@@ -144,7 +144,7 @@ public class AuthServiceImpl implements AuthService{
       String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), null, null, null, currentSessionId);
       String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId(), currentSessionId);
       List<TenantSummaryDTO> tenantSummaryDTOList = this.getTenantSummaryDTOListFromUserId(userInfo);
-      return AuthResponseDTO.builder()
+      return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(tenantSummaryDTOList) // Danh sách tenant cho user chọn
@@ -169,7 +169,7 @@ public class AuthServiceImpl implements AuthService{
   }
 
   @Override
-  public AuthResponseDTO selectTenant(UUID currentUserId, SelectTenantRequestDTO request) {
+  public AuthServiceResult selectTenant(UUID currentUserId, SelectTenantRequestDTO request) {
     Optional<User> user = this.userRepository.findById(currentUserId);
     if (user.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin User !");
     if(!user.get().getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
@@ -194,7 +194,7 @@ public class AuthServiceImpl implements AuthService{
     List<BranchSummaryDTO> listBranchSummaryDTO = this.getBranchSummaryDTOListFromUserIdAndTenantId(userInfo.getId(), request.getTenantId(), roleInfo.getCode());
 
     List<String> listPermission = this.permissionRepository.findAllPermissionCodeByRoleId(roleInfo.getId());
-    return AuthResponseDTO.builder()
+    return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(null) // Đã chọn tenant rồi thì không cần trả list tenant nữa. Lần sau thì call api list tenant
@@ -216,7 +216,7 @@ public class AuthServiceImpl implements AuthService{
   }
 
   @Override
-  public AuthResponseDTO switchBranch(UUID currentUserId, SwitchBranchRequestDTO request) {
+  public AuthServiceResult switchBranch(UUID currentUserId, SwitchBranchRequestDTO request) {
     Optional<User> user = this.userRepository.findById(currentUserId);
     if (user.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin User !");
     if(!user.get().getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
@@ -256,7 +256,7 @@ public class AuthServiceImpl implements AuthService{
     List<String> listPermission = this.permissionRepository.findAllPermissionCodeByRoleId(roleInfo.getId());
 
     List<BranchSummaryDTO> listBranchSummaryDTO = this.getBranchSummaryDTOListFromUserIdAndTenantId(currentUserId, tenantUUID, roleInfo.getCode());
-    return AuthResponseDTO.builder()
+    return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(null) // Đã chọn tenant rồi thì không cần trả list tenant nữa. Lần sau thì call api list tenant
@@ -279,10 +279,13 @@ public class AuthServiceImpl implements AuthService{
   }
 
   @Override
-  public AuthResponseDTO refreshToken(RefreshTokenRequestDTO request) {
-    if (!this.jwtProvider.validateToken(request.getRefreshToken())) throw new AppException(ErrorCode.BAD_REQUEST, "Refesh Token không hợp lệ !");
+  public AuthServiceResult refreshToken(String inputRefreshToken) {
+    if (!StringUtils.hasText(inputRefreshToken)) {
+      throw new AppException(ErrorCode.UNAUTHORIZED, "Không tìm thấy Refresh Token, vui lòng đăng nhập lại !");
+    }
+    if (!this.jwtProvider.validateToken(inputRefreshToken)) throw new AppException(ErrorCode.BAD_REQUEST, "Refesh Token không hợp lệ !");
 
-    Claims claims = this.jwtProvider.parseClaims(request.getRefreshToken());
+    Claims claims = this.jwtProvider.parseClaims(inputRefreshToken);
 
     String tokenType = claims.get(TokenType.CLAIM_TOKEN_TYPE, String.class);
     if (!TokenType.TOKEN_TYPE_REFRESH.equals(tokenType)) throw new AppException(ErrorCode.UNAUTHORIZED);
@@ -309,7 +312,7 @@ public class AuthServiceImpl implements AuthService{
     );
     List<TenantSummaryDTO> tenantSummaryDTOList = Boolean.TRUE.equals(userInfo.getIsSuperAdmin()) ? null : this.getTenantSummaryDTOListFromUserId(userInfo);
     String roleOfUser = Boolean.TRUE.equals(userInfo.getIsSuperAdmin()) ? RoleConstant.SUPER_ADMIN : null;
-    return AuthResponseDTO.builder()
+    return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(tenantSummaryDTOList) // Đã chọn tenant rồi thì không cần trả list tenant nữa. Lần sau thì call api list tenant

@@ -13,7 +13,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class AuthResponseDTO {
   private String accessToken;
-  private String refreshToken;
+  // private String refreshToken;
   private long expiresIn;
   private UserInfoResponseDTO user;
   private List<TenantSummaryDTO> availableTenants;
