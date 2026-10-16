@@ -4,6 +4,7 @@ import java.util.UUID;
 
 import com.carrental.car_rental_backend.branch.dto.BranchDTORequest.BranchDTORequestToCreate;
 
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -18,13 +19,17 @@ import lombok.NoArgsConstructor;
 // Nested Class (class lồng)
 public class BranchDTORequest {
 
+    //sử dụng để áp dụng validate
     public interface CreateGroup {}
     public interface UpdateGroup {}
 
     private UUID id;
     private String name;
-    private String code;
     private String phone;
+    private String keyword;
+    private Boolean isActive;
+    private Integer pageIndex = 0;
+    private Integer pageSize = 10;
 
     //sử dụng mô hình namespace
     // interface nội bộ
@@ -38,11 +43,10 @@ public class BranchDTORequest {
 
         @Pattern(groups = CreateGroup.class, regexp = "^0[35789]\\d{8}$", message = "Số điện thoại không đúng định dạng")
         private String phone;
-        private String code;
+
+        @Email
         private String email;
         private String address;
-        private String city;
-        private String district;
     }
 
     @Data 
@@ -52,11 +56,14 @@ public class BranchDTORequest {
 
         @Pattern(groups = UpdateGroup.class, regexp = "^0[35789]\\d{8}$", message = "Số điện thoại không đúng định dạng")
         private String phone;
-        
-        private String code;
+
+        @Email
         private String email;
         private String address;
-        private String city;
-        private String district;
+    }
+
+    @Data 
+    public static class BranchStatusUpdateRequest {
+        private Boolean isActive;
     }
 }

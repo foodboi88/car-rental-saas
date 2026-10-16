@@ -548,77 +548,111 @@ BƯỚC 4: CẤP JWT CÓ TENANT CONTEXT
 Sau khi xác định Tenant (tự động hoặc User chọn):
 → Backend tạo JWT chứa:
     {
-      "user_id": "uuid",
-      "tenant_id": "uuid",       // Tenant đã chọn
-      "branch_ids": ["id1"],     // Các Branch User được gán (nếu có)
-      "role": "TENANT_ADMIN",    // Role TRONG Tenant đã chọn
-      "exp": ...
+      "sub": "user-uuid",
+      "email": "user@example.vn",
+      "tenant_id": "tenant-uuid",       // Tenant đã chọn
+      "role": "TENANT_ADMIN",           // Role trong Tenant đã chọn
+      "active_branch_id": null          // Chưa chọn chi nhánh làm việc
     }
-→ Redirect vào dashboard của Tenant đó
+→ Trả về danh sách chi nhánh (assignedBranches) và permissions cho Frontend
 
-BƯỚC 5: SWITCH TENANT (không cần re-login)
-──────────────────────────────────
-Khi đang ở trong Tenant A, User muốn chuyển sang Tenant B:
-→ Click avatar → "Chuyển nhà xe" → Chọn Tenant B
-→ POST /auth/switch-tenant { tenant_id }
-→ Hệ thống kiểm tra User có quyền trong Tenant B không
-→ Cấp JWT mới với tenant_id = B, role = role trong Tenant B
-→ Redirect về dashboard của Tenant B
-→ Không cần nhập lại email/password
+BƯỚC 4: CHỌN / CHUYỂN ĐỔI CHI NHÁNH LÀM VIỆC (switch-branch)
+──────────────────────────────────────────────────────────
+→ User chọn chi nhánh làm việc: "Chi nhánh Quận 1"
+→ POST /api/v1/auth/switch-branch { "activeBranchId": "branch-uuid" }
+→ Kiểm tra:
+  * Chi nhánh có thuộc đúng tenant_id trong context không? (Chống IDOR)
+  * Chi nhánh có đang hoạt động (isActive) không?
+  * Nếu là TENANT_ADMIN: Có toàn quyền vào mọi chi nhánh active (bỏ qua bảng user_branches)
+  * Nếu là Nhân viên (STAFF/SALE): Bắt buộc phải có bản ghi phân công trong user_branches
+→ Cấp Access Token hoàn chỉnh mang active_branch_id:
+    {
+      "sub": "user-uuid",
+      "email": "user@example.vn",
+      "tenant_id": "tenant-uuid",
+      "role": "STAFF",
+      "active_branch_id": "branch-uuid" // Chi nhánh đang trực
+    }
+→ Chuyển hướng vào màn hình nghiệp vụ chính (Dashboard chi nhánh)
+
+BƯỚC 5: LÀM MỚI PHIÊN LÀM VIỆC (refresh-token)
+─────────────────────────────────────────────
+Khi Access Token hết hạn (15 phút):
+→ POST /api/v1/auth/refresh-token { "refreshToken": "..." }
+→ Kiểm tra tài khoản người dùng còn active không
+→ Trả về cặp Access Token và Refresh Token mới, kèm danh sách availableTenants mới nhất
 ```
 
-**Chi tiết API:**
+**Chi tiết Khế ước API Thực tế (Backend REST APIs):**
 
-| Endpoint | Mô tả |
-|----------|-------|
-| `POST /auth/login` | Xác thực email+password, trả về danh sách Tenant (nếu > 1) hoặc JWT (nếu = 1) |
-| `POST /auth/select-tenant` | User chọn Tenant từ picker → nhận JWT với tenant context |
-| `POST /auth/switch-tenant` | Đổi Tenant khi đang đăng nhập → JWT mới |
-| `GET /auth/me/tenants` | Lấy danh sách Tenant hiện tại User có thể truy cập |
+| Endpoint | Method | Header | Body | Mô tả chức năng |
+| :--- | :---: | :--- | :--- | :--- |
+| `/api/v1/auth/login` | `POST` | Public | `LoginRequestDTO` (`email`, `password`) | Xác thực tài khoản. Phân 3 luồng: Super Admin, 1 Tenant (vào thẳng), >1 Tenant (chọn nhà xe). |
+| `/api/v1/auth/select-tenant` | `POST` | `Bearer <token>` | `SelectTenantRequestDTO` (`tenantId`) | Chọn nhà xe làm việc $\rightarrow$ Cấp token mang `tenant_id` và danh sách chi nhánh tương ứng. |
+| `/api/v1/auth/switch-branch` | `POST` | `Bearer <token>` | `SwitchBranchRequestDTO` (`activeBranchId`) | Chọn/Đổi chi nhánh làm việc $\rightarrow$ Cấp token đầy đủ mang `active_branch_id`. |
+| `/api/v1/auth/refresh-token` | `POST` | Public | `RefreshTokenRequestDTO` (`refreshToken`) | Làm mới token khi Access Token hết hạn, lấy lại thông tin phân quyền mới nhất. |
 
-**Response `POST /auth/login` khi User có nhiều Tenant:**
+**Cấu trúc Response `AuthResponseDTO` Thực tế:**
+
 ```json
 {
-  "requires_tenant_selection": true,
-  "tenants": [
-    {
-      "tenant_id": "uuid-a",
-      "name": "RentCar VN",
-      "role": "TENANT_ADMIN"
-    },
-    {
-      "tenant_id": "uuid-b",
-      "name": "Xe Điện Sài Gòn",
-      "role": "STAFF"
+  "success": true,
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsIn...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsIn...",
+    "expiresIn": 900,
+    "availableTenants": [
+      {
+        "tenantId": "e41492d0-67ee-4699-b311-fee98cb37781",
+        "tenantName": "RentCar Hà Nội",
+        "domain": "hanoi.carrental.local",
+        "role": "STAFF",
+        "isActive": true
+      }
+    ],
+    "user": {
+      "id": "4aec2a36-fa3b-4b26-a0d9-f0b063971d9a",
+      "email": "lan.staff@rentcarhanoi.vn",
+      "fullname": "Trần Thị Lan",
+      "phone": "09241419610",
+      "tenantId": "e41492d0-67ee-4699-b311-fee98cb37781",
+      "tenantName": "RentCar Hà Nội",
+      "roleCode": "STAFF",
+      "activeBranchId": "33b5b9fe-c6bc-42fa-978e-8e0ea092dc6a",
+      "permissions": ["booking:read", "booking:create", "vehicle:read"],
+      "assignedBranches": [
+        {
+          "branchId": "33b5b9fe-c6bc-42fa-978e-8e0ea092dc6a",
+          "branchName": "Central Hà Nội",
+          "address": "1 Đường 1 - Central Hà Nội"
+        }
+      ]
     }
-  ]
-}
-```
-
-**Response `POST /auth/login` khi User có 1 Tenant (tự động chọn):**
-```json
-{
-  "requires_tenant_selection": false,
-  "access_token": "eyJhbGciOiJI...",
-  "tenant": {
-    "id": "uuid-a",
-    "name": "RentCar VN"
   },
-  "user": {
-    "role": "TENANT_ADMIN"
-  }
+  "message": "Chọn chi nhánh thành công !",
+  "timestamp": "2026-10-05T10:15:00Z"
 }
 ```
 
 ---
 
-## 8. Hiểu đơn giản
+## 8. Cơ Chế Cô Lập Dữ Liệu Ở Tầng Mã Nguồn (Thread Context Isolation)
 
-| | Giải thích bằng bất động sản |
-|---|---|
-| **Multi-tenant** | "Nhà xây như thế nào?" - 1 tòa nhà có nhiều căn hộ, mỗi căn 1 gia đình |
-| **Multi-branch** | "Người thuê sắp xếp nội thất ra sao?" - Mỗi gia đình tự trang trí theo ý thích |
+Để đảm bảo data giữa các Tenant và Branch không bao giờ bị rò rỉ:
+1. **`JwtAuthenticationFilter`:** Với mỗi HTTP Request gửi đến, Filter bóc tách các claims trong JWT:
+   - Trích xuất `tenant_id` $\rightarrow$ nạp vào `TenantContext.setTenantId(tenantUUID)`
+   - Trích xuất `active_branch_id` $\rightarrow$ nạp vào `TenantContext.setBranchId(branchUUID)`
+   - Trích xuất `role` $\rightarrow$ nạp vào `TenantContext.setRole(role)`
+2. **`TenantContext` (ThreadLocal):** Đóng vai trò là biến ngữ cảnh xuyên suốt Thread xử lý của request đó, cho phép các Repository và Service tự động lấy `tenant_id` mà không cần truyền tham số thủ công.
+3. **Dọn dẹp bắt buộc (`TenantContext.clear()`):** Đặt trong khối `finally` của Filter để ngăn ngừa ô nhiễm dữ liệu giữa các luồng tái sử dụng của Tomcat Thread Pool.
 
-**Tóm lại:**
-- **Multi-tenant Architecture** = Cách xây dựng (kỹ thuật)
-- **Multi-branch Business Model** = Cách tổ chức (kinh doanh)
+---
+
+## 9. Hiểu Đơn Giản Bản Chất
+
+| Khái niệm | Mô hình so sánh | Ý nghĩa kỹ thuật |
+| :--- | :--- | :--- |
+| **Multi-tenant** | *"Một tòa nhà chung cư có nhiều căn hộ"* | Cách xây dựng hạ tầng phần mềm: 1 server, 1 DB chung, dữ liệu độc lập ngăn nắp theo từng phòng. |
+| **Multi-branch** | *"Mỗi gia đình tự phân chia phòng khách, phòng ngủ"* | Mô hình nghiệp vụ kinh doanh: Từng công ty tự chia mạng lưới chi nhánh, tự gán nhân sự trực thuộc. |
+| **Context Switch** | *"Rút chìa khóa phòng này để mở cửa phòng khác"* | Cơ chế cấp JWT mới: Khi chuyển nhà xe hoặc chuyển chi nhánh, token được nâng cấp claims tương ứng. |
+

@@ -13,24 +13,44 @@ import org.springframework.stereotype.Repository;
 
 import com.carrental.car_rental_backend.branch.dto.BranchDTOResponse;
 import com.carrental.car_rental_backend.branch.entity.Branch;
-
-@Repository
+@Repository 
 public interface BranchRepository extends JpaRepository<Branch, UUID> {
+  @Query(value = """
+    SELECT branches.* FROM branches
+    INNER JOIN user_branches ON branches.id = user_branches.branch_id
+    WHERE user_branches.user_id = :userId and user_branches.tenant_id = :tenantId
+  """, nativeQuery = true)
+  List<Branch> findAllAssignedBranchesByUserIdTenantId(@Param("userId") UUID userId, @Param("tenantId") UUID tenantId);
+  List<Branch> findByTenantId(UUID tenantId);
 
-    //Lấy ra branch từ trong danh sách
-    //các điều kiện tìm kiếm theo tên, mã và số điện thoại chi nhánh
-    //sử dụng toán tử AND để có thể tìm kiếm kết hợp các điều kiện
-    //(CAST(:[<tên biến> AS <kiểu dữ liệu>) ép kiểu
-    @Query("SELECT branch FROM Branch branch WHERE " + 
-        "(CAST(:name AS String) IS NULL OR LOWER(branch.name) LIKE LOWER (CONCAT('%', CAST(:name AS String), '%'))) AND " +
-        "(CAST(:code AS String) IS NULL OR LOWER(branch.code) LIKE LOWER (CONCAT('%', CAST(:code AS String), '%'))) AND " +
-        "(CAST(:phone AS String) IS NULL OR LOWER(branch.phone) LIKE LOWER (CONCAT('%', CAST(:phone AS String), '%')))"
-    )
-    Page<Branch> searchBranch(@Param("name") String name,
-        @Param("code") String code,
-        @Param("phone") String phone,
-        Pageable pageable
-    );
+  // kiểm tra trùng lặp tên chi nhánh
+  boolean existsByTenantIdAndName(UUID tenantId, String name);
 
-    Optional<Branch> findById(UUID id);
+  //kiểm tra trùng tên khi update
+  boolean existsByTenantIdAndNameAndIdNot(UUID tenantId, String name, UUID id);
+
+  //tìm kiếm tránh lỗi bảo mật
+  Optional<Branch> findByIdAndTenantId(UUID id, UUID tenantId);
+
+  //lấy danh sách active
+  List<Branch> findByTenantIdAndIsActiveTrueOrderByNameAsc(UUID tenantId);
+
+  // tìm kiếm branch
+  @Query("""
+    SELECT b FROM Branch b 
+    WHERE b.tenantId = :tenantId
+      AND (:isActive IS NULL OR b.isActive = :isActive)
+      AND (
+          :keyword IS NULL OR :keyword = '' 
+          OR LOWER(b.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR LOWER(b.address) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR b.phone LIKE CONCAT('%', :keyword, '%')
+      )
+    ORDER BY b.createdAt DESC""")
+  Page<Branch> searchBranch(
+    @Param ("tenantId") UUID tenantId,
+    @Param ("keyword") String keyword,
+    @Param ("isActive") Boolean isActive,
+    Pageable pageable
+  );
 }

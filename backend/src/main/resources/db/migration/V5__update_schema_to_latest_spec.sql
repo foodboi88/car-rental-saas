@@ -184,8 +184,13 @@ DECLARE
     canonical_id UUID;
 BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'vehicle_types' AND column_name = 'tenant_id') THEN
-        FOR rec IN (SELECT name, MIN(id) as first_id FROM vehicle_types GROUP BY name HAVING COUNT(*) > 1) LOOP
-            canonical_id := rec.first_id;
+        FOR rec IN (
+            SELECT name 
+            FROM vehicle_types 
+            GROUP BY name 
+            HAVING COUNT(*) > 1
+        ) LOOP
+            SELECT id INTO canonical_id FROM vehicle_types WHERE name = rec.name ORDER BY created_at ASC, id ASC LIMIT 1;
             UPDATE vehicles SET vehicle_type_id = canonical_id WHERE vehicle_type_id IN (SELECT id FROM vehicle_types WHERE name = rec.name AND id != canonical_id);
             DELETE FROM vehicle_types WHERE name = rec.name AND id != canonical_id;
         END LOOP;
@@ -246,8 +251,8 @@ BEGIN
         ALTER TABLE bookings ADD COLUMN temp_return_time TIMESTAMPTZ;
 
         UPDATE bookings 
-        SET temp_pickup_time = (pickup_date + pickup_time)::timestamptz,
-            temp_return_time = (return_date + return_time)::timestamptz;
+        SET temp_pickup_time = (pickup_date + COALESCE(pickup_time, '00:00:00'::time))::timestamptz,
+            temp_return_time = (return_date + COALESCE(return_time, '23:59:59'::time))::timestamptz;
 
         ALTER TABLE bookings DROP COLUMN pickup_time;
         ALTER TABLE bookings DROP COLUMN return_time;
