@@ -9,6 +9,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.util.StringUtils;
 
 import com.carrental.car_rental_backend.account.entity.User;
 
@@ -72,7 +73,7 @@ public class UserPrincipal implements UserDetails{
       }
     }
 
-    if(roleCode != null && !roleCode.isBlank()){
+    if(roleCode != null && StringUtils.hasText(roleCode)){
       formatedListPermission.add(new SimpleGrantedAuthority("ROLE_" + roleCode));
     }
 

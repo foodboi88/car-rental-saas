@@ -72,4 +72,13 @@ public class AuthController {
       ApiResponse.success(response, "Làm mới token thành công !")
     );
   }
+
+  @PostMapping("/logout")
+  public ResponseEntity<ApiResponse<String>> logout() {
+    this.authService.logout();
+
+    return ResponseEntity.ok(
+      ApiResponse.success("Đã đăng xuất hệ thống !")
+    );
+  }
 }

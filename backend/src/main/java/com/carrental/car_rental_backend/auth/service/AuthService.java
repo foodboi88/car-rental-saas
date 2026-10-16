@@ -15,4 +15,5 @@ public interface AuthService {
   public AuthResponseDTO switchBranch(UUID currentUserId, SwitchBranchRequestDTO request);
   public AuthResponseDTO refreshToken(RefreshTokenRequestDTO request);
   public UserInfoResponseDTO getMe();
+  public void logout();
 }

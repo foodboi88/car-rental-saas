@@ -9,6 +9,7 @@ import javax.crypto.SecretKey;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import com.carrental.car_rental_backend.common.constant.ClaimKey;
 import com.carrental.car_rental_backend.common.constant.TokenType;
 import com.carrental.car_rental_backend.common.exception.AppException;
 import com.carrental.car_rental_backend.common.exception.ErrorCode;
@@ -39,37 +40,39 @@ public class JwtProvider {
     this.refreshTokenExpirationMs = refreshTokenExpirationMs;
   }
 
-  public String generateAccessToken(UUID userId, String email, String roleCode, UUID tenantId, UUID activeBranchId) {
+  public String generateAccessToken(UUID userId, String email, String roleCode, UUID tenantId, UUID activeBranchId, UUID currentSessionId) {
     Date now = new Date();
     Date expiryDate = new Date(now.getTime() + accessTokenExpirationMs);
     
     var builder = Jwts.builder()
       .subject(userId.toString())
       .claim(TokenType.CLAIM_TOKEN_TYPE, TokenType.TOKEN_TYPE_ACCESS)
-      .claim("email", email)
-      .claim("role", roleCode)
+      .claim(ClaimKey.EMAIL, email)
+      .claim(ClaimKey.ROLE, roleCode)
+      .claim(ClaimKey.CURRENT_SESSION_ID, currentSessionId)
       .issuedAt(now)
       .expiration(expiryDate)
       .signWith(key);
       
     if (tenantId != null) {
-      builder.claim("tenant_id", tenantId.toString());
+      builder.claim(ClaimKey.TENANT_ID, tenantId.toString());
     }
 
     if(activeBranchId != null) {
-      builder.claim("active_branch_id", activeBranchId.toString());
+      builder.claim(ClaimKey.ACTIVE_BRANCH_ID, activeBranchId.toString());
     }
 
     return builder.compact();
   }
 
-  public String generateRefreshToken(UUID userId) {
+  public String generateRefreshToken(UUID userId, UUID currentSessionId) {
     Date now = new Date();
     Date expiryDate = new Date(now.getTime() + this.refreshTokenExpirationMs);
 
     return Jwts.builder()
       .subject(userId.toString())
       .claim(TokenType.CLAIM_TOKEN_TYPE, TokenType.TOKEN_TYPE_REFRESH)
+      .claim(ClaimKey.CURRENT_SESSION_ID, currentSessionId)
       .issuedAt(now)
       .expiration(expiryDate)
       .signWith(key)
