@@ -106,9 +106,9 @@ class TenantServiceImplTest {
     return Role.builder().id(ADMIN_ROLE_ID).tenantId(TENANT_ID).code("TENANT_ADMIN").build();
   }
 
-  // tenantRepository.saveAndFlush trả về chính tenant được lưu, kèm id
+  // tenantRepository.save trả về chính tenant được lưu, kèm id
   private void stubTenantSaving() {
-    when(tenantRepository.saveAndFlush(any(Tenant.class))).thenAnswer(invocation -> {
+    when(tenantRepository.save(any(Tenant.class))).thenAnswer(invocation -> {
       Tenant tenant = invocation.getArgument(0);
       tenant.setId(TENANT_ID);
       return tenant;
@@ -159,7 +159,7 @@ class TenantServiceImplTest {
     this.createTenantWithNewAccount();
 
     ArgumentCaptor<Tenant> captor = ArgumentCaptor.forClass(Tenant.class);
-    verify(tenantRepository).saveAndFlush(captor.capture());
+    verify(tenantRepository).save(captor.capture());
     Tenant saved = captor.getValue();
     assertThat(saved.getDomain()).isEqualTo("probe-car");
     assertThat(saved.getName()).isEqualTo("Probe Car");
@@ -286,7 +286,7 @@ class TenantServiceImplTest {
 
     assertAppException(() -> tenantService.createTenant(request, ACTOR_ID), ErrorCode.TENANT_DOMAIN_ALREADY_EXISTS);
 
-    verify(tenantRepository, never()).saveAndFlush(any(Tenant.class));
+    verify(tenantRepository, never()).save(any(Tenant.class));
   }
 
   @Test
@@ -295,7 +295,7 @@ class TenantServiceImplTest {
 
     assertAppException(() -> tenantService.createTenant(request, ACTOR_ID), ErrorCode.BAD_REQUEST);
 
-    verify(tenantRepository, never()).saveAndFlush(any(Tenant.class));
+    verify(tenantRepository, never()).save(any(Tenant.class));
   }
 
   @Test
@@ -304,7 +304,7 @@ class TenantServiceImplTest {
 
     assertAppException(() -> tenantService.createTenant(request, ACTOR_ID), ErrorCode.BAD_REQUEST);
 
-    verify(tenantRepository, never()).saveAndFlush(any(Tenant.class));
+    verify(tenantRepository, never()).save(any(Tenant.class));
   }
 
   @Test
@@ -355,7 +355,7 @@ class TenantServiceImplTest {
 
     assertAppException(() -> tenantService.createTenant(request, ACTOR_ID), ErrorCode.BAD_REQUEST);
 
-    verify(tenantRepository, never()).saveAndFlush(any(Tenant.class));
+    verify(tenantRepository, never()).save(any(Tenant.class));
     verify(userRepository, never()).save(any(User.class));
   }
 

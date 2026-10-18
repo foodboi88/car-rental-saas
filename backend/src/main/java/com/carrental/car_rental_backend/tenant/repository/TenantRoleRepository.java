@@ -13,7 +13,7 @@ import com.carrental.car_rental_backend.account.entity.Role;
 
 public interface TenantRoleRepository extends JpaRepository<Role, UUID> {
 
-  @Modifying(flushAutomatically = true)
+  @Modifying
   @Query(value = """
     INSERT INTO roles (tenant_id, name, code, description, is_system_default)
     VALUES (:tenantId, :name, :code, :description, TRUE)
@@ -25,7 +25,7 @@ public interface TenantRoleRepository extends JpaRepository<Role, UUID> {
     @Param("description") String description
   );
 
-  @Modifying(flushAutomatically = true)
+  @Modifying
   @Query(value = """
     INSERT INTO role_permissions (role_id, permission_id)
     SELECT r.id, p.id
@@ -38,7 +38,7 @@ public interface TenantRoleRepository extends JpaRepository<Role, UUID> {
     @Param("roleCode") String roleCode
   );
 
-  @Modifying(flushAutomatically = true)
+  @Modifying
   @Query(value = """
     INSERT INTO role_permissions (role_id, permission_id)
     SELECT r.id, p.id

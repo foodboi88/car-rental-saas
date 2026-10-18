@@ -77,8 +77,7 @@ public class TenantServiceImpl implements TenantService {
     String settings = this.normalizeSettings(request.getSettings());
     // Kiểm tra hết các chủ nhà xe TRƯỚC khi ghi bất cứ thứ gì
     List<PreparedAdmin> admins = this.prepareAdmins(request.getAdmins());
-
-    Tenant tenant = this.tenantRepository.saveAndFlush(
+    Tenant tenant = this.tenantRepository.save(
       Tenant.builder()
         .name(request.getName().trim())
         .domain(domain)
@@ -101,8 +100,11 @@ public class TenantServiceImpl implements TenantService {
     );
 
     this.createDefaultRoles(tenant.getId());
-    Role adminRole = this.tenantRoleRepository.findByTenantIdAndCode(tenant.getId(), RoleConstant.TENANT_ADMIN)
-      .orElseThrow(() -> new AppException(ErrorCode.INTERNAL_SERVER_ERROR, "Không tìm thấy nhóm quyền chủ nhà xe vừa tạo !"));
+    Optional<Role> adminRoleResult = this.tenantRoleRepository.findByTenantIdAndCode(tenant.getId(), RoleConstant.TENANT_ADMIN);
+    if (adminRoleResult.isEmpty()) {
+      throw new AppException(ErrorCode.INTERNAL_SERVER_ERROR, "Không tìm thấy nhóm quyền chủ nhà xe vừa tạo !");
+    }
+    Role adminRole = adminRoleResult.get();
 
     List<CreateTenantResponseDTO.AdminResult> adminResults = new ArrayList<>();
     for (PreparedAdmin admin : admins) {
@@ -129,6 +131,7 @@ public class TenantServiceImpl implements TenantService {
     String keywordPattern = (keyword == null || keyword.isBlank())
       ? "%"
       : "%" + keyword.trim().toLowerCase(Locale.ROOT) + "%";
+    // map: đổi từng Tenant trong trang kết quả thành TenantResponseDTO
     return this.tenantRepository.search(keywordPattern, isActive, pageable).map(this::toTenantResponse);
   }
 
@@ -175,6 +178,7 @@ public class TenantServiceImpl implements TenantService {
       return this.toTenantResponse(tenant);
     }
     tenant.setActive(isActive);
+    // saveAndFlush: lưu rồi ghi xuống DB ngay, để updatedAt trả về là giờ mới
     Tenant saved = this.tenantRepository.saveAndFlush(tenant);
     log.info("Người dùng {} {} nhà xe {} (id = {})", actorId, isActive ? "mở khóa" : "khóa", saved.getName(), saved.getId());
     return this.toTenantResponse(saved);
@@ -192,8 +196,11 @@ public class TenantServiceImpl implements TenantService {
     if (!tenant.isActive()) {
       throw new AppException(ErrorCode.BAD_REQUEST, "Nhà xe đang bị khóa, không thể thêm chủ nhà xe !");
     }
-    Role adminRole = this.tenantRoleRepository.findByTenantIdAndCode(tenantId, RoleConstant.TENANT_ADMIN)
-      .orElseThrow(() -> new AppException(ErrorCode.INTERNAL_SERVER_ERROR, "Nhà xe chưa có nhóm quyền chủ nhà xe !"));
+    Optional<Role> adminRoleResult = this.tenantRoleRepository.findByTenantIdAndCode(tenantId, RoleConstant.TENANT_ADMIN);
+    if (adminRoleResult.isEmpty()) {
+      throw new AppException(ErrorCode.INTERNAL_SERVER_ERROR, "Nhà xe chưa có nhóm quyền chủ nhà xe !");
+    }
+    Role adminRole = adminRoleResult.get();
 
     PreparedAdmin admin = this.prepareAdmin(request, new HashSet<>());
     CreateTenantResponseDTO.AdminResult result = this.assignTenantAdmin(tenantId, adminRole.getId(), admin);
@@ -205,10 +212,12 @@ public class TenantServiceImpl implements TenantService {
   @Transactional(readOnly = true)
   public List<TenantAdminResponseDTO> listTenantAdmins(UUID tenantId) {
     this.findTenantOrThrow(tenantId);
-    return this.tenantAdminQueryRepository.findMembersByTenantIdAndRoleCode(tenantId, RoleConstant.TENANT_ADMIN)
-      .stream()
-      .map(this::toTenantAdminResponse)
-      .toList();
+    List<Object[]> rows = this.tenantAdminQueryRepository.findMembersByTenantIdAndRoleCode(tenantId, RoleConstant.TENANT_ADMIN);
+    List<TenantAdminResponseDTO> result = new ArrayList<>();
+    for (Object[] row : rows) {
+      result.add(this.toTenantAdminResponse(row));
+    }
+    return result;
   }
 
   // Tạo 3 nhóm quyền mặc định cho nhà xe mới, kèm quyền của từng nhóm
@@ -335,8 +344,11 @@ public class TenantServiceImpl implements TenantService {
   }
 
   private Tenant findTenantOrThrow(UUID tenantId) {
-    return this.tenantRepository.findById(tenantId)
-      .orElseThrow(() -> new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy nhà xe !"));
+    Optional<Tenant> tenant = this.tenantRepository.findById(tenantId);
+    if (tenant.isEmpty()) {
+      throw new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy nhà xe !");
+    }
+    return tenant.get();
   }
 
   // Mỗi dòng truy vấn là mảng [User, UserTenant]
