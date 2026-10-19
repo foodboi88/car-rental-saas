@@ -348,41 +348,20 @@ Tất cả giao diện của hệ thống được tối ưu hóa cho **Mobile W
         *   **Tab 2: Loại xe & Giá sàn (Vehicle Types):** Danh sách Card phân khúc xe (Sedan 4 chỗ, SUV 7 chỗ...), mô tả và **Giá thuê cơ bản/ngày (`1,200,000 VNĐ`)**.
     *   *FAB Button (`+`) nổi tự động chuyển ngữ cảnh:* Ở Tab 1 bấm `+` mở Form Thêm chiếc xe mới (3 khung); ở Tab 2 bấm `+` mở Form Tạo loại xe mới.
 *   **Prompt mẫu cho AI:**
-    > *"Design a mobile-first, responsive web interface for 'Fleet Management' of a SaaS car rental platform. Top app bar features a hamburger menu, title 'Quản lý fleet', and user avatar. Sub-header displays vehicle quota 'Xe (12/15)' and package badge. Provide two tabs: 'Vehicles' and 'Vehicle Types'. Under 'Vehicles' tab, display search bar, status filter chips (Available, Rented, Maintenance), branch filter dropdown, and a list of vehicle cards (photo thumbnail, license plate badge, model, branch, odo, fuel, action menu button). Include a bottom sheet for 'Quick Odo & Maintenance Update'. Under 'Vehicle Types' tab, list categories with daily rental rates. Place a floating action button '+' th3. **Chi tiết Quy trình Đăng nhập & Phân ngữ cảnh (Single Active Branch Context)**:
-   * **Nếu `is_super_admin == true`**:
-     * Cấp Access JWT (15 phút) với claims: `tenant_id = null`, `role = SUPER_ADMIN`, `active_branch_id = null`.
-     * Cấp Refresh JWT (7 ngày) trong HTTP-only Cookie `refresh_token`.
-     * Trả về `LoginResponse` kèm `requiresTenantSelection = false`.
-   * **Nếu `is_super_admin == false`**: Query bảng `user_tenants` lấy danh sách Tenant đang hoạt động của người dùng.
-     * *Trường hợp 0 Tenant*: Ném lỗi `AccessDeniedException` (Người dùng chưa được gắn vào nhà xe nào).
-     * *Trường hợp 1 Tenant*: Tự động chọn Tenant đó. Lấy role trong `user_tenants`, danh sách `assignedBranches` và chọn `defaultBranchId` (Chi nhánh mặc định/đầu tiên). Cấp Access JWT (`tenant_id`, `role`, `active_branch_id`) + Refresh JWT. Trả về `requiresTenantSelection = false`, kèm `activeBranchId` và `assignedBranches`.
-     * *Trường hợp 2+ Tenant*: Trả về `LoginResponse` chứa `requiresTenantSelection = true`, kèm `preAuthToken` (Hạn 5 phút, scope `PRE_AUTH`) và danh sách `tenants` (gồm `tenantId`, `tenantName`, `role`). Đợi người dùng chọn Tenant.
+    > *"Design a mobile-first, responsive web interface for 'Fleet Management' of a SaaS car rental platform. Top app bar features a hamburger menu, title 'Quản lý fleet', and user avatar. Sub-header displays vehicle quota 'Xe (12/15)' and package badge. Provide two tabs: 'Vehicles' and 'Vehicle Types'. Under 'Vehicles' tab, display search bar, status filter chips (Available, Rented, Maintenance), branch filter dropdown, and a list of vehicle cards (photo thumbnail, license plate badge, model, branch, odo, fuel, action menu button). Include a bottom sheet for 'Quick Odo & Maintenance Update'. Under 'Vehicle Types' tab, list categories with daily rental rates. Place a floating action button '+' that dynamically changes context: adding a vehicle under Vehicles tab, or creating a vehicle type under Vehicle Types tab. Sleek modern Tailwind CSS, mobile touch-friendly."*
+#### MÀN HÌNH 5: Quản Lý Chi Nhánh & Bãi Xe (Branch Management - Mobile-First)
+*   **Mô tả:** Màn hình quản lý danh sách chi nhánh, điểm giao nhận và văn phòng của nhà xe.
+    *   *App Header:* Nút Hamburger `☰` mở Sidebar Menu, Tiêu đề **Quản lý chi nhánh**, Avatar cá nhân. Sub-header hiển thị Quota `Chi nhánh (2/3)` kèm Badge `Gói Growth`.
+    *   *Khu vực Danh sách & Bộ lọc:* Ô tìm kiếm tên, mã, SĐT chi nhánh; Filter Chips trạng thái (`Tất cả`, `🟢 Hoạt động`, `🔴 Tạm ngưng`).
+    *   *Danh sách Branch Cards:* Thẻ card bo góc hiển thị Mã chi nhánh, Tên, SĐT, Địa chỉ chi tiết, Giờ hoạt động, Số lượng xe đang đỗ (`12 Xe`). Nút `⋮` mở Action Sheet (Xem chi tiết 2 tabs, Chỉnh sửa, Tạm ngưng/Kích hoạt, Xóa chi nhánh).
+    *   *FAB Button (`+`):* Nút nổi ở góc phải dưới mở Form Thêm chi nhánh mới (Slide-up modal gồm 3 khung: Thông tin cơ bản, Địa chỉ hành chính, Thời gian hoạt động).
+*   **Prompt mẫu cho AI:**
+    > *"Create a mobile-first, responsive web page for 'Branch Management' of a SaaS car rental platform. Top bar has a hamburger menu, screen title 'Quản lý chi nhánh', and user profile avatar. Sub-header displays quota badge 'Chi nhánh (2/3) - Gói Growth'. Include a search input and horizontal filter chips for status (All, Active, Suspended). Display a list of branch cards showing branch code badge, branch name, address, phone number, operating hours, and vehicle count badge. Each card has a three-dot action menu triggering a bottom action sheet. Place a prominent floating action button '+' at the bottom right to trigger a slide-up modal for creating a new branch with a clean 3-section layout. Modern mobile UX, crisp typography."*
 
-4. **Chọn Tenant (`POST /api/v1/auth/select-tenant`)**:
-   * Header: `Authorization: Bearer <preAuthToken>`
-   * Request Body: `{ "tenantId": "uuid-tenant-selected" }`
-   * Backend xác minh user thực sự thuộc `tenantId` yêu cầu trong `user_tenants`.
-   * Lấy role & danh sách `assignedBranches`, đặt `activeBranchId = defaultBranchId`. Cấp Access JWT chính thức (`tenant_id`, `role`, `active_branch_id`) và Refresh Token (Cookie).
-
-5. **Đổi Chi Nhánh Làm Việc (`POST /api/v1/auth/switch-branch`)**:
-   * Header: `Authorization: Bearer <accessToken>`
-   * Request Body: `{ "branchId": "uuid-branch-selected" }`
-   * Backend xác minh `branchId` thuộc danh sách chi nhánh được gán (`user_branches`) của User tại Tenant hiện tại. Nếu hợp lệ, tái cấp (Re-issue) **Access JWT mới** chứa `active_branch_id = branchId`.
-
-#### D. Cấu trúc Token & TenantContext
-* **Access JWT Payload (15 phút)**:
-  ```json
-  {
-    "sub": "user-uuid",
-    "email": "user@example.com",
-    "role": "TENANT_ADMIN | STAFF | SALE | SUPER_ADMIN",
-    "tenant_id": "tenant-uuid-or-null",
-    "active_branch_id": "branch-uuid-or-null"
-  }
-  ```
-* **Refresh JWT (7 ngày)**: Lưu trong Cookie `HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth/refresh`.
-* **TenantContext Layer**: `JwtAuthenticationFilter` giải mã token trên mỗi request, nạp `tenant_id`, `active_branch_id` (`CURRENT_BRANCH`) và `role` vào `TenantContext` (ThreadLocal), sau đó gọi `SET LOCAL app.current_tenant = '...'` trên Postgres để kích hoạt RLS. Dọn dẹp `TenantContext.clear()` trong khối `finally`.xám chuyển động nhẹ) thay vì vòng xoay spinner truyền thống để tăng trải nghiệm mượt mà.
+### 7.3 Quy chuẩn Trạng thái & Phản hồi (States & Feedback)
+*   **Hiệu ứng tải (Skeleton Loading):** Khi dữ liệu đang tải, hiển thị Skeleton Shimmer (vệt sáng xám chuyển động nhẹ) thay vì vòng xoay spinner truyền thống để tăng trải nghiệm mượt mà.
 *   **Phản hồi lỗi (Error Validation State):** Cảnh báo lỗi nhập liệu bằng màu đỏ (`Destructive Red` - `#EF4444`) kèm text mô tả chi tiết ngay dưới trường thông tin bị lỗi.
+*   **Trạng thái rỗng (Empty States):** Khi danh sách tìm kiếm không có kết quả, hiển thị icon minh họa cùng thông điệp hướng dẫn rõ ràng và nút bấm kêu gọi hành động (Call-to-Action).
 
 ---
 
@@ -422,46 +401,66 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 * `STAFF` (Role ID = 2): Nhân viên nghiệp vụ.
 * `SALE` (Role ID = 3): Cộng tác viên kinh doanh.
 
-#### C. Luồng xử lý Đăng nhập & Tenant Selection (`AuthService`)
+#### C. Luồng xử lý Đăng nhập & Phân cấp Ngữ cảnh (`AuthService`)
 1. **Đăng nhập tập trung (`POST /api/v1/auth/login`)**:
    * Request Body: `{ "email": "user@example.com", "password": "Password123!" }`
-   * Backend kiểm tra Email -> nếu không tìm thấy, ném lỗi `BadCredentialsException`.
-   * Kiểm tra Password bằng `BCryptPasswordEncoder` -> nếu sai, ném lỗi `BadCredentialsException`.
-   * Kiểm tra cờ `is_active` -> nếu false, ném lỗi `DisabledException`.
-2. **Chi tiết Quy trình Đăng nhập & Phân ngữ cảnh (Single Active Branch Context)**:
+   * Backend kiểm tra Email & Mật khẩu bằng `BCryptPasswordEncoder` (sai ném `401 UNAUTHORIZED`, *"Sai tài khoản hoặc mật khẩu !"*).
+   * Kiểm tra cờ `is_active` của User (nếu false ném `401 UNAUTHORIZED`, *"Tài khoản của bạn đã bị khóa !"*).
+   * **Cơ chế trả Token**: Hệ thống trả cả `accessToken` và `refreshToken` trực tiếp trong Response Body (`AuthResponseDTO`), không sử dụng Cookie.
+2. **Quy trình Phân cấp Ngữ cảnh theo Vai trò**:
    * **Nếu `is_super_admin == true`**:
-     * Cấp Access JWT (15 phút) với claims: `tenant_id = null`, `role = SUPER_ADMIN`, `active_branch_id = null`.
-     * Cấp Refresh JWT (7 ngày) trong HTTP-only Cookie `refresh_token`.
-     * Trả về `LoginResponse` kèm `requiresTenantSelection = false`.
-   * **Nếu `is_super_admin == false`**: Query bảng `user_tenants` lấy danh sách Tenant đang hoạt động của người dùng.
-     * *Trường hợp 0 Tenant*: Ném lỗi `AccessDeniedException` (Người dùng chưa được gắn vào nhà xe nào).
-     * *Trường hợp 1 Tenant*: Tự động chọn Tenant đó. Lấy role trong `user_tenants`, danh sách `assignedBranches` và chọn `defaultBranchId` (Chi nhánh mặc định/đầu tiên). Cấp Access JWT (`tenant_id`, `role`, `active_branch_id`) + Refresh JWT. Trả về `requiresTenantSelection = false`, kèm `activeBranchId` và `assignedBranches`.
-     * *Trường hợp 2+ Tenant*: Trả về `LoginResponse` chứa `requiresTenantSelection = true`, kèm `preAuthToken` (Hạn 5 phút, scope `PRE_AUTH`) và danh sách `tenants` (gồm `tenantId`, `tenantName`, `role`). Đợi người dùng chọn Tenant.
+     * Cấp Access JWT với claims: `tenant_id = null`, `role = SUPER_ADMIN`, `active_branch_id = null`.
+     * Cấp Refresh JWT.
+     * Trả về `AuthResponseDTO` với `availableTenants = null`, `roleCode = SUPER_ADMIN`.
+   * **Nếu `is_super_admin == false`**: Query bảng `user_tenants` lấy danh sách nhà xe người dùng trực thuộc:
+     * *Trường hợp 0 Tenant*: Ném lỗi `401 UNAUTHORIZED` (*"Bạn chưa được phân công vào Tenant nào !"*).
+     * *Trường hợp 1 Tenant*: Tự động chọn Tenant đó. Cấp Access JWT (`tenant_id`, `role = roleCode`), Refresh JWT. Trả về `availableTenants` (1 phần tử), danh sách chi nhánh được gán `assignedBranches`, danh sách quyền `permissions` và thông tin `user`.
+     * *Trường hợp 2+ Tenant*: Cấp Access JWT tạm thời (chưa có `tenant_id` và `role`), Refresh JWT, và danh sách các nhà xe `availableTenants` (`tenantId`, `tenantName`, `domain`, `role`, `isActive`) để người dùng chọn trên giao diện. `assignedBranches = null`, `permissions = null`.
 
-3. **Chọn Tenant (`POST /api/v1/auth/select-tenant`)**:
-   * Header: `Authorization: Bearer <preAuthToken>`
+3. **Chọn Nhà Xe (`POST /api/v1/auth/select-tenant`)**:
+   * Header: `Authorization: Bearer <accessToken>` (Token tạm thời hoặc token phiên hiện tại)
    * Request Body: `{ "tenantId": "uuid-tenant-selected" }`
-   * Backend xác minh user thực sự thuộc `tenantId` yêu cầu trong `user_tenants`.
-   * Lấy role & danh sách `assignedBranches`, đặt `activeBranchId = defaultBranchId`. Cấp Access JWT chính thức (`tenant_id`, `role`, `active_branch_id`) và Refresh Token (Cookie).
+   * Backend xác minh user thực sự thuộc `tenantId` yêu cầu trong `user_tenants` và kiểm tra nhà xe đang hoạt động (`isActive = true`).
+   * Cấp **Access JWT chính thức** gắn `tenant_id` và `role` của user tại tenant đó, Refresh Token mới, danh sách `assignedBranches` và danh sách `permissions` tương ứng.
 
 4. **Đổi Chi Nhánh Làm Việc (`POST /api/v1/auth/switch-branch`)**:
    * Header: `Authorization: Bearer <accessToken>`
    * Request Body: `{ "branchId": "uuid-branch-selected" }`
-   * Backend xác minh `branchId` thuộc danh sách chi nhánh được gán (`user_branches`) của User tại Tenant hiện tại. Nếu hợp lệ, tái cấp (Re-issue) **Access JWT mới** chứa `active_branch_id = branchId`.
+   * Backend xác minh quyền truy cập chi nhánh:
+     * Với `TENANT_ADMIN`: Có quyền chọn bất kỳ chi nhánh nào đang hoạt động thuộc tenant.
+     * Với `STAFF`: Kiểm tra chi nhánh phải nằm trong danh sách được phân công (`user_branches`).
+   * Tái cấp (Re-issue) **Access JWT mới** chứa claim `active_branch_id = branchId`.
+
+5. **Làm Mới Token (`POST /api/v1/auth/refresh-token`)**:
+   * Request Body: `{ "refreshToken": "..." }`
+   * Backend xác thực Refresh Token (kiểm tra hạn dùng và `token_type = REFRESH`), cấp cặp `accessToken` và `refreshToken` mới.
 
 #### D. Cấu trúc Token & TenantContext
-* **Access JWT Payload (15 phút)**:
+* **Access JWT Payload**:
   ```json
   {
     "sub": "user-uuid",
+    "token_type": "ACCESS",
     "email": "user@example.com",
     "role": "TENANT_ADMIN | STAFF | SALE | SUPER_ADMIN",
     "tenant_id": "tenant-uuid-or-null",
-    "active_branch_id": "branch-uuid-or-null"
+    "active_branch_id": "branch-uuid-or-null",
+    "current_session_id": "session-uuid-or-null",
+    "iat": 1729000000,
+    "exp": 1729000900
   }
   ```
-* **Refresh JWT (7 ngày)**: Lưu trong Cookie `HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth/refresh`.
-* **TenantContext Layer**: `JwtAuthenticationFilter` giải mã token trên mỗi request, nạp `tenant_id`, `active_branch_id` (`CURRENT_BRANCH`) và `role` vào `TenantContext` (ThreadLocal), sau đó gọi `SET LOCAL app.current_tenant = '...'` trên Postgres để kích hoạt RLS. Dọn dẹp `TenantContext.clear()` trong khối `finally`.
+* **Refresh JWT Payload**:
+  ```json
+  {
+    "sub": "user-uuid",
+    "token_type": "REFRESH",
+    "current_session_id": "session-uuid-or-null",
+    "iat": 1729000000,
+    "exp": 1729604800
+  }
+  ```
+* **TenantContext Layer**: `JwtAuthenticationFilter` giải mã Access Token trên mỗi request, nạp `tenant_id`, `active_branch_id` và `role` vào `TenantContext` (ThreadLocal), đồng thời nạp `UserPrincipal` vào `SecurityContextHolder`. Dọn dẹp `TenantContext.clear()` trong khối `finally` sau khi hoàn tất request.
 
 ---
 
@@ -562,54 +561,6 @@ public class CreateAccountRequestDTO {
    * **Trải nghiệm Responsive Confirmation**:
      * *Mobile Web*: Trượt Bottom Sheet cảnh báo màu đỏ từ dưới lên với các nút action to dễ chạm ngón cái.
      * *Desktop Web*: Tự động chuyển thành Popup Dialog nằm chính giữa màn hình.
-
-5. **Màn hình Chi tiết Chi nhánh (Branch Detail - 2 Tabs View)**:
-   * *Header*: Tiêu đề tên chi nhánh + Nút `< Quay lại`.
-   * *Tab 1: Thông tin chi tiết*: Hiển thị đầy đủ thông tin mã, tên, SĐT, địa chỉ 4 phần, giờ hoạt động, trạng thái, ngày tạo.
-   * *Tab 2: Danh sách xe*: Danh sách Card các xe đang gán cho chi nhánh, hiển thị kèm trạng thái xe (*Sẵn sàng, Đang thuê, Bảo dưỡng*).
-
----
-
-### 9.4 Module Quản Lý Đội Xe & Phân Khúc (`fleet-management`)
-
-#### A. Tổng quan & Phạm vi
-* **Trạng thái**: **ĐÃ HOÀN THÀNH SPEC & BRAINSTORMING UI/UX**
-* **Mục tiêu**: Cho phép Chủ nhà xe (`TENANT_ADMIN`) và Nhân viên (`STAFF`) xem, khai thác và quản lý danh mục phân khúc xe (`vehicle_types`) cùng danh sách các xe vật lý (`vehicles`) trong hệ thống Multi-tenant Car Rental SaaS.
-
-#### B. Phân quyền & Quota Cước (`max_vehicles`)
-1. **Phân quyền**:
-   * `TENANT_ADMIN`: Full CRUD đối với Loại xe và Xe. Được phép thêm, sửa, đổi trạng thái bảo dưỡng, đổi chi nhánh và xóa xe.
-   * `STAFF`: Quản lý danh sách xe tại chi nhánh được phân công (Read-only Loại xe, cập nhật Odo / Trạng thái bảo dưỡng / đổi vị trí xe đỗ).
-   * `SALE`: Read-only danh sách xe trống trên toàn hệ thống để tư vấn booking.
-2. **Kiểm soát Hybrid SaaS Quota (`max_vehicles`)**:
-   * Gói **Starter**: Tối đa 15 Xe.
-   * Gói **Growth**: Tối đa 50 Xe.
-   * Gói **Enterprise**: Tối đa 200 Xe.
-   * Kiểm tra quota khi gọi API `POST /api/v1/vehicles`. Nếu vượt quá quota trả về HTTP `400`/`403` mã lỗi `VEHICLE_QUOTA_EXCEEDED`.
-
-#### C. Quy tắc Trạng thái & Ràng buộc An toàn
-1. **Trạng thái Xe (`status`)**:
-   * `1` - AVAILABLE (🟢 Sẵn sàng): Xe trống tại chi nhánh, sẵn sàng cho thuê.
-   * `2` - RENTED (🔵 Đang thuê): Xe đang nằm trong hợp đồng thuê active.
-   * `3` - MAINTENANCE (🔴 Bảo dưỡng): Xe đang bảo dưỡng hoặc hỏng hóc.
-   * `4` - TRANSFERRED (🟡 Điều phối): Xe đang di chuyển giữa các chi nhánh.
-2. **Ràng buộc khi Xóa**:
-   * **Xe**: Không cho phép xóa xe (Hard Delete) nếu xe đang nằm trong Booking active hoặc có lịch sử hợp đồng. Thực hiện Soft Delete (`is_active = false`).
-   * **Loại xe**: Không cho phép xóa loại xe đang chứa xe (`Số xe thuộc loại > 0`). Hiển thị **Modal Cảnh báo Thông minh** kèm nút điều hướng `[Xem danh sách N xe này]` để đổi phân khúc cho các xe trước khi xóa.
-
-#### D. Thiết Kế Giao Diện Frontend (Mobile-First UI/UX Specification)
-1. **Cấu trúc Navigation Sidebar**:
-   * Tách thành 2 Menu độc lập trên Sidebar:
-     * 🚗 **Quản lý Xe** (`/fleet/vehicles`)
-     * 🏷️ **Quản lý Loại xe** (`/fleet/vehicle-types`)
-2. **Màn hình Quản lý Xe (`/fleet/vehicles`)**:
-   * **Top Summary Widget**: Hiển thị Quota `Xe (12/15) - Gói Starter` + Badges thống kê tương tác (`8 Sẵn sàng` 🟢 | `3 Đang thuê` 🔵 | `1 Bảo dưỡng` 🔴).
-   * **Search & Filters**: Input tìm kiếm biển số/model, Horizontal filter chips status, Dropdown lọc theo Chi nhánh.
-   * **Vehicle Cards**: Card xe 16:9 thumbnail, biển số, model, chi nhánh, odo, nhiên liệu. Nút nổi bật `⚡ Cập nhật Odo & Trạng thái` (Mở Bottom Sheet trong 3 giây) + Icon `⋮` mở menu tác vụ đầy đủ.
-   * **Wizard Form 3 Bước (Thêm/Sửa Xe)**: Bước 1: Cơ bản ➔ Bước 2: Thông số vận hành ➔ Bước 3: Upload 1-5 ảnh thực tế.
-3. **Màn hình Quản lý Loại xe (`/fleet/vehicle-types`)**:
-   * **Card Loại xe**: Tên phân khúc, Đơn giá thuê cơ bản/ngày (xanh nổi bật), Số lượng xe thuộc loại, Nút `✏️ Sửa` & `🗑️ Xóa`.
-   * **Smart Safety Delete Modal**: Cảnh báo khi xóa loại xe còn dữ liệu xe liên kết, hỗ trợ điều hướng nhanh sang danh sách xe để chuyển phân khúc.
 
 ---
 
@@ -720,9 +671,52 @@ CREATE INDEX idx_branches_status ON branches(tenant_id, status);
 
 ---
 
-## 6. Hướng Dẫn Kiểm Thử Cục Bộ & Dữ Liệu Seed (Local Verification Guide)
+### 9.4 Module Quản Lý Đội Xe & Phân Khúc (`fleet-management`)
 
-### 6.1 Dữ liệu Tài khoản Mẫu Đã Cấu Hình Sẵn (Seed Credentials)
+#### A. Tổng quan & Phạm vi
+* **Trạng thái**: **ĐÃ HOÀN THÀNH SPEC & BRAINSTORMING UI/UX**
+* **Mục tiêu**: Cho phép Chủ nhà xe (`TENANT_ADMIN`) và Nhân viên (`STAFF`) xem, khai thác và quản lý danh mục phân khúc xe (`vehicle_types`) cùng danh sách các xe vật lý (`vehicles`) trong hệ thống Multi-tenant Car Rental SaaS.
+
+#### B. Phân quyền & Quota Cước (`max_vehicles`)
+1. **Phân quyền**:
+   * `TENANT_ADMIN`: Full CRUD đối với Loại xe và Xe. Được phép thêm, sửa, đổi trạng thái bảo dưỡng, đổi chi nhánh và xóa xe.
+   * `STAFF`: Quản lý danh sách xe tại chi nhánh được phân công (Read-only Loại xe, cập nhật Odo / Trạng thái bảo dưỡng / đổi vị trí xe đỗ).
+   * `SALE`: Read-only danh sách xe trống trên toàn hệ thống để tư vấn booking.
+2. **Kiểm soát Hybrid SaaS Quota (`max_vehicles`)**:
+   * Gói **Starter**: Tối đa 15 Xe.
+   * Gói **Growth**: Tối đa 50 Xe.
+   * Gói **Enterprise**: Tối đa 200 Xe.
+   * Kiểm tra quota khi gọi API `POST /api/v1/vehicles`. Nếu vượt quá quota trả về HTTP `400`/`403` mã lỗi `VEHICLE_QUOTA_EXCEEDED`.
+
+#### C. Quy tắc Trạng thái & Ràng buộc An toàn
+1. **Trạng thái Xe (`status`)**:
+   * `1` - AVAILABLE (🟢 Sẵn sàng): Xe trống tại chi nhánh, sẵn sàng cho thuê.
+   * `2` - RENTED (🔵 Đang thuê): Xe đang nằm trong hợp đồng thuê active.
+   * `3` - MAINTENANCE (🔴 Bảo dưỡng): Xe đang bảo dưỡng hoặc hỏng hóc.
+   * `4` - TRANSFERRED (🟡 Điều phối): Xe đang di chuyển giữa các chi nhánh.
+2. **Ràng buộc khi Xóa**:
+   * **Xe**: Không cho phép xóa xe (Hard Delete) nếu xe đang nằm trong Booking active hoặc có lịch sử hợp đồng. Thực hiện Soft Delete (`is_active = false`).
+   * **Loại xe**: Không cho phép xóa loại xe đang chứa xe (`Số xe thuộc loại > 0`). Hiển thị **Modal Cảnh báo Thông minh** kèm nút điều hướng `[Xem danh sách N xe này]` để đổi phân khúc cho các xe trước khi xóa.
+
+#### D. Thiết Kế Giao Diện Frontend (Mobile-First UI/UX Specification)
+1. **Cấu trúc Navigation Sidebar**:
+   * Tách thành 2 Menu độc lập trên Sidebar:
+     * 🚗 **Quản lý Xe** (`/fleet/vehicles`)
+     * 🏷️ **Quản lý Loại xe** (`/fleet/vehicle-types`)
+2. **Màn hình Quản lý Xe (`/fleet/vehicles`)**:
+   * **Top Summary Widget**: Hiển thị Quota `Xe (12/15) - Gói Starter` + Badges thống kê tương tác (`8 Sẵn sàng` 🟢 | `3 Đang thuê` 🔵 | `1 Bảo dưỡng` 🔴).
+   * **Search & Filters**: Input tìm kiếm biển số/model, Horizontal filter chips status, Dropdown lọc theo Chi nhánh.
+   * **Vehicle Cards**: Card xe 16:9 thumbnail, biển số, model, chi nhánh, odo, nhiên liệu. Nút nổi bật `⚡ Cập nhật Odo & Trạng thái` (Mở Bottom Sheet trong 3 giây) + Icon `⋮` mở menu tác vụ đầy đủ.
+   * **Wizard Form 3 Bước (Thêm/Sửa Xe)**: Bước 1: Cơ bản ➔ Bước 2: Thông số vận hành ➔ Bước 3: Upload 1-5 ảnh thực tế.
+3. **Màn hình Quản lý Loại xe (`/fleet/vehicle-types`)**:
+   * **Card Loại xe**: Tên phân khúc, Đơn giá thuê cơ bản/ngày (xanh nổi bật), Số lượng xe thuộc loại, Nút `✏️ Sửa` & `🗑️ Xóa`.
+   * **Smart Safety Delete Modal**: Cảnh báo khi xóa loại xe còn dữ liệu xe liên kết, hỗ trợ điều hướng nhanh sang danh sách xe để chuyển phân khúc.
+
+---
+
+## 10. Hướng Dẫn Kiểm Thử Cục Bộ & Dữ Liệu Seed (Local Verification Guide)
+
+### 10.1 Dữ liệu Tài khoản Mẫu Đã Cấu Hình Sẵn (Seed Credentials)
 
 > 🔑 **Mật khẩu dùng chung cho tất cả tài khoản:** `Hieudvt@123`
 
@@ -735,7 +729,7 @@ CREATE INDEX idx_branches_status ON branches(tenant_id, status);
 | `mai.admin@saigonauto.vn` | `TENANT_ADMIN` | Sài Gòn Auto | Toàn bộ chi nhánh Sài Gòn | Kiểm tra chống tấn công chéo nhà xe (IDOR) |
 | `locked.user@rentcarhanoi.vn` | `STAFF` | RentCar Hà Nội | Đã bị khóa (`is_active = false`) | Kiểm tra chặn đăng nhập tài khoản bị khóa (401) |
 
-### 6.2 Các Bước Kiểm Thử API Trên Swagger UI (`/swagger-ui/index.html`)
+### 10.2 Các Bước Kiểm Thử API Trên Swagger UI (`/swagger-ui/index.html`)
 
 1. **Khởi động server:** Di chuyển vào `backend/` và chạy `mvn spring-boot:run`.
 2. **Mở Swagger:** Truy cập `http://localhost:8080/swagger-ui/index.html`.
@@ -746,7 +740,7 @@ CREATE INDEX idx_branches_status ON branches(tenant_id, status);
 
 ---
 
-## 7. Cấu Trúc Mã Nguồn Backend Thực Tế (Backend Source Tree)
+## 11. Cấu Trúc Mã Nguồn Backend Thực Tế (Backend Source Tree)
 
 ```
 backend/src/main/java/com/carrental/car_rental_backend/
