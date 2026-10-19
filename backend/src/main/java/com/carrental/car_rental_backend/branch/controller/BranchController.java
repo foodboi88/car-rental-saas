@@ -81,6 +81,6 @@ public class BranchController {
     @DeleteMapping("/api/v1/branchs/delete/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteBranch(@PathVariable UUID id, Boolean status){
         branchService.updateBranchStatus(id, status);
-        return  ResponseEntity.ok().body(ApiResponse.success(null));
+        return  ResponseEntity.ok().body(ApiResponse.success(null, "Xóa thành công!"));
     }
 }

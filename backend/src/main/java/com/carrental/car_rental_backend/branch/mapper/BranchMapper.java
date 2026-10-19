@@ -29,7 +29,6 @@ public interface BranchMapper {
     @Mapping (target = "isActive", constant = "true")
     // Thêm mới branch
     Branch toEntity(BranchDTORequest.BranchDTORequestToCreate dtoRequestToCreate);
-    // Branch createBranch(BranchDTORequest.BranchDTORequestToCreate dtoRequestToCreate);
 
     // Những trường nào trong request có giá trị null thì không tiến hành gán lại giá trị đó
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)

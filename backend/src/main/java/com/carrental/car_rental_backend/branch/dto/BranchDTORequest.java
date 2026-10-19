@@ -34,6 +34,7 @@ public class BranchDTORequest {
     //sử dụng mô hình namespace
     // interface nội bộ
     @Data
+    //class con hoạt động độc lập, có thể khởi tạo thông qua class cha
     public static class BranchDTORequestToCreate {
         private UUID tenantId;
 

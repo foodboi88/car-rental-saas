@@ -1,7 +1,10 @@
 package com.carrental.car_rental_backend.account.dto;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+
+import com.carrental.car_rental_backend.branch.dto.BranchSummaryDTO;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -22,5 +25,8 @@ public class UserDTOResponse {
     private Boolean isSuperAdmin;
     private Instant lastLoginAt;
     private Instant createdAt;
+    private String roleCode;
+    private String roleName;
+    private List<BranchSummaryDTO> branches;
 }
 

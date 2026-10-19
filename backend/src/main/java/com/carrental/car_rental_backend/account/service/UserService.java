@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +27,7 @@ import com.carrental.car_rental_backend.common.enums.user.UserRole;
 import com.carrental.car_rental_backend.common.exception.AppException;
 import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.security.context.TenantContext;
+import com.carrental.car_rental_backend.security.principal.UserPrincipal;
 
 import lombok.RequiredArgsConstructor;
 
@@ -46,24 +48,27 @@ public class UserService {
             userDTORequest = new UserDTORequest();
         }
 
+        //Bố sung thêm tenantId để lấy chính xác danh sách user
+        UUID tenantId = TenantContext.getTenantId();
+
         int pageIndex = userDTORequest.getPageIndex() != null ? userDTORequest.getPageIndex() : 0;
         int pageSize = userDTORequest.getPageSize() != null ? userDTORequest.getPageSize() : 10;
         Pageable pageable = PageRequest.of(pageIndex, pageSize);
 
         Page<User> users = userRepository.searchUser(
+            tenantId,
             userDTORequest.getFullname(),
             userDTORequest.getPhone(),
             pageable
         );
-
-        return users.map(userMapper::toResponse);
+        return users.map(user -> userMapper.toResponse(user));
     }
 
     @Transactional
     public UserDTOResponse createUserBranch(UserDTORequest.UserDTORequestToCreate requestCreate){
         //Kiểm tra email trùng lặp
         if(userRepository.existsByEmail(requestCreate.getEmail())){
-            throw new RuntimeException("Email đã tồn tại");
+            throw new AppException(ErrorCode.BAD_REQUEST, "Email đã tồn tại");
         }
         if(requestCreate.getRole() == UserRole.STAFF && (requestCreate.getBranchIds() == null || requestCreate.getBranchIds().isEmpty())){
             throw new AppException(ErrorCode.VALIDATION_ERROR, "Nhân viên phải được gán vào ít nhất 1 chi nhánh");
@@ -93,20 +98,22 @@ public class UserService {
     // Sử dụng Transactional để đảm bảo nếu bị lõi sẽ rollback lại thao tác
     @Transactional 
     public UserDTOResponse updateUser(UUID id, UserDTORequest.UserDTORequestToUpdate requestUpdate){
+        // Kiểm tra tài khoản cần update có thuộc tenant hiện tại không
         //Kiểm tra xem user có tồn tại không
         User existUser = userRepository.findByIdAndIsActiveTrue(id).orElseThrow(() -> new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Tài khoản không tồn tại"));
+        UUID tenantId = TenantContext.getTenantId();
+        //tìm bản ghi tương với với điều kiện tìm kiếm theo userId và tenantId
+        UserTenant userTenant = userTenantRepository.findByUserIdAndTenantId(id, tenantId).orElseThrow(() -> new AppException(ErrorCode.VALIDATION_ERROR, "Tài khoản không thuộc về Tenant này"));
         //Nếu có, tiến hành sử dụng mapper để map lại các thông tin cần cập nhật
         userMapper.updateUser(requestUpdate, existUser);
         //Lưu thông tin vào DB
         User updateUser = userRepository.save(existUser);
-        UUID tenantId = TenantContext.getTenantId();
+        //Nếu cần update role
         if(requestUpdate.getRole() != null){
             // tìm role có trong tenant hiện tại
             Role role = roleRepository.findByTenantIdAndCode(tenantId, requestUpdate.getRole().name()).orElseThrow(() -> new AppException(ErrorCode.VALIDATION_ERROR));
             //Lấy ra id của role đó
             UUID roleId = role.getId();
-            //tìm bản ghi tương với với điều kiện tìm kiếm theo userId và tenantId
-            UserTenant userTenant = userTenantRepository.findByUserIdAndTenantId(id, tenantId).orElseThrow(() -> new AppException(ErrorCode.VALIDATION_ERROR));
             //Cập nhật role mới
             userTenant.setRoleId(roleId);
             userTenantRepository.save(userTenant);
@@ -126,14 +133,20 @@ public class UserService {
     @Transactional 
     public void deleteUser(UUID id){
         UUID tenantId = TenantContext.getTenantId();
+
+        UserPrincipal currentUser = (UserPrincipal)
+        // lưu trữ phiên làm việc của request hiện tại 
+        // getPrincipal trả về danh tính của người gửi token
+        // UserPrincipal ép kiểu về class UserPrincipal
+        SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if(id.equals(currentUser.getId())){
+            throw new AppException(ErrorCode.BAD_REQUEST, "Không thể tự xóa tài khoản của chính mình");
+        }
         User existUser = userRepository.findByIdAndIsActiveTrue(id).orElseThrow(() -> new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Tài khoản không tồn tại"));
-        
         // Thu hồi toàn bộ quyền ở các chi nhánh của nhà xe này
         userBranchRepository.deleteByTenantIdAndUserId(tenantId, id);
-
         // xóa liên kết trong bảng user_tenant
         userTenantRepository.deleteByUserIdAndTenantId(id, tenantId);
-        
         existUser.setIsActive(false);
         userRepository.save(existUser);
     }

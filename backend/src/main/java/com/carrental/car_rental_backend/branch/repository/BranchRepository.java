@@ -11,7 +11,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import com.carrental.car_rental_backend.branch.dto.BranchDTOResponse;
 import com.carrental.car_rental_backend.branch.entity.Branch;
 @Repository 
 public interface BranchRepository extends JpaRepository<Branch, UUID> {

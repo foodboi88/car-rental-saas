@@ -18,13 +18,25 @@ public interface UserRepository extends JpaRepository<User, UUID> {
   Optional<User> findByIdAndIsActiveTrue(UUID id);
   boolean existsByEmail(String email);
 
-  @Query("SELECT u FROM User u WHERE " + 
-      "(CAST(:fullname AS String) IS NULL OR LOWER(u.fullname) LIKE LOWER(CONCAT('%', CAST(:fullname AS String), '%'))) AND " +
-      "(CAST(:phone AS String) IS NULL OR LOWER(u.phone) LIKE LOWER(CONCAT('%', CAST(:phone AS String), '%')))"
-  )
+// Lấy thông tin user từ trong bảng User
+// join giữa User và UserTenant để xem id của user phải chính xác với userId trong bảng UserTenant
+// WHERE ut.tenantId = :tenantId giữ lại userId chính xác khi gọi API
+  @Query(value = "SELECT u FROM User u " +
+          "JOIN UserTenant ut ON ut.userId = u.id " +
+          "WHERE ut.tenantId = :tenantId " +
+          "  AND (CAST(:fullname AS String) IS NULL OR LOWER(u.fullname) LIKE LOWER(CONCAT('%', CAST(:fullname AS String), '%'))) "
+          +
+          "  AND (CAST(:phone AS String) IS NULL OR LOWER(u.phone) LIKE LOWER(CONCAT('%', CAST(:phone AS String), '%'))) "
+          +
+          "ORDER BY u.createdAt DESC", countQuery = "SELECT count(u) FROM User u " +
+                  "JOIN UserTenant ut ON ut.userId = u.id " +
+                  "WHERE ut.tenantId = :tenantId " +
+                  "  AND (CAST(:fullname AS String) IS NULL OR LOWER(u.fullname) LIKE LOWER(CONCAT('%', CAST(:fullname AS String), '%'))) "
+                  +
+                  "  AND (CAST(:phone AS String) IS NULL OR LOWER(u.phone) LIKE LOWER(CONCAT('%', CAST(:phone AS String), '%')))")
   Page<User> searchUser(
-      @Param("fullname") String fullname,
-      @Param("phone") String phone,
-      Pageable pageable
-  );
+        @Param ("tenantId") UUID id,
+          @Param("fullname") String fullname,
+          @Param("phone") String phone,
+          Pageable pageable);
 }

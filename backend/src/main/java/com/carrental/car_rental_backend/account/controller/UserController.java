@@ -24,9 +24,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 
 
 @RestController
+// annotation quét class, chỉ chọn những trường có "final" để đưa vào constructor
 @RequiredArgsConstructor
 public class UserController {
 
+    // gán giá trị 1 lần duy nhất, không thể gán lại giá trị khác
     private final UserService userService;
 
     @GetMapping("/api/v1/users/search")
@@ -41,6 +43,8 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(responseCreate));
     }
 
+    // sử dụng PATCH để update: Cập nhật 1 phần
+    // gửi những trường cần thay đổi, những trường không thay đổi thì giữ nguyên dữ liệu cũ
     @PatchMapping ("/api/v1/users/update/{id}")
     public ResponseEntity<ApiResponse<UserDTOResponse>> updateUser(
         @Validated(UserDTORequest.UpdateGroup.class)

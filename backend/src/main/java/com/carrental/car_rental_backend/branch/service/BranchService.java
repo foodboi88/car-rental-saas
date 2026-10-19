@@ -25,6 +25,7 @@ import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.security.context.TenantContext;
 import com.carrental.car_rental_backend.security.principal.UserPrincipal;
 
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 
 
@@ -42,10 +43,12 @@ public class BranchService {
         if(authentication != null && authentication.getPrincipal() instanceof UserPrincipal userPrincipal){
             return userPrincipal;
         }
+        // khi throw lỗi, GlobalExceptionHandler sẽ bắt lỗi, xử lý lỗi toàn cục
         throw new AppException(ErrorCode.UNAUTHORIZED);
     }
     
     //thêm mới chi nhánh
+    @Transactional
     public BranchDTOResponse createBranch(BranchDTORequestToCreate requestToCreate) {
         UUID tenantId = TenantContext.getTenantId();
         if(branchRepository.existsByTenantIdAndName(tenantId, requestToCreate.getName())){
@@ -76,7 +79,7 @@ public class BranchService {
 
         return branchMapper.toResponse(branch);
     }
-
+    @Transactional
     public BranchDTOResponse updateBranch(UUID id, BranchDTORequestToUpdate requestToUpdate){
         UUID tenantId = TenantContext.getTenantId();
         Branch existsBranch = branchRepository.findByIdAndTenantId(id, tenantId).orElseThrow(() -> new AppException(ErrorCode.BAD_REQUEST));
@@ -91,6 +94,7 @@ public class BranchService {
         return branchMapper.toResponse(savedBranch);
     }
 
+    @Transactional 
     public BranchDTOResponse updateBranchStatus(UUID id, boolean isActive){
         UUID tenantId = TenantContext.getTenantId();
         // tìm kiếm branch, kiểm tra xem có tồn tại hay không
