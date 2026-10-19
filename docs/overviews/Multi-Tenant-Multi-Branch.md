@@ -575,22 +575,27 @@ BƯỚC 4: CHỌN / CHUYỂN ĐỔI CHI NHÁNH LÀM VIỆC (switch-branch)
     }
 → Chuyển hướng vào màn hình nghiệp vụ chính (Dashboard chi nhánh)
 
-BƯỚC 5: LÀM MỚI PHIÊN LÀM VIỆC (refresh-token)
-─────────────────────────────────────────────
-Khi Access Token hết hạn (15 phút):
-→ POST /api/v1/auth/refresh-token { "refreshToken": "..." }
-→ Kiểm tra tài khoản người dùng còn active không
-→ Trả về cặp Access Token và Refresh Token mới, kèm danh sách availableTenants mới nhất
+BƯỚC 5: LÀM MỚI PHIÊN LÀM VIỆC TỰ ĐỘNG (SILENT REFRESH - refresh-token)
+───────────────────────────────────────────────────────────────────────
+Khi Access Token hết hạn (15 phút), Frontend tự động gọi ngầm:
+→ POST /api/v1/auth/refresh-token (Đính kèm HttpOnly Cookie: refreshToken)
+→ Backend kiểm tra chữ ký, hạn sử dụng, session id và bóc tách tenant_id, active_branch_id từ refresh token
+→ Xử lý thông minh bảo tồn ngữ cảnh làm việc (Zero-Interruption UX):
+  * Nếu đang ở màn chọn Nhà xe (Pre-tenant) → Cấp token tạm thời + danh sách availableTenants.
+  * Nếu đang ở màn chọn Chi nhánh → Cấp token mang tenant_id, roleCode + danh sách assignedBranches.
+  * Nếu đang làm việc tại Chi nhánh (Dashboard/Booking) → Cấp token đầy đủ tenant_id, active_branch_id, roleCode, permissions.
+→ Trả về Access Token mới trong Response Body và Refresh Token mới qua Set-Cookie header. Form đang nhập của người dùng được submit tiếp tục mà không bị gián đoạn hay mất dữ liệu!
 ```
 
 **Chi tiết Khế ước API Thực tế (Backend REST APIs):**
 
-| Endpoint | Method | Header | Body | Mô tả chức năng |
+| Endpoint | Method | Header / Cookie | Body | Mô tả chức năng |
 | :--- | :---: | :--- | :--- | :--- |
-| `/api/v1/auth/login` | `POST` | Public | `LoginRequestDTO` (`email`, `password`) | Xác thực tài khoản. Phân 3 luồng: Super Admin, 1 Tenant (vào thẳng), >1 Tenant (chọn nhà xe). |
+| `/api/v1/auth/login` | `POST` | Public | `LoginRequestDTO` (`email`, `password`) | Xác thực tài khoản. Trả `accessToken` trong body, set HttpOnly Cookie `refreshToken`. |
 | `/api/v1/auth/select-tenant` | `POST` | `Bearer <token>` | `SelectTenantRequestDTO` (`tenantId`) | Chọn nhà xe làm việc $\rightarrow$ Cấp token mang `tenant_id` và danh sách chi nhánh tương ứng. |
 | `/api/v1/auth/switch-branch` | `POST` | `Bearer <token>` | `SwitchBranchRequestDTO` (`activeBranchId`) | Chọn/Đổi chi nhánh làm việc $\rightarrow$ Cấp token đầy đủ mang `active_branch_id`. |
-| `/api/v1/auth/refresh-token` | `POST` | Public | `RefreshTokenRequestDTO` (`refreshToken`) | Làm mới token khi Access Token hết hạn, lấy lại thông tin phân quyền mới nhất. |
+| `/api/v1/auth/refresh-token` | `POST` | Cookie: `refreshToken` | *Trống* | Làm mới token tự động. Bảo tồn ngữ cảnh Nhà xe & Chi nhánh (Silent Refresh). |
+| `/api/v1/auth/logout` | `POST` | `Bearer <token>` | *Trống* | Đăng xuất hệ thống, hủy session, xóa HttpOnly Cookie. |
 
 **Cấu trúc Response `AuthResponseDTO` Thực tế:**
 
@@ -599,17 +604,8 @@ Khi Access Token hết hạn (15 phút):
   "success": true,
   "data": {
     "accessToken": "eyJhbGciOiJIUzI1NiIsIn...",
-    "refreshToken": "eyJhbGciOiJIUzI1NiIsIn...",
     "expiresIn": 900,
-    "availableTenants": [
-      {
-        "tenantId": "e41492d0-67ee-4699-b311-fee98cb37781",
-        "tenantName": "RentCar Hà Nội",
-        "domain": "hanoi.carrental.local",
-        "role": "STAFF",
-        "isActive": true
-      }
-    ],
+    "availableTenants": null,
     "user": {
       "id": "4aec2a36-fa3b-4b26-a0d9-f0b063971d9a",
       "email": "lan.staff@rentcarhanoi.vn",
@@ -629,8 +625,8 @@ Khi Access Token hết hạn (15 phút):
       ]
     }
   },
-  "message": "Chọn chi nhánh thành công !",
-  "timestamp": "2026-10-05T10:15:00Z"
+  "message": "Làm mới token thành công !",
+  "timestamp": "2026-10-19T10:15:00Z"
 }
 ```
 

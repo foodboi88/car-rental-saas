@@ -410,37 +410,42 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
    * Request Body: `{ "email": "user@example.com", "password": "Password123!" }`
    * Backend kiểm tra Email & Mật khẩu bằng `BCryptPasswordEncoder` (sai ném `401 UNAUTHORIZED`, *"Sai tài khoản hoặc mật khẩu !"*).
    * Kiểm tra cờ `is_active` của User (nếu false ném `401 UNAUTHORIZED`, *"Tài khoản của bạn đã bị khóa !"*).
-   * **Cơ chế trả Token**: `accessToken` (sống 15 phút) nằm trong Response Body (`AuthResponseDTO`). `refreshToken` (sống 7 ngày) **không** nằm trong body mà được đặt vào Cookie `refreshToken` (`HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth`).
+   * **Cơ chế trả Token**: `accessToken` (sống 15 phút) nằm trong Response Body (`AuthResponseDTO`). `refreshToken` (sống 7 ngày) **không** nằm trong body mà được đặt vào Cookie `refreshToken` (`HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth`) nhằm triệt tiêu rủi ro XSS. Gọi API khác origin thì frontend phải bật `withCredentials = true`.
    * **Một phiên mỗi tài khoản**: mỗi lần đăng nhập tạo mã phiên mới lưu ở `users.current_session_id` (migration V7), phiên cũ mất hiệu lực.
 2. **Quy trình Phân cấp Ngữ cảnh theo Vai trò**:
-   * **Nếu `is_super_admin == true`**:
-     * Cấp Access JWT với claims: `tenant_id = null`, `role = SUPER_ADMIN`, `active_branch_id = null`.
-     * Cấp Refresh JWT.
-     * Trả về `AuthResponseDTO` với `availableTenants = null`, `roleCode = SUPER_ADMIN`.
-   * **Nếu `is_super_admin == false`**: Query bảng `user_tenants` lấy danh sách nhà xe người dùng trực thuộc:
-     * *Trường hợp 0 Tenant*: Ném lỗi `401 UNAUTHORIZED` (*"Bạn chưa được phân công vào Tenant nào !"*).
-     * *Trường hợp 1 Tenant*: Tự động chọn Tenant đó. Cấp Access JWT (`tenant_id`, `role = roleCode`), Refresh JWT. Trả về `availableTenants` (1 phần tử), danh sách chi nhánh được gán `assignedBranches`, danh sách quyền `permissions` và thông tin `user`.
-     * *Trường hợp 2+ Tenant*: Cấp Access JWT tạm thời (chưa có `tenant_id` và `role`), Refresh JWT, và danh sách các nhà xe `availableTenants` (`tenantId`, `tenantName`, `domain`, `role`, `isActive`) để người dùng chọn trên giao diện. `assignedBranches = null`, `permissions = null`.
+    * **Nếu `is_super_admin == true`**:
+      * Cấp Access JWT với claims: `tenant_id = null`, `role = SUPER_ADMIN`, `active_branch_id = null`.
+      * Cấp Refresh JWT (Set-Cookie).
+      * Trả về `AuthResponseDTO` với `availableTenants = null`, `roleCode = SUPER_ADMIN`.
+    * **Nếu `is_super_admin == false`**: Query bảng `user_tenants` lấy danh sách nhà xe người dùng trực thuộc:
+      * *Trường hợp 0 Tenant*: Ném lỗi `401 UNAUTHORIZED` (*"Bạn chưa được phân công vào Tenant nào !"*).
+      * *Trường hợp 1 Tenant*: Tự động chọn Tenant đó. Cấp Access JWT (`tenant_id`, `role = roleCode`), Refresh JWT. Trả về `availableTenants` (1 phần tử), danh sách chi nhánh được gán `assignedBranches`, danh sách quyền `permissions` và thông tin `user`.
+      * *Trường hợp 2+ Tenant*: Cấp Access JWT tạm thời (chưa có `tenant_id` và `role`), Refresh JWT, và danh sách các nhà xe `availableTenants` (`tenantId`, `tenantName`, `domain`, `role`, `isActive`) để người dùng chọn trên giao diện. `assignedBranches = null`, `permissions = null`.
 
 3. **Chọn Nhà Xe (`POST /api/v1/auth/select-tenant`)**:
-   * Header: `Authorization: Bearer <accessToken>` (Token tạm thời hoặc token phiên hiện tại)
-   * Request Body: `{ "tenantId": "uuid-tenant-selected" }`
-   * Backend xác minh user thực sự thuộc `tenantId` yêu cầu trong `user_tenants` và kiểm tra nhà xe đang hoạt động (`isActive = true`).
-   * Cấp **Access JWT chính thức** gắn `tenant_id` và `role` của user tại tenant đó, Refresh Token mới, danh sách `assignedBranches` và danh sách `permissions` tương ứng.
+    * Header: `Authorization: Bearer <accessToken>` (Token tạm thời hoặc token phiên hiện tại)
+    * Request Body: `{ "tenantId": "uuid-tenant-selected" }`
+    * Backend xác minh user thực sự thuộc `tenantId` yêu cầu trong `user_tenants` và kiểm tra nhà xe đang hoạt động (`isActive = true`).
+    * Cấp **Access JWT chính thức** gắn `tenant_id` và `role` của user tại tenant đó, Refresh Token mới qua Cookie, danh sách `assignedBranches` và danh sách `permissions` tương ứng.
 
 4. **Đổi Chi Nhánh Làm Việc (`POST /api/v1/auth/switch-branch`)**:
    * Header: `Authorization: Bearer <accessToken>`
    * Request Body: `{ "activeBranchId": "uuid-branch-selected" }`
    * Backend xác minh quyền truy cập chi nhánh:
      * Với `TENANT_ADMIN`: Có quyền chọn bất kỳ chi nhánh nào đang hoạt động thuộc tenant.
-     * Với `STAFF`: Kiểm tra chi nhánh phải nằm trong danh sách được phân công (`user_branches`).
-   * Tái cấp (Re-issue) **Access JWT mới** chứa claim `active_branch_id = activeBranchId`.
+     * Với `STAFF` / `SALE`: Kiểm tra chi nhánh phải nằm trong danh sách được phân công (`user_branches`).
+   * Tái cấp (Re-issue) **Access JWT mới** chứa claim `active_branch_id = activeBranchId` và Refresh Token mới tương ứng (đặt lại Cookie).
    * Người thuộc 1 nhà xe vẫn phải gọi API này để chọn chi nhánh (`login` trả `activeBranchId = null` kèm `assignedBranches`).
 
-5. **Làm Mới Token (`POST /api/v1/auth/refresh-token`)**:
+5. **Làm Mới Token Tự Động (Silent Refresh - `POST /api/v1/auth/refresh-token`)**:
    * Không có Request Body: backend đọc Refresh Token từ Cookie `refreshToken` (không có cookie trả `401`).
-   * Backend xác thực Refresh Token (hạn dùng, `token_type = REFRESH`, đúng phiên `current_session_id`; phiên cũ trả `403`), cấp `accessToken` mới và đặt lại Cookie.
-   * Token cấp lại luôn ở mức người dùng (chưa có nhà xe và chi nhánh, Super Admin thì mang `SUPER_ADMIN`) kèm `availableTenants`, nên phải chọn lại nhà xe và chi nhánh.
+   * Backend xác thực Refresh Token (hạn dùng, `token_type = REFRESH`, đúng phiên `current_session_id`; phiên cũ trả `403`), bóc tách `tenant_id` và `active_branch_id` trong Refresh Token để cấp `accessToken` mới mang đúng ngữ cảnh đang làm việc, đồng thời đặt lại Cookie. Nhờ vậy form người dùng đang nhập không bị gián đoạn.
+   * Kết quả theo ngữ cảnh lưu trong Refresh Token:
+     * Super Admin: `SUPER_ADMIN`, không có nhà xe và chi nhánh.
+     * Chưa chọn nhà xe (đang ở màn chọn nhà xe): token mức người dùng kèm `availableTenants`.
+     * Đã chọn nhà xe, chưa chọn chi nhánh: token có `tenant_id`, kèm `assignedBranches` và `permissions`.
+     * Đã chọn cả nhà xe và chi nhánh: token đầy đủ `tenant_id` và `active_branch_id`, kèm `assignedBranches` và `permissions`; `availableTenants = null`.
+   * Nhà xe đã bị khóa trong lúc đó thì trả `403`.
 
 6. **Đăng Xuất (`POST /api/v1/auth/logout`)**:
    * Header: `Authorization: Bearer <accessToken>`. Backend xóa `current_session_id` của user và xóa Cookie `refreshToken`.
@@ -465,6 +470,8 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
   {
     "sub": "user-uuid",
     "token_type": "REFRESH",
+    "tenant_id": "tenant-uuid-or-null",
+    "active_branch_id": "branch-uuid-or-null",
     "current_session_id": "session-uuid-or-null",
     "iat": 1729000000,
     "exp": 1729604800
