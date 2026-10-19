@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.carrental.car_rental_backend.auth.dto.request.LoginRequestDTO;
-import com.carrental.car_rental_backend.auth.dto.request.RefreshTokenRequestDTO;
 import com.carrental.car_rental_backend.auth.dto.request.SelectTenantRequestDTO;
 import com.carrental.car_rental_backend.auth.dto.request.SwitchBranchRequestDTO;
 import com.carrental.car_rental_backend.auth.dto.response.AuthResponseDTO;

@@ -65,18 +65,27 @@ public class JwtProvider {
     return builder.compact();
   }
 
-  public String generateRefreshToken(UUID userId, UUID currentSessionId) {
+  public String generateRefreshToken(UUID userId, UUID currentSessionId, UUID tenantId, UUID activeBranchId) {
     Date now = new Date();
     Date expiryDate = new Date(now.getTime() + this.refreshTokenExpirationMs);
 
-    return Jwts.builder()
+    var builder = Jwts.builder()
       .subject(userId.toString())
       .claim(TokenType.CLAIM_TOKEN_TYPE, TokenType.TOKEN_TYPE_REFRESH)
       .claim(ClaimKey.CURRENT_SESSION_ID, currentSessionId)
       .issuedAt(now)
       .expiration(expiryDate)
-      .signWith(key)
-      .compact();
+      .signWith(key);
+
+    if (tenantId != null) {
+      builder.claim(ClaimKey.TENANT_ID, tenantId.toString());
+    }
+
+    if(activeBranchId != null) {
+      builder.claim(ClaimKey.ACTIVE_BRANCH_ID, activeBranchId.toString());
+    }
+
+    return builder.compact();
   }
 
   public UUID getUserIdFromToken(String token) {
