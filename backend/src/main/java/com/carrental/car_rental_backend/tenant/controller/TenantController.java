@@ -39,7 +39,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v1/tenants")
 @PreAuthorize("hasRole('SUPER_ADMIN')") // Ở cấp lớp: mọi endpoint bên dưới chỉ Super Admin được gọi
-@RequiredArgsConstructor
+@RequiredArgsConstructor // Sinh ra constructor nhận các field final của class (Ở đây là: TenantService)
 public class TenantController {
   private static final int MAX_PAGE_SIZE = 100;
 
@@ -47,7 +47,10 @@ public class TenantController {
 
   @PostMapping
   public ResponseEntity<ApiResponse<CreateTenantResponseDTO>> createTenant(
+    // Lấy thông tin user đang đăng nhập từ hệ thống xác thực
     @AuthenticationPrincipal UserPrincipal userPrincipal,
+    // @Valid kiểm tra các điều kiện trên DTO
+    // @RequestBody: đọc JSON -> Object
     @Valid @RequestBody CreateTenantRequestDTO request
   ) {
     CreateTenantResponseDTO response = this.tenantService.createTenant(request, userPrincipal.getId());
@@ -64,7 +67,6 @@ public class TenantController {
     @RequestParam(defaultValue = "0") int page,
     @RequestParam(defaultValue = "10") int size
   ) {
-    // Tự dựng phân trang, không nhận tham số sort từ client (tránh sort theo trường không tồn tại)
     PageRequest pageRequest = PageRequest.of(
       Math.max(page, 0),
       Math.min(Math.max(size, 1), MAX_PAGE_SIZE),

@@ -60,8 +60,8 @@ sequenceDiagram
   end
   F->>F: nạp người dùng và quyền từ DB
   F->>K: chuyển request
-  K->>K: kiểm tra hình dạng body bằng @Valid
-  alt sai hình dạng
+  K->>K: kiểm tra định dạng body bằng @Valid
+  alt sai định dạng
     K->>H: MethodArgumentNotValidException
     H-->>C: 400 VALIDATION_ERROR kèm lỗi từng trường
   end
@@ -80,7 +80,7 @@ sequenceDiagram
   end
 ```
 
-> **Chú ý thứ tự:** kiểm tra hình dạng body (bước 5) chạy **trước** kiểm tra quyền (bước 8), nên người không có quyền gửi body sai nhận 400 chứ chưa phải 403.
+> **Chú ý thứ tự:** kiểm tra định dạng body (bước 5) chạy **trước** kiểm tra quyền (bước 8), nên người không có quyền gửi body sai nhận 400 chứ chưa phải 403.
 
 ### 1.5 Luồng xử lý một chủ nhà xe (dùng chung cho API 1 và API 8)
 
@@ -155,7 +155,7 @@ sequenceDiagram
   participant S as Service
   participant R as Repository
   C->>K: POST /api/v1/tenants kèm body
-  Note over C,K: đã qua kiểm tra token, hình dạng body và quyền Super Admin
+  Note over C,K: đã qua kiểm tra token, định dạng body và quyền Super Admin
   K->>S: createTenant(request, actorId)
   Note over S,R: GIAI ĐOẠN 1 - kiểm tra, chưa ghi gì vào DB
   S->>R: TenantRepository.existsByDomain(domain)
@@ -250,7 +250,7 @@ sequenceDiagram
 
 | HTTP | `error.code` | Khi nào | Thông báo |
 | :-: | :--- | :--- | :--- |
-| 400 | `VALIDATION_ERROR` | Sai hình dạng (tên rỗng, domain sai mẫu, email sai dạng, mật khẩu yếu, thiếu `admins`...) | Chi tiết theo từng trường trong `data` |
+| 400 | `VALIDATION_ERROR` | Dữ liệu không hợp lệ (tên rỗng, domain sai mẫu, email sai dạng, mật khẩu yếu, thiếu `admins`...) | Chi tiết theo từng trường trong `data` |
 | 400 | `ERR_400` | `admins` rỗng | "Cần ít nhất một chủ nhà xe !" |
 | 400 | `ERR_400` | Email trùng trong danh sách | "Email chủ nhà xe bị trùng trong danh sách: {email}" |
 | 400 | `ERR_400` | Tài khoản có sẵn đang bị khóa | "Tài khoản {email} đang bị khóa !" |
@@ -428,7 +428,7 @@ Ví dụ chỉ đổi tên và gói (4 trường kia giữ nguyên):
 ### Lỗi
 | HTTP | `error.code` | Khi nào | Thông báo |
 | :-: | :--- | :--- | :--- |
-| 400 | `VALIDATION_ERROR` | Sai hình dạng (thiếu tên, domain, gói...) | Theo từng trường |
+| 400 | `VALIDATION_ERROR` | Dữ liệu không hợp lệ (thiếu tên, domain, gói...) | Theo từng trường |
 | 400 | `ERR_400` | `settings` không phải JSON | "Trường settings không phải JSON hợp lệ !" |
 | 404 | `ERR_404` | Không có nhà xe | "Không tìm thấy nhà xe !" |
 | 409 | `TENANT_DOMAIN_ALREADY_EXISTS` | Domain mới trùng nhà xe khác | "Domain đã được sử dụng" |
@@ -644,7 +644,7 @@ Ví dụ: `{ "email": "chu2@binhan.vn", "fullName": "Trần Thị Hai", "passwor
 ### Lỗi
 | HTTP | `error.code` | Khi nào | Thông báo |
 | :-: | :--- | :--- | :--- |
-| 400 | `VALIDATION_ERROR` | Sai hình dạng | Theo từng trường |
+| 400 | `VALIDATION_ERROR` | Dữ liệu không hợp lệ | Theo từng trường |
 | 400 | `ERR_400` | Nhà xe đang bị khóa | "Nhà xe đang bị khóa, không thể thêm chủ nhà xe !" |
 | 400 | `ERR_400` | Tài khoản có sẵn bị khóa | "Tài khoản {email} đang bị khóa !" |
 | 400 | `ERR_400` | Tài khoản có sẵn là Super Admin | "Tài khoản Super Admin không thể làm chủ nhà xe: {email}" |
@@ -705,7 +705,7 @@ Ví dụ lỗi:
 | :-: | :--- | :--- | :--- |
 | 401 | `AUTH_UNAUTHORIZED` | Không có token, token sai hoặc hết hạn | Thông báo: "Bạn cần đăng nhập để thực hiện tác vụ này hoặc Token đã hết hạn !" |
 | 403 | `AUTH_FORBIDDEN` | Có token nhưng không phải Super Admin | Thông báo: "Bạn không có quyền thực hiện thao tác này" |
-| 400 | `VALIDATION_ERROR` | Body sai hình dạng | Có **cả** `error` (thông báo "Dữ liệu đầu vào không hợp lệ") và `data`. `data` là bản đồ `{ tên trường: thông báo lỗi }`, ví dụ `{"domain": "Domain chỉ gồm chữ thường, số, dấu chấm và gạch ngang"}`. Trường trong danh sách có dạng `admins[0].email` |
+| 400 | `VALIDATION_ERROR` | Body không hợp lệ | Có **cả** `error` (thông báo "Dữ liệu đầu vào không hợp lệ") và `data`. `data` là bản đồ `{ tên trường: thông báo lỗi }`, ví dụ `{"domain": "Domain chỉ gồm chữ thường, số, dấu chấm và gạch ngang"}`. Trường trong danh sách có dạng `admins[0].email` |
 | 400 | `MALFORMED_JSON` | Body không phải JSON hợp lệ, hoặc `planTier` ngoài 4 giá trị cho phép (ví dụ `"GOLD"`) | Thông báo: "Dữ liệu JSON gửi lên không đúng định dạng" |
 | 400 | `ERR_400` | Vi phạm luật nghiệp vụ | Thông báo cụ thể ghi ở từng API |
 | 404 | `ERR_404` | Không tìm thấy nhà xe | Thông báo: "Không tìm thấy nhà xe !" |
@@ -713,7 +713,7 @@ Ví dụ lỗi:
 | 409 | `TENANT_ADMIN_ALREADY_ASSIGNED` | Người này đã là chủ của nhà xe này | |
 | 500 | `ERR_500` | Lỗi hệ thống | Cũng là kết quả của tham số đường dẫn hoặc query sai kiểu. Xem "Lỗi đã biết" ở cuối |
 
-> **Thứ tự kiểm tra:** Spring kiểm tra **hình dạng body** (`VALIDATION_ERROR`) **trước** khi kiểm tra quyền. Người không có quyền gửi body sai sẽ nhận 400 chứ chưa phải 403.
+> **Thứ tự kiểm tra:** Spring kiểm tra **định dạng body** (`VALIDATION_ERROR`) **trước** khi kiểm tra quyền. Người không có quyền gửi body sai sẽ nhận 400 chứ chưa phải 403.
 
 ### C. Kiểu dữ liệu dùng chung
 

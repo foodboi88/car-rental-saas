@@ -109,7 +109,7 @@ Mỗi giai đoạn dựa trên giai đoạn trước. **Làm từ trong ra:** en
 | `TenantAdminResponseDTO` | Một chủ nhà xe khi xem danh sách |
 
 **Chú ý:**
-- DTO chỉ kiểm tra **hình dạng** (không hỏi DB). Giới hạn `@Size` khớp độ rộng cột DB. Chi tiết từng trường xem [đặc tả](2026-10-19-tenant-api-spec.md).
+- DTO chỉ kiểm tra **định dạng** (không hỏi DB). Giới hạn `@Size` khớp độ rộng cột DB. Chi tiết từng trường xem [đặc tả](2026-10-19-tenant-api-spec.md).
 - `fullName` và `password` **không** đánh `@NotBlank`: chỉ bắt buộc khi email chưa có tài khoản, Service kiểm tra điều kiện này.
 - Mật khẩu tối đa 72 ký tự vì BCrypt chỉ dùng 72 byte đầu.
 - **Thiếu `@Valid` trên danh sách `admins`** thì Spring không kiểm tra từng phần tử.
@@ -150,7 +150,7 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 ### Giai đoạn 4: Service
 `TenantService` (interface) và `TenantServiceImpl`. Cả lớp chạy trong **một giao dịch** (`@Transactional`), hàm chỉ đọc đánh dấu `readOnly`. Lỗi nghiệp vụ ném `AppException(ErrorCode, ...)`. Thêm vào `ErrorCode`: `TENANT_DOMAIN_ALREADY_EXISTS` và `TENANT_ADMIN_ALREADY_ASSIGNED` (đều 409).
 
-**Phân vai kiểm tra:** DTO kiểm hình dạng; Service kiểm luật cần DB hoặc luật riêng; DB là chốt chặn cuối (unique, khóa ngoại).
+**Phân vai kiểm tra:** DTO kiểm định dạng; Service kiểm luật cần DB hoặc luật riêng; DB là chốt chặn cuối (unique, khóa ngoại).
 
 | Hàm | Việc làm |
 | :--- | :--- |
@@ -207,7 +207,7 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 **Chú ý:**
 - **Phân trang tự dựng, không nhận `sort` từ client:** `page` âm thành 0, `size` kẹp từ 1 đến 100, luôn sắp theo `createdAt` giảm dần (tham số `sort` đi thẳng vào câu truy vấn, sai tên trường gây lỗi). Trả `PagedModel`, không trả `Page`.
 - **Hai API gán người vào nhà xe tách riêng:** API gán chủ (module này, Super Admin gọi, nhà xe lấy từ URL, chỉ gán `TENANT_ADMIN`) khác API tạo nhân viên (module account, chủ nhà xe gọi, nhà xe lấy từ token chống IDOR, chỉ gán `STAFF` hoặc `SALE`). Không gộp một endpoint để khỏi rẽ nhánh theo vai trò và leo quyền. **Phần lõi** "tìm hoặc tạo tài khoản rồi liên kết" viết một chỗ để quy tắc không lệch.
-- Spring kiểm tra **hình dạng body trước quyền**: người không có quyền gửi body sai nhận 400 chứ chưa phải 403.
+- Spring kiểm tra **định dạng body trước quyền**: người không có quyền gửi body sai nhận 400 chứ chưa phải 403.
 
 **Xong khi:** gọi được cả 8 API, người không phải Super Admin nhận 403.
 

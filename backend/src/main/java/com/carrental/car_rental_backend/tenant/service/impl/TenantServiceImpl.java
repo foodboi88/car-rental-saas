@@ -76,7 +76,7 @@ public class TenantServiceImpl implements TenantService {
     }
     String settings = this.normalizeSettings(request.getSettings());
     // Kiểm tra hết các chủ nhà xe TRƯỚC khi ghi bất cứ thứ gì
-    List<PreparedAdmin> admins = this.prepareAdmins(request.getAdmins());
+    List<PreparedAdmin> admins = this.prepareAdminList(request.getAdmins());
     Tenant tenant = this.tenantRepository.save(
       Tenant.builder()
         .name(request.getName().trim())
@@ -100,11 +100,7 @@ public class TenantServiceImpl implements TenantService {
     );
 
     this.createDefaultRoles(tenant.getId());
-    Optional<Role> adminRoleResult = this.tenantRoleRepository.findByTenantIdAndCode(tenant.getId(), RoleConstant.TENANT_ADMIN);
-    if (adminRoleResult.isEmpty()) {
-      throw new AppException(ErrorCode.INTERNAL_SERVER_ERROR, "Không tìm thấy nhóm quyền chủ nhà xe vừa tạo !");
-    }
-    Role adminRole = adminRoleResult.get();
+    Role adminRole = this.findAdminRoleOrThrow(tenant.getId());
 
     List<CreateTenantResponseDTO.AdminResult> adminResults = new ArrayList<>();
     for (PreparedAdmin admin : admins) {
@@ -196,12 +192,9 @@ public class TenantServiceImpl implements TenantService {
     if (!tenant.isActive()) {
       throw new AppException(ErrorCode.BAD_REQUEST, "Nhà xe đang bị khóa, không thể thêm chủ nhà xe !");
     }
-    Optional<Role> adminRoleResult = this.tenantRoleRepository.findByTenantIdAndCode(tenantId, RoleConstant.TENANT_ADMIN);
-    if (adminRoleResult.isEmpty()) {
-      throw new AppException(ErrorCode.INTERNAL_SERVER_ERROR, "Nhà xe chưa có nhóm quyền chủ nhà xe !");
-    }
-    Role adminRole = adminRoleResult.get();
+    Role adminRole = this.findAdminRoleOrThrow(tenantId);
 
+    // Chỉ có một email nên không có gì để so trùng trong danh sách: truyền một tập rỗng
     PreparedAdmin admin = this.prepareAdmin(request, new HashSet<>());
     CreateTenantResponseDTO.AdminResult result = this.assignTenantAdmin(tenantId, adminRole.getId(), admin);
     log.info("Người dùng {} thêm chủ nhà xe cho nhà xe {} (id = {}), tài khoản mới: {}", actorId, tenant.getName(), tenantId, result.isAccountCreated());
@@ -232,8 +225,8 @@ public class TenantServiceImpl implements TenantService {
     }
   }
 
-  // Kiểm tra danh sách chủ nhà xe, chưa ghi gì xuống DB
-  private List<PreparedAdmin> prepareAdmins(List<AdminAssignmentRequestDTO> requests) {
+  // Kiểm tra cả danh sách chủ nhà xe (gọi prepareAdmin cho từng người), chưa ghi gì xuống DB
+  private List<PreparedAdmin> prepareAdminList(List<AdminAssignmentRequestDTO> requests) {
     if (requests == null || requests.isEmpty()) {
       throw new AppException(ErrorCode.BAD_REQUEST, "Cần ít nhất một chủ nhà xe !");
     }
@@ -250,13 +243,17 @@ public class TenantServiceImpl implements TenantService {
     if (email.isEmpty()) {
       throw new AppException(ErrorCode.BAD_REQUEST, "Email chủ nhà xe không được để trống !");
     }
+    // add() vừa thêm email vào tập seenEmails (các email đã gặp trong lần gửi này).
     if (!seenEmails.add(email)) {
       throw new AppException(ErrorCode.BAD_REQUEST, "Email chủ nhà xe bị trùng trong danh sách: " + email);
     }
 
-    Optional<User> existing = this.userRepository.findByEmail(email);
-    if (existing.isPresent()) {
-      User user = existing.get();
+    Optional<User> existingUser = this.userRepository.findByEmail(email);
+
+    // Email đã có tài khoản trong hệ thống: nếu dùng được thì chỉ liên kết vào nhà xe, không tạo mới
+    if (existingUser.isPresent()) {
+      User user = existingUser.get();
+     
       if (!Boolean.TRUE.equals(user.getIsActive())) {
         throw new AppException(ErrorCode.BAD_REQUEST, "Tài khoản " + email + " đang bị khóa !");
       }
@@ -341,6 +338,15 @@ public class TenantServiceImpl implements TenantService {
       throw new AppException(ErrorCode.BAD_REQUEST, "Trường settings không phải JSON hợp lệ !");
     }
     return settings;
+  }
+
+  // Nhóm quyền TENANT_ADMIN của nhà xe. Thiếu là dữ liệu hỏng (nhà xe tạo tay, không qua API) nên báo 500
+  private Role findAdminRoleOrThrow(UUID tenantId) {
+    Optional<Role> adminRole = this.tenantRoleRepository.findByTenantIdAndCode(tenantId, RoleConstant.TENANT_ADMIN);
+    if (adminRole.isEmpty()) {
+      throw new AppException(ErrorCode.INTERNAL_SERVER_ERROR, "Nhà xe chưa có nhóm quyền chủ nhà xe !");
+    }
+    return adminRole.get();
   }
 
   private Tenant findTenantOrThrow(UUID tenantId) {
