@@ -46,6 +46,7 @@ erDiagram
         string email UK
         string password_hash
         boolean is_super_admin
+        UUID current_session_id
     }
     
     tenants {
@@ -467,7 +468,7 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 ### 9.2 Module Quản Lý Tài Khoản & Phân Công Nhân Sự (`account-management`)
 
 #### A. Tổng quan & Trạng thái
-* **Trạng thái**: **ĐÃ TRIỂN KHAI & VERIFIED (Implemented & Tested)**
+* **Trạng thái**: **ĐÃ HOÀN THÀNH SPEC & DATA MODEL (Chờ triển khai Service/Controller)**
 * **Mục tiêu**: Cho phép Chủ nhà xe (`TENANT_ADMIN`) tạo và quản lý tài khoản nhân viên (`STAFF` hoặc `SALE`) trong Tenant của mình, thiết lập ràng buộc phân công chi nhánh và hỗ trợ gán tài khoản đã tồn tại trên hệ thống vào nhà xe mà không làm đè mật khẩu.
 
 #### B. Quy tắc Nghiệp vụ & Validation
@@ -567,65 +568,60 @@ public class CreateAccountRequestDTO {
 ### 9.3 Module Quản Lý Chi Nhánh (`branch-management`)
 
 #### A. Tổng quan & Trạng thái
-* **Trạng thái**: **ĐÃ HOÀN THÀNH IMPLEMENTATION & VERIFICATION (Build Success, 100% Test Passed)**
+* **Trạng thái**: **ĐÃ HOÀN THÀNH SPEC & DATA MODEL (Entity & Repository đã sẵn sàng, chờ triển khai Service/Controller)**
 * **Mục tiêu**: Cho phép Chủ nhà xe (`TENANT_ADMIN`) quản lý danh sách các bãi xe, điểm giao nhận và văn phòng chi nhánh. Áp dụng mô hình **Hybrid SaaS Quota** khống chế số lượng chi nhánh theo gói cước để bảo vệ tài nguyên server.
 
 #### B. Quy tắc Phân quyền & Quota Cước
 1. **Phân quyền**:
-   * `TENANT_ADMIN` (Role ID = 1): **Quyền duy nhất** được Thêm mới, Cập nhật, Tạm ngưng và Xóa Chi nhánh.
-   * `STAFF` (Role ID = 2) & `SALE` (Role ID = 3): Chỉ có quyền Xem danh sách & Chi tiết các Chi nhánh được phân công (Read-only).
+   * `TENANT_ADMIN` (Role ID = 1): **Quyền duy nhất** được Thêm mới, Cập nhật, Bật/Tắt hoạt động và Xóa Chi nhánh.
+   * `STAFF` (Role ID = 2) & `SALE` (Role ID = 3): Chỉ có quyền Xem danh sách & Chi tiết các Chi nhánh được phân công (Read-only qua `user_branches`).
 2. **Mô hình Hybrid SaaS Quota (`max_branches` & `max_vehicles`)**:
    * Gói **Starter**: Tối đa 1 Chi nhánh, max 15 Xe.
    * Gói **Growth**: Tối đa 3 Chi nhánh, max 50 Xe.
    * Gói **Enterprise**: Tối đa 10 Chi nhánh (hoặc tùy chỉnh), max 200 Xe.
    * **Kiểm tra Quota khi tạo Chi nhánh (`POST /api/v1/branches`)**:
-     * Query: `SELECT COUNT(*) FROM branches WHERE tenant_id = :tenantId AND is_deleted = false`.
+     * Query: `SELECT COUNT(*) FROM branches WHERE tenant_id = :tenantId AND is_active = true`.
      * Nếu `currentBranchCount >= tenantSubscription.max_branches`: Trả về lỗi HTTP `400 Bad Request` / `403 Forbidden` với mã lỗi `BRANCH_QUOTA_EXCEEDED` (*"Bạn đã đạt giới hạn tối đa X chi nhánh của gói cước hiện tại!"*).
 
 #### C. Quy tắc An Toàn Khi Xóa & Đổi Trạng Thái (Safety Guards)
-1. **Đổi trạng thái (`PATCH /api/v1/branches/{id}/status`)**:
-   * Cho phép đổi giữa `ACTIVE` (Hoạt động) và `INACTIVE` (Tạm ngưng).
-   * Khi Chi nhánh ở trạng thái `INACTIVE`: Ngăn không cho chọn chi nhánh này khi tạo Hợp đồng mới hoặc phân bổ Xe mới.
+1. **Đổi trạng thái hoạt động (`PATCH /api/v1/branches/{id}/status`)**:
+   * Cho phép đổi `is_active` giữa `true` (Hoạt động) và `false` (Tạm ngưng).
+   * Khi Chi nhánh ở trạng thái `is_active = false`: Ngăn không cho chọn chi nhánh này khi tạo Hợp đồng mới hoặc phân bổ Xe mới.
 2. **Xóa Chi nhánh (`DELETE /api/v1/branches/{id}`)**:
-   * **RÀNG BUỘC AN TOÀN**: **KHÔNG CHO XÓA CỨNG (Hard Delete)** nếu chi nhánh đang chứa Xe (`vehicles.branch_id = branch.id`) hoặc có Booking/Hợp đồng đang hoạt động. Ném lỗi `BRANCH_HAS_ACTIVE_VEHICLES`.
-   * Nếu thỏa mãn điều kiện không có dữ liệu liên kết: Thực hiện **Soft Delete** (`is_deleted = true`).
+   * **RÀNG BUỘC AN TOÀN**: **KHÔNG CHO PHÉP XÓA** nếu chi nhánh đang chứa Xe (`vehicles.branch_id = branch.id`) hoặc có Booking/Hợp đồng đang hoạt động. Ném lỗi `BRANCH_HAS_ACTIVE_VEHICLES`.
+   * Nếu thỏa mãn điều kiện không có dữ liệu liên kết: Thực hiện xóa bản ghi khỏi hệ thống hoặc vô hiệu hóa (`is_active = false`).
 
-#### D. Schema Bảng `branches`
+#### D. Schema Bảng `branches` (Đã đồng bộ Migration V6)
 ```sql
 CREATE TABLE branches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    code VARCHAR(50) NOT NULL,
     name VARCHAR(255) NOT NULL,
+    address TEXT,
     phone VARCHAR(20),
-    address VARCHAR(255) NOT NULL,
-    city VARCHAR(100) NOT NULL,
-    district VARCHAR(100),
-    ward VARCHAR(100),
-    opening_hours VARCHAR(100),
-    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE, INACTIVE
-    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    email VARCHAR(255),
+    latitude DECIMAL(10, 8),
+    longitude DECIMAL(11, 8),
+    is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uk_branches_tenant_code UNIQUE (tenant_id, code)
+    CONSTRAINT unique_branch_tenant UNIQUE (id, tenant_id)
 );
 
 CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
-CREATE INDEX idx_branches_status ON branches(tenant_id, status);
 ```
 
 #### E. Danh mục API Specification
-* `GET /api/v1/branches`: Phân trang, tìm kiếm theo `name`/`code`/`phone`, lọc `status`. (Trả về `vehicle_count`).
-* `GET /api/v1/branches/{id}`: Xem chi tiết thông tin chi nhánh.
-* `POST /api/v1/branches`: Tạo chi nhánh mới (Validate `TENANT_ADMIN`, validate Quota `max_branches`, validate trùng `code`).
-* `PUT /api/v1/branches/{id}`: Cập nhật thông tin chi nhánh (Không được đổi `tenant_id`).
-* `PATCH /api/v1/branches/{id}/status`: Chuyển đổi trạng thái `ACTIVE` <-> `INACTIVE`.
-* `DELETE /api/v1/branches/{id}`: Xóa mềm chi nhánh (Kiểm tra dữ liệu xe/booking ràng buộc trước khi xóa).
+* `GET /api/v1/branches`: Phân trang, tìm kiếm theo `name`/`phone`, lọc theo `isActive` (Mặc định trả về kèm `vehicle_count`).
+* `GET /api/v1/branches/{id}`: Xem chi tiết thông tin chi nhánh (Tên, hotline, email, địa chỉ, tọa độ GPS).
+* `POST /api/v1/branches`: Tạo chi nhánh mới (Validate `TENANT_ADMIN`, validate Quota `max_branches` theo gói cước).
+* `PUT /api/v1/branches/{id}`: Cập nhật thông tin chi nhánh (`name`, `address`, `phone`, `email`, `latitude`, `longitude` - Không được đổi `tenant_id`).
+* `PATCH /api/v1/branches/{id}/status`: Chuyển đổi trạng thái hoạt động (`isActive`: `true` <-> `false`).
+* `DELETE /api/v1/branches/{id}`: Xóa chi nhánh (Kiểm tra dữ liệu xe/booking ràng buộc trước khi xóa).
 
 #### F. Danh mục Mã Lỗi Nghiệp vụ Chuẩn (Error Codes)
 * `FORBIDDEN_ROLE` (403): Chỉ Chủ doanh nghiệp (`TENANT_ADMIN`) mới có quyền thực hiện thao tác này.
 * `BRANCH_QUOTA_EXCEEDED` (400): Đã đạt giới hạn số lượng chi nhánh của gói cước hiện tại.
-* `BRANCH_CODE_EXISTS` (400): Mã chi nhánh đã tồn tại trong hệ thống của bạn.
 * `BRANCH_HAS_ACTIVE_VEHICLES` (400): Không thể xóa chi nhánh đang có xe hoặc hợp đồng hoạt động.
 * `BRANCH_NOT_FOUND` (404): Không tìm thấy chi nhánh yêu cầu.
 
@@ -641,13 +637,13 @@ CREATE INDEX idx_branches_status ON branches(tenant_id, status);
    * **Sub-Header Bar (Thanh thông tin Quota & Gói cước)**:
      * *Bên trái*: Text hiển thị thông tin số lượng/Quota: `Chi nhánh (2/3)`.
      * *Bên phải*: Badge thông tin gói cước: `Gói Growth` (Hoặc nút `Nâng cấp` khi tiệm cận/vượt trần quota).
-   * **Khu vực Tìm kiếm & Lọc**: Ô Input `🔍 Tìm theo tên, mã, SĐT...` và các Filter Chips cuộn ngang (`[Tất cả]`, `[Hoạt động]`, `[Tạm ngưng]`).
+   * **Khu vực Tìm kiếm & Lọc**: Ô Input `🔍 Tìm theo tên, SĐT, địa chỉ...` và các Filter Chips cuộn ngang (`[Tất cả]`, `[Hoạt động]`, `[Tạm ngưng]`).
    * **Floating Action Button (FAB)**: Nút tròn `+` nổi bay ở góc dưới bên phía phải màn hình (Bottom-Right Floating), cố định khi cuộn danh sách, bấm vào để mở Form Thêm Chi Nhánh.
 
 2. **Danh sách Card Chi nhánh (Branch Card List)**:
    * Mỗi chi nhánh hiển thị dưới dạng một Card bo góc gồm:
-     * *Header Card*: Badge Mã (VD: `CN-Q1`) | Tên Chi Nhánh | Badge Status (`🟢 Hoạt động` / `🔴 Tạm ngưng`).
-     * *Body Card*: SĐT (Clickable tự động gọi điện), Địa chỉ chi tiết, Giờ hoạt động (`07:00 - 21:00`), Số lượng xe (`12 Xe`).
+     * *Header Card*: Tên Chi Nhánh | Badge Status (`🟢 Hoạt động` / `🔴 Tạm ngưng`).
+     * *Body Card*: SĐT (Clickable tự động gọi điện), Email, Địa chỉ chi tiết, Tọa độ GPS, Số lượng xe (`12 Xe`).
      * *Action Button*: Icon `⋮` ở góc phải card -> Bấm để trượt **Bottom Sheet** thao tác.
 
 3. **Bottom Sheet Thao tác (Action Sheet)**:
@@ -660,13 +656,13 @@ CREATE INDEX idx_branches_status ON branches(tenant_id, status);
 4. **Form Thêm mới / Chỉnh sửa Chi nhánh (Single-page 3-section Form)**:
    * Mở dạng Fullscreen Slide-up Modal cuộn dọc:
      * *Header Form*: Nút `< Hủy` | Tiêu đề *"Thêm chi nhánh mới"* / *"Chỉnh sửa chi nhánh"* | Nút **[Lưu]** nổi bật.
-     * *Khung 1: Thông tin cơ bản*: Mã chi nhánh (`code`), Tên chi nhánh (`name`), SĐT (`phone`).
-     * *Khung 2: Địa chỉ hành chính (Free-text inputs)*: Tỉnh / Thành phố (`city`), Quận / Huyện (`district`), Phường / Xã (`ward`), Địa chỉ chi tiết (`address`).
-     * *Khung 3: Thời gian hoạt động*: Giờ mở cửa & Giờ đóng cửa (Native Time Picker).
+     * *Khung 1: Thông tin liên hệ cơ bản*: Tên chi nhánh (`name`), SĐT hotline (`phone`), Email liên hệ (`email`).
+     * *Khung 2: Địa chỉ & Định vị GPS*: Địa chỉ chi tiết (`address`), Tọa độ GPS (`latitude`, `longitude` - hỗ trợ bấm lấy vị trí hiện tại hoặc ghim bản đồ).
+     * *Khung 3: Trạng thái*: Công tắc kích hoạt hoạt động (`is_active` - Mặc định bật).
 
 5. **Màn hình Chi tiết Chi nhánh (Branch Detail - 2 Tabs View)**:
    * *Header*: Tiêu đề tên chi nhánh + Nút `< Quay lại`.
-   * *Tab 1: Thông tin chi tiết*: Hiển thị đầy đủ thông tin mã, tên, SĐT, địa chỉ 4 phần, giờ hoạt động, trạng thái, ngày tạo.
+   * *Tab 1: Thông tin chi tiết*: Hiển thị đầy đủ thông tin tên, hotline, email, địa chỉ, tọa độ GPS bản đồ, trạng thái hoạt động, ngày tạo.
    * *Tab 2: Danh sách xe*: Danh sách Card các xe đang gán cho chi nhánh, hiển thị kèm trạng thái xe (*Sẵn sàng, Đang thuê, Bảo dưỡng*).
 
 ---
