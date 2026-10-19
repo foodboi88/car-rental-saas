@@ -196,7 +196,8 @@ Khi khách hàng trả xe về bãi:
 Dự án sử dụng kiến trúc Spring Boot Monolith gọn nhẹ nhằm tối ưu hóa thời gian phát triển và chi phí hạ tầng trong giai đoạn MVP.
 
 ### 4.1 Tech Stack Thực Tế (MVP Scope)
-*   **Backend Framework:** Java 17 + Spring Boot 3.3.x (Spring Data JPA, Spring Security).
+*   **Backend Framework:** Java 17 + Spring Boot 4.0.x (Spring Data JPA, Spring Security 7, Hibernate 7).
+*   **Frontend:** Angular 21 (component độc lập, `signal`), mobile-first và responsive, có giao diện sáng/tối. Xem [kế hoạch frontend](../plans/frontend/2026-10-19-frontend-auth-plan.md).
 *   **Database:** PostgreSQL 15+ (Single instance, shared schema, phân tách dữ liệu qua `tenant_id`).
 *   **Hạ tầng:** Docker Compose (single instance để chạy BE + DB).
 *   **File Storage:** AWS S3 / MinIO (Lưu ảnh xe, ảnh giấy tờ khách hàng).
@@ -285,7 +286,7 @@ Trường `plan_tier` của bảng `tenants` được lưu trữ dưới dạng 
 #### Phase 1: Thiết Lập Nền Móng (Weeks 1 - 5)
 *   **Mục tiêu:** Xây dựng xong bộ khung kỹ thuật vững chắc cho việc bảo mật và tách biệt dữ liệu đa chi nhánh, đa khách hàng.
 *   **Nhiệm vụ trọng tâm:**
-    *   Setup Boilerplate backend (Spring Boot 3.3, Flyway migration, Exception handler, Swagger).
+    *   Setup Boilerplate backend (Spring Boot 4.0, Flyway migration, Exception handler, Swagger).
     *   Thiết kế DB Schema cơ bản, kích hoạt Postgres RLS trên toàn bộ các bảng nghiệp vụ.
     *   Xây dựng hệ thống Đăng nhập tập trung bằng JWT (AccessToken 15 phút, RefreshToken 7 ngày đặt trong HttpOnly Cookie).
     *   Xây dựng tính năng Tenant Picker cho người dùng có nhiều doanh nghiệp.
@@ -322,6 +323,8 @@ Tất cả giao diện của hệ thống được tối ưu hóa cho **Mobile W
 *   **Màu cảnh báo/nhấn mạnh (Secondary/Accent):** `Amber/Orange` (`#F59E0B`) - Dành cho tiền cọc, cảnh báo vi phạm.
 *   **Màu nền (Background):** `Slate Gray` nhẹ (`#F8FAFC`), các thẻ Card nội dung dùng màu trắng tinh khiết (`#FFFFFF`). Bo góc chuẩn là `12px` (`0.75rem`).
 *   **Font chữ:** `Inter` hoặc `Outfit` mang lại sự hiện đại, hiển thị sắc nét trên cả iOS và Android.
+*   **Giao diện sáng/tối:** màu khai báo bằng biến CSS ở `:root`, giao diện tối chỉ đổi giá trị biến (`:root[data-theme='dark']`). Lần đầu theo cài đặt hệ điều hành, sau đó nhớ lựa chọn của người dùng.
+*   **Khung ứng dụng (sau đăng nhập):** header trên cùng (logo, nhà xe/chi nhánh đang làm việc, menu người dùng) và menu bên trái cố định từ 1024px; dưới 1024px menu là ngăn kéo mở bằng nút ba gạch. Màn trước đăng nhập giữ thẻ giữa màn hình.
 
 ### 7.2 Chi tiết 5 Màn hình Core Nghiệp vụ
 
@@ -351,7 +354,7 @@ Tất cả giao diện của hệ thống được tối ưu hóa cho **Mobile W
     > *"Design a mobile-first, responsive web interface for 'Fleet Management' of a SaaS car rental platform. Top app bar features a hamburger menu, title 'Quản lý fleet', and user avatar. Sub-header displays vehicle quota 'Xe (12/15)' and package badge. Provide two tabs: 'Vehicles' and 'Vehicle Types'. Under 'Vehicles' tab, display search bar, status filter chips (Available, Rented, Maintenance), branch filter dropdown, and a list of vehicle cards (photo thumbnail, license plate badge, model, branch, odo, fuel, action menu button). Include a bottom sheet for 'Quick Odo & Maintenance Update'. Under 'Vehicle Types' tab, list categories with daily rental rates. Place a floating action button '+' th3. **Chi tiết Quy trình Đăng nhập & Phân ngữ cảnh (Single Active Branch Context)**:
    * **Nếu `is_super_admin == true`**:
      * Cấp Access JWT (15 phút) với claims: `tenant_id = null`, `role = SUPER_ADMIN`, `active_branch_id = null`.
-     * Cấp Refresh JWT (7 ngày) trong HTTP-only Cookie `refresh_token`.
+     * Cấp Refresh JWT (7 ngày) trong HttpOnly Cookie `refreshToken`.
      * Trả về `LoginResponse` kèm `requiresTenantSelection = false`.
    * **Nếu `is_super_admin == false`**: Query bảng `user_tenants` lấy danh sách Tenant đang hoạt động của người dùng.
      * *Trường hợp 0 Tenant*: Ném lỗi `AccessDeniedException` (Người dùng chưa được gắn vào nhà xe nào).
@@ -366,7 +369,7 @@ Tất cả giao diện của hệ thống được tối ưu hóa cho **Mobile W
 
 5. **Đổi Chi Nhánh Làm Việc (`POST /api/v1/auth/switch-branch`)**:
    * Header: `Authorization: Bearer <accessToken>`
-   * Request Body: `{ "branchId": "uuid-branch-selected" }`
+   * Request Body: `{ "activeBranchId": "uuid-branch-selected" }`
    * Backend xác minh `branchId` thuộc danh sách chi nhánh được gán (`user_branches`) của User tại Tenant hiện tại. Nếu hợp lệ, tái cấp (Re-issue) **Access JWT mới** chứa `active_branch_id = branchId`.
 
 #### D. Cấu trúc Token & TenantContext
@@ -380,7 +383,7 @@ Tất cả giao diện của hệ thống được tối ưu hóa cho **Mobile W
     "active_branch_id": "branch-uuid-or-null"
   }
   ```
-* **Refresh JWT (7 ngày)**: Lưu trong Cookie `HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth/refresh`.
+* **Refresh JWT (7 ngày)**: Lưu trong Cookie `HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth`.
 * **TenantContext Layer**: `JwtAuthenticationFilter` giải mã token trên mỗi request, nạp `tenant_id`, `active_branch_id` (`CURRENT_BRANCH`) và `role` vào `TenantContext` (ThreadLocal), sau đó gọi `SET LOCAL app.current_tenant = '...'` trên Postgres để kích hoạt RLS. Dọn dẹp `TenantContext.clear()` trong khối `finally`.xám chuyển động nhẹ) thay vì vòng xoay spinner truyền thống để tăng trải nghiệm mượt mà.
 *   **Phản hồi lỗi (Error Validation State):** Cảnh báo lỗi nhập liệu bằng màu đỏ (`Destructive Red` - `#EF4444`) kèm text mô tả chi tiết ngay dưới trường thông tin bị lỗi.
 
@@ -414,7 +417,7 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 
 #### A. Tổng quan & Trạng thái
 * **Trạng thái**: **ĐÃ HOÀN THÀNH (Done)**
-* **Mục tiêu**: Khởi tạo base project Spring Boot 3.3.x (Java 17, Spring Security, Spring Data JPA, Flyway, PostgreSQL) và xây dựng hệ thống đăng nhập tập trung, cấp JWT token (Access + Refresh) hỗ trợ người dùng thuộc 1 hoặc nhiều Tenant.
+* **Mục tiêu**: Khởi tạo base project Spring Boot 4.0.x (Java 17, Spring Security, Spring Data JPA, Flyway, PostgreSQL) và xây dựng hệ thống đăng nhập tập trung, cấp JWT token (Access + Refresh) hỗ trợ người dùng thuộc 1 hoặc nhiều Tenant.
 
 #### B. Phân quyền & Vai trò trong hệ thống
 * `SUPER_ADMIN`: Quản trị viên toàn hệ thống SaaS (`is_super_admin = true` trong bảng `users`).
@@ -423,6 +426,12 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 * `SALE` (Role ID = 3): Cộng tác viên kinh doanh.
 
 #### C. Luồng xử lý Đăng nhập & Tenant Selection (`AuthService`)
+> **Lưu ý (cập nhật 19/10/2026):** phần mô tả luồng bên dưới là thiết kế ban đầu. Code thực tế khác ở các điểm sau, hợp đồng chính xác xem mục 3 của [kế hoạch frontend](../plans/frontend/2026-10-19-frontend-auth-plan.md):
+> - Không có `preAuthToken` và `requiresTenantSelection`. `login` trả access token thường; người thuộc nhiều nhà xe nhận token chưa có nhà xe kèm `availableTenants`, rồi gọi `select-tenant` bằng chính token đó.
+> - Người thuộc 1 nhà xe vẫn phải gọi `switch-branch` để chọn chi nhánh (`login` trả `activeBranchId = null` kèm `assignedBranches`).
+> - `refresh-token` luôn trả token mức người dùng (chưa có nhà xe, chi nhánh). Mỗi tài khoản chỉ một phiên (cột `users.current_session_id`, migration V7), có thêm `POST /logout`.
+> - Lỗi trả theo `AppException` (HTTP 401/403/400), không phải các exception như `BadCredentialsException`.
+
 1. **Đăng nhập tập trung (`POST /api/v1/auth/login`)**:
    * Request Body: `{ "email": "user@example.com", "password": "Password123!" }`
    * Backend kiểm tra Email -> nếu không tìm thấy, ném lỗi `BadCredentialsException`.
@@ -431,7 +440,7 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 2. **Chi tiết Quy trình Đăng nhập & Phân ngữ cảnh (Single Active Branch Context)**:
    * **Nếu `is_super_admin == true`**:
      * Cấp Access JWT (15 phút) với claims: `tenant_id = null`, `role = SUPER_ADMIN`, `active_branch_id = null`.
-     * Cấp Refresh JWT (7 ngày) trong HTTP-only Cookie `refresh_token`.
+     * Cấp Refresh JWT (7 ngày) trong HttpOnly Cookie `refreshToken`.
      * Trả về `LoginResponse` kèm `requiresTenantSelection = false`.
    * **Nếu `is_super_admin == false`**: Query bảng `user_tenants` lấy danh sách Tenant đang hoạt động của người dùng.
      * *Trường hợp 0 Tenant*: Ném lỗi `AccessDeniedException` (Người dùng chưa được gắn vào nhà xe nào).
@@ -446,7 +455,7 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 
 4. **Đổi Chi Nhánh Làm Việc (`POST /api/v1/auth/switch-branch`)**:
    * Header: `Authorization: Bearer <accessToken>`
-   * Request Body: `{ "branchId": "uuid-branch-selected" }`
+   * Request Body: `{ "activeBranchId": "uuid-branch-selected" }`
    * Backend xác minh `branchId` thuộc danh sách chi nhánh được gán (`user_branches`) của User tại Tenant hiện tại. Nếu hợp lệ, tái cấp (Re-issue) **Access JWT mới** chứa `active_branch_id = branchId`.
 
 #### D. Cấu trúc Token & TenantContext
@@ -460,7 +469,7 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
     "active_branch_id": "branch-uuid-or-null"
   }
   ```
-* **Refresh JWT (7 ngày)**: Lưu trong Cookie `HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth/refresh`.
+* **Refresh JWT (7 ngày)**: Lưu trong Cookie `HttpOnly; Secure; SameSite=Strict`, path `/api/v1/auth`.
 * **TenantContext Layer**: `JwtAuthenticationFilter` giải mã token trên mỗi request, nạp `tenant_id`, `active_branch_id` (`CURRENT_BRANCH`) và `role` vào `TenantContext` (ThreadLocal), sau đó gọi `SET LOCAL app.current_tenant = '...'` trên Postgres để kích hoạt RLS. Dọn dẹp `TenantContext.clear()` trong khối `finally`.
 
 ---
@@ -728,12 +737,14 @@ CREATE INDEX idx_branches_status ON branches(tenant_id, status);
 
 | Email | Vai trò | Phạm vi Nhà xe | Chi nhánh được gán | Mục đích kiểm thử |
 | :--- | :--- | :--- | :--- | :--- |
-| `superadmin@carrental.vn` | `SUPER_ADMIN` | Toàn hệ thống | Không giới hạn | Kiểm tra luồng bypass tenant, quản trị cấp cao nhất |
+| `superadmin@carrental.vn` (*) | `SUPER_ADMIN` | Toàn hệ thống | Không giới hạn | Kiểm tra luồng bypass tenant, quản trị cấp cao nhất |
 | `minh.admin@rentcarhanoi.vn` | `TENANT_ADMIN` | RentCar Hà Nội | Toàn bộ 3 chi nhánh (*Central HN, Cầu Giấy, Đống Đa*) | Kiểm tra luồng chủ xe tự do switch vào bất kỳ chi nhánh nào |
 | `lan.staff@rentcarhanoi.vn` | `STAFF` | RentCar Hà Nội | 2 chi nhánh (*Central HN, Cầu Giấy*) | Kiểm tra luồng nhân viên bị giới hạn (vào Đống Đa bị 403) |
-| `multi.user@carrental.vn` | `STAFF` | Hà Nội & Sài Gòn | Đa nhà xe | Kiểm tra luồng chọn nhà xe (`select-tenant`) trước khi vào chi nhánh |
-| `mai.admin@saigonauto.vn` | `TENANT_ADMIN` | Sài Gòn Auto | Toàn bộ chi nhánh Sài Gòn | Kiểm tra chống tấn công chéo nhà xe (IDOR) |
-| `locked.user@rentcarhanoi.vn` | `STAFF` | RentCar Hà Nội | Đã bị khóa (`is_active = false`) | Kiểm tra chặn đăng nhập tài khoản bị khóa (401) |
+| `multi.user@carrental.vn` (*) | `STAFF` | Hà Nội & Sài Gòn | Đa nhà xe | Kiểm tra luồng chọn nhà xe (`select-tenant`) trước khi vào chi nhánh |
+| `mai.admin@saigonauto.vn` | `TENANT_ADMIN` | Sài Gòn Auto | Toàn bộ 3 chi nhánh Sài Gòn | Kiểm tra chống tấn công chéo nhà xe (IDOR) |
+| `locked.user@rentcarhanoi.vn` (*) | `STAFF` | RentCar Hà Nội | Đã bị khóa (`is_active = false`) | Kiểm tra chặn đăng nhập tài khoản bị khóa (401) |
+
+> (*) Ba tài khoản này **không có trong dữ liệu mẫu** (migration `V2` chỉ nạp 10 tài khoản). Tạo thêm bằng khối SQL trong mục "Dữ Liệu Tài Khoản Kiểm Thử" của [README](../../README.md).
 
 ### 6.2 Các Bước Kiểm Thử API Trên Swagger UI (`/swagger-ui/index.html`)
 
@@ -777,5 +788,21 @@ backend/src/main/java/com/carrental/car_rental_backend/
     └── repository/             # TenantRepository
 ```
 
+## 8. Cấu Trúc Mã Nguồn Frontend (Frontend Source Tree)
 
+Chạy thử: xem mục "Khởi chạy Frontend" trong [README](../../README.md). Hiện mới có màn hình Auth.
 
+```
+frontend/
+├── proxy.conf.json             # Máy chủ dev chuyển /api sang backend (cổng 8080), không cần CORS
+└── src/app/
+    ├── core/
+    │   ├── auth/               # AuthService (giữ phiên), interceptor, guards, quy tắc điều hướng
+    │   ├── models/             # Kiểu dữ liệu khớp DTO của backend
+    │   ├── navigation/         # nav-items.ts: mục menu theo quyền
+    │   ├── theme/              # ThemeService: sáng/tối
+    │   └── testing/            # Dữ liệu mẫu dùng trong test
+    ├── layout/app-shell/       # Khung chung: header, menu bên trái, vùng nội dung
+    ├── shared/                 # Biểu tượng SVG, nút đổi sáng/tối
+    └── features/               # login, select-tenant, select-branch, home
+```

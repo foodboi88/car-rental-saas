@@ -1,6 +1,6 @@
 # Car Rental SaaS Platform
 
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.x-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Java](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://www.oracle.com/java/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -23,8 +23,8 @@ Hệ thống hỗ trợ quản lý nhà xe, chi nhánh/bãi xe, quản lý độ
   - **Super Admin:** Quản trị toàn hệ thống SaaS, bypass kiểm tra tenant.
   - **Nhà xe đơn (1 Tenant):** Đăng nhập tự động nạp ngữ cảnh nhà xe và danh sách chi nhánh.
   - **Đa nhà xe (>1 Tenant):** Cấp token tạm thời (pre-tenant), hỗ trợ chọn nhà xe (`select-tenant`) và chuyển đổi chi nhánh (`switch-branch`).
-- **Bảo mật & Tách biệt Phiên:** Stateless JWT Authentication (Access Token TTL ngắn + Refresh Token), xử lý lỗi bảo mật tập trung tại tầng Security Filter.
-- **Tự động Đồng bộ Database (Flyway):** Hệ thống Database Migrations tự động từ V1 đến V6, bảo đảm toàn vẹn dữ liệu và lược đồ bảng.
+- **Bảo mật & Tách biệt Phiên:** Stateless JWT Authentication. Access Token sống 15 phút; Refresh Token sống 7 ngày, lưu trong cookie `HttpOnly` (không nằm trong phản hồi JSON). Mỗi tài khoản chỉ có một phiên đăng nhập tại một thời điểm (đăng nhập nơi khác làm phiên cũ hết hiệu lực), có API đăng xuất, và kiểm tra loại token. Nhà xe bị khóa bị chặn ngay ở mỗi request. Lỗi bảo mật được xử lý tập trung tại tầng Security Filter.
+- **Tự động Đồng bộ Database (Flyway):** Hệ thống Database Migrations tự động từ V1 đến V7, bảo đảm toàn vẹn dữ liệu và lược đồ bảng.
 
 ---
 
@@ -32,13 +32,14 @@ Hệ thống hỗ trợ quản lý nhà xe, chi nhánh/bãi xe, quản lý độ
 
 | Phân hệ / Module | Nội dung triển khai | Trạng thái |
 | :--- | :--- | :---: |
-| **Database Migrations** | Flyway V1 $\rightarrow$ V6 (Schema, Seed data, Dynamic RBAC, Branch alignment) | `100% HOÀN THÀNH` |
+| **Database Migrations** | Flyway V1 $\rightarrow$ V7 (Schema, Seed data, Dynamic RBAC, Branch alignment, Single Session) | `100% HOÀN THÀNH` |
 | **Security & Context Filter** | `JwtAuthenticationFilter`, `TenantContext`, `UserPrincipal`, Filter Exception Handlers | `100% HOÀN THÀNH` |
-| **Authentication Service** | `login`, `selectTenant`, `switchBranch`, `refreshToken` (Chống IDOR, kiểm soát tài khoản khóa) | `100% HOÀN THÀNH` |
-| **REST API Controller** | `AuthController` (`/api/v1/auth/**`), Swagger OpenAPI 3.0 Integration | `100% HOÀN THÀNH` |
+| **Authentication Service** | `login`, `selectTenant`, `switchBranch`, `refreshToken`, `logout` (Chống IDOR, kiểm soát tài khoản và nhà xe bị khóa, một phiên mỗi tài khoản) | `100% HOÀN THÀNH` |
+| **REST API Controller** | `AuthController` (`/api/v1/auth/**`: `login`, `refresh-token`, `select-tenant`, `switch-branch`, `logout`), Swagger OpenAPI 3.0 Integration | `100% HOÀN THÀNH` |
 | **Fleet & Vehicle Module** | Quản lý loại xe, hồ sơ xe, trạng thái xe | `Đang triển khai` |
 | **Branch Management** | CRUD chi nhánh, phân công nhân sự chi nhánh | `Đang triển khai` |
 | **Booking & Pricing Engine** | Đặt cọc, giữ chỗ (HOLD), giao/nhận xe, phạt trễ giờ, bảng giá động | `Kế hoạch Phase 2` |
+| **Frontend (màn hình Auth)** | Angular, mobile-first và responsive, có khung ứng dụng (header, menu theo quyền) và giao diện sáng/tối: đăng nhập, chọn nhà xe, chọn chi nhánh, làm mới phiên, đăng xuất. Xem [kế hoạch và kết quả chạy thử](docs/plans/frontend/2026-10-19-frontend-auth-plan.md) | `Auth: đã dựng và chạy thử` |
 
 ---
 
@@ -46,11 +47,12 @@ Hệ thống hỗ trợ quản lý nhà xe, chi nhánh/bãi xe, quản lý độ
 
 | Tầng (Layer) | Công nghệ chính |
 | :--- | :--- |
-| **Backend** | Java 17, Spring Boot 3.x, Spring Security 6.x, Spring Data JPA, Hibernate |
+| **Backend** | Java 17, Spring Boot 4.0.x, Spring Security 7.x, Spring Data JPA, Hibernate 7 |
 | **Database** | PostgreSQL 15 (Shared Database, `tenant_id` Logical Isolation) |
 | **Database Migration**| Flyway Migration Tool |
-| **Authentication** | Stateless JWT (jjwt 0.12.x), BCrypt Password Encoder |
+| **Authentication** | Stateless JWT (jjwt 0.12.x), Refresh Token qua cookie `HttpOnly`, BCrypt Password Encoder |
 | **API Documentation**| SpringDoc OpenAPI 3.0 / Swagger UI |
+| **Frontend** | Angular 21 (component độc lập, `signal`, không zone.js), Vitest, mobile-first và responsive, giao diện sáng/tối. Mới có màn hình Auth, xem [kế hoạch frontend](docs/plans/frontend/2026-10-19-frontend-auth-plan.md) |
 | **Build & Tooling** | Apache Maven 3.9+, Lombok, Docker |
 
 ---
@@ -61,6 +63,7 @@ Hệ thống hỗ trợ quản lý nhà xe, chi nhánh/bãi xe, quản lý độ
 - **Java Development Kit (JDK):** Version 17 trở lên.
 - **Apache Maven:** Version 3.9+ (hoặc Maven Wrapper đi kèm).
 - **Docker & Docker Compose:** Dùng để chạy cơ sở dữ liệu PostgreSQL.
+- **Node.js:** Version 20.19+, 22.12+ hoặc 24+ (Angular 21 yêu cầu; đã thử với 24) và npm. Chỉ cần khi chạy frontend.
 
 ### 2. Khởi động Cơ sở dữ liệu (PostgreSQL)
 Chạy container PostgreSQL với cấu hình mặc định của dự án:
@@ -79,11 +82,22 @@ Di chuyển vào thư mục `backend` và chạy ứng dụng Spring Boot:
 cd backend
 mvn spring-boot:run
 ```
-> Khi khởi động, Flyway sẽ tự động chạy các script migration từ `V1` đến `V6` để tạo bảng và nạp dữ liệu mẫu vào PostgreSQL.
+> Khi khởi động, Flyway sẽ tự động chạy các script migration từ `V1` đến `V7` để tạo bảng và nạp dữ liệu mẫu vào PostgreSQL.
 
 ### 4. Truy cập Swagger UI
 Sau khi ứng dụng khởi chạy thành công tại cổng `8080`, mở trình duyệt truy cập:
 👉 **`http://localhost:8080/swagger-ui/index.html`**
+
+### 5. Khởi chạy Frontend (màn hình Auth)
+Mở terminal khác, vào thư mục `frontend` và chạy máy chủ dev:
+```powershell
+cd frontend
+npm install
+npm start
+```
+Mở **`http://localhost:4200`**. Máy chủ dev chuyển các lời gọi `/api` sang backend ở cổng `8080` (cấu hình trong `frontend/proxy.conf.json`), nên không cần cấu hình CORS. Dùng Chrome hoặc Firefox: cookie refresh token có thuộc tính `Secure` chỉ chạy trên `http://localhost` với hai trình duyệt này.
+
+Chạy test đơn vị: `npm test` (trong thư mục `frontend`). Màn hình đăng nhập có sẵn các nút điền nhanh email tài khoản mẫu (chỉ khi chạy dev), mật khẩu vẫn phải tự nhập.
 
 ---
 
@@ -94,12 +108,36 @@ Sau khi ứng dụng khởi chạy thành công tại cổng `8080`, mở trình
 
 | Email | Vai trò (Role) | Thuộc Nhà xe (Tenant) | Chi nhánh thao tác | Mục đích kiểm thử |
 | :--- | :--- | :--- | :--- | :--- |
-| **`superadmin@carrental.vn`** | `SUPER_ADMIN` | Toàn hệ thống | Không giới hạn | Đăng nhập cấp cao nhất, quản lý toàn bộ hệ thống |
+| **`superadmin@carrental.vn`** (*) | `SUPER_ADMIN` | Toàn hệ thống | Không giới hạn | Đăng nhập cấp cao nhất, quản lý toàn bộ hệ thống |
 | **`minh.admin@rentcarhanoi.vn`** | `TENANT_ADMIN` | RentCar Hà Nội | Toàn quyền 3 chi nhánh (*Central HN, Cầu Giấy, Đống Đa*) | Test luồng 1 nhà xe, switch branch tự do cho chủ xe |
 | **`lan.staff@rentcarhanoi.vn`** | `STAFF` | RentCar Hà Nội | Được gán 2 chi nhánh (*Central HN, Cầu Giấy*) | Test giới hạn chi nhánh (vào Đống Đa bị chặn 403) |
-| **`multi.user@carrental.vn`** | `STAFF` | RentCar Hà Nội & Sài Gòn Auto | Đa nhà xe | Test luồng chọn nhà xe (`select-tenant`) trước khi vào chi nhánh |
-| **`mai.admin@saigonauto.vn`** | `TENANT_ADMIN` | Sài Gòn Auto | Toàn quyền chi nhánh Sài Gòn | Test chống tấn công chéo nhà xe (IDOR) |
-| **`locked.user@rentcarhanoi.vn`** | `STAFF` | RentCar Hà Nội | Tài khoản bị vô hiệu hóa (`is_active = false`) | Test chặn đăng nhập tài khoản bị khóa (401) |
+| **`multi.user@carrental.vn`** (*) | `STAFF` | RentCar Hà Nội & Sài Gòn Auto | Đa nhà xe | Test luồng chọn nhà xe (`select-tenant`) trước khi vào chi nhánh |
+| **`mai.admin@saigonauto.vn`** | `TENANT_ADMIN` | Sài Gòn Auto | Toàn quyền 3 chi nhánh (*Central Sài Gòn, Quận 1, Quận 7*) | Test chống tấn công chéo nhà xe (IDOR) |
+| **`locked.user@rentcarhanoi.vn`** (*) | `STAFF` | RentCar Hà Nội | Tài khoản bị vô hiệu hóa (`is_active = false`) | Test chặn đăng nhập tài khoản bị khóa (401) |
+
+> (*) **Ba tài khoản này không có trong dữ liệu mẫu** (migration `V2` chỉ nạp 10 tài khoản: năm của RentCar Hà Nội là `minh.admin`, `lan.staff`, `huy.staff`, `ha.sale`, `khoa.sale`, và năm của Sài Gòn Auto là `mai.admin`, `bao.staff`, `tam.staff`, `anh.sale`, `tuan.sale`). Tạo thêm bằng SQL dưới đây khi cần kiểm thử, mật khẩu dùng chung với các tài khoản mẫu:
+>
+> ```sql
+> -- Super Admin (nên dùng tài khoản riêng: Super Admin không vào được nhà xe)
+> INSERT INTO users (email, password_hash, full_name, is_active, is_super_admin)
+> SELECT 'superadmin@carrental.vn', password_hash, 'Super Admin', TRUE, TRUE
+> FROM users WHERE email = 'minh.admin@rentcarhanoi.vn';
+>
+> -- Tài khoản bị khóa
+> INSERT INTO users (email, password_hash, full_name, is_active, is_super_admin)
+> SELECT 'locked.user@rentcarhanoi.vn', password_hash, 'Locked User', FALSE, FALSE
+> FROM users WHERE email = 'minh.admin@rentcarhanoi.vn';
+>
+> -- Tài khoản thuộc hai nhà xe (vai trò STAFF ở cả hai)
+> INSERT INTO users (email, password_hash, full_name, is_active, is_super_admin)
+> SELECT 'multi.user@carrental.vn', password_hash, 'Multi User', TRUE, FALSE
+> FROM users WHERE email = 'minh.admin@rentcarhanoi.vn';
+> INSERT INTO user_tenants (user_id, tenant_id, role_id, joined_at)
+> SELECT u.id, r.tenant_id, r.id, NOW()
+> FROM users u CROSS JOIN roles r JOIN tenants t ON t.id = r.tenant_id
+> WHERE u.email = 'multi.user@carrental.vn' AND r.code = 'STAFF'
+>   AND t.domain IN ('hanoi.carrental.local', 'saigon.carrental.local');
+> ```
 
 ---
 
@@ -111,6 +149,11 @@ Tất cả tài liệu thiết kế và phân tích chuyên sâu được lưu t
 - 🗄 **[Database Schema](docs/overviews/Database-Schema.md):** Thiết kế lược đồ cơ sở dữ liệu chi tiết, các mối quan hệ bảng, chỉ mục (Index) và giải thích nghiệp vụ.
 - 🏢 **[Multi-Tenant & Multi-Branch Guide](docs/overviews/Multi-Tenant-Multi-Branch.md):** Phân tích sự khác biệt giữa kiến trúc phần mềm Multi-Tenant và mô hình nghiệp vụ Multi-Branch.
 - 🚀 **[Onboarding Guide](docs/overviews/onboarding.md):** Cẩm nang hướng dẫn thành viên mới tiếp cận dự án, quy ước code và hướng dẫn kiểm thử.
+
+Kế hoạch và hướng dẫn triển khai từng phần nằm ở [`docs/plans/`](docs/plans/):
+
+- 🔐 **[Hướng dẫn module Auth (JWT)](docs/plans/auth-login/2026-08-28-auth-jwt-implementation-guide.md):** Cách xây dựng đăng nhập, chọn nhà xe, chọn chi nhánh, làm mới token.
+- 🖥 **[Kế hoạch Frontend (màn hình Auth)](docs/plans/frontend/2026-10-19-frontend-auth-plan.md):** Phạm vi, hợp đồng API auth, luồng màn hình và quy tắc giao diện mobile-first.
 
 ---
 
