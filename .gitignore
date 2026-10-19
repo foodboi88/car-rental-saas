@@ -39,3 +39,8 @@ target/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Node / Angular (frontend)
+node_modules/
+**/dist/
+.angular/
