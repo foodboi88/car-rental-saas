@@ -1,0 +1,47 @@
+<main class="screen">
+  <app-theme-toggle class="theme-float" />
+  <div class="brand"><span class="brand-mark" aria-hidden="true">C</span>Car Rental SaaS</div>
+
+  <section class="card">
+    <div>
+      <h1 class="card-title">Chọn nhà xe</h1>
+      <p class="card-sub">Xin chào {{ user()?.fullname }}. Bạn thuộc nhiều nhà xe, hãy chọn nơi muốn làm việc.</p>
+    </div>
+
+    @if (errorMessage(); as message) {
+      <div class="alert alert-error" role="alert">{{ message }}</div>
+    }
+
+    @if (tenants().length) {
+      <ul class="choice-list">
+        @for (tenant of tenants(); track tenant.tenantId) {
+          <li>
+            <button
+              type="button"
+              class="choice"
+              [class.choice-current]="tenant.tenantId === user()?.tenantId"
+              [disabled]="!tenant.isActive || pendingTenantId() !== null"
+              (click)="choose(tenant)"
+            >
+              <span>
+                <span class="choice-name">{{ tenant.tenantName }}</span><br />
+                <span class="choice-meta">{{ tenant.domain }}</span>
+              </span>
+              @if (!tenant.isActive) {
+                <span class="chip chip-muted">Tạm ngưng</span>
+              } @else if (pendingTenantId() === tenant.tenantId) {
+                <span class="chip">Đang vào...</span>
+              } @else {
+                <span class="chip">{{ tenant.role }}</span>
+              }
+            </button>
+          </li>
+        }
+      </ul>
+    } @else {
+      <div class="alert alert-info" role="status">Tài khoản này chưa thuộc nhà xe nào. Hãy liên hệ quản trị viên.</div>
+    }
+
+    <button type="button" class="btn btn-ghost btn-block" (click)="logout()"><app-icon name="logout" />Đăng xuất</button>
+  </section>
+</main>

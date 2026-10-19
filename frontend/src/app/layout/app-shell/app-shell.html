@@ -1,0 +1,122 @@
+<div class="shell" [class.nav-open]="navOpen()">
+  <header class="topbar">
+    <button
+      type="button"
+      class="icon-btn menu-btn"
+      [attr.aria-label]="navOpen() ? 'Đóng menu' : 'Mở menu'"
+      [attr.aria-expanded]="navOpen()"
+      aria-controls="sidebar"
+      (click)="toggleNav()"
+    >
+      <app-icon [name]="navOpen() ? 'close' : 'menu'" />
+    </button>
+
+    <a class="brand" [routerLink]="routes.home">
+      <span class="brand-mark" aria-hidden="true">C</span>
+      <span class="brand-name">Car Rental SaaS</span>
+    </a>
+
+    <span class="topbar-spacer"></span>
+
+    <span class="context" title="Nhà xe và chi nhánh đang làm việc">
+      <app-icon name="building" />
+      <span class="context-text">
+        {{ tenantLabel() }}
+        @if (branchLabel(); as branch) {
+          <span class="context-sep">/</span>{{ branch }}
+        }
+      </span>
+    </span>
+
+    <div class="user-menu">
+      <button
+        type="button"
+        class="user-btn"
+        aria-haspopup="menu"
+        [attr.aria-expanded]="menuOpen()"
+        aria-label="Menu người dùng"
+        (click)="toggleMenu()"
+      >
+        <span class="avatar" aria-hidden="true">{{ initials() }}</span>
+        <span class="user-name">{{ user()?.fullname }}</span>
+        <app-icon name="chevronDown" />
+      </button>
+
+      @if (menuOpen()) {
+        <div class="menu" role="menu">
+          <div class="menu-head">
+            <span class="avatar avatar-lg" aria-hidden="true">{{ initials() }}</span>
+            <div class="menu-who">
+              <strong>{{ user()?.fullname }}</strong>
+              <span class="menu-email">{{ user()?.email }}</span>
+            </div>
+          </div>
+
+          <div class="menu-context">
+            <span class="chip chip-amber">{{ user()?.roleCode }}</span>
+            <span class="menu-context-row"><app-icon name="building" />{{ tenantLabel() }}</span>
+            @if (branchLabel(); as branch) {
+              <span class="menu-context-row"><app-icon name="branch" />{{ branch }}</span>
+            }
+          </div>
+
+          <div class="menu-list">
+            @if (canChangeBranch()) {
+              <button type="button" class="menu-item" role="menuitem" (click)="goTo(routes.selectBranch)">
+                <span class="menu-icon"><app-icon name="branch" /></span>Đổi chi nhánh
+              </button>
+            }
+            @if (canChangeTenant()) {
+              <button type="button" class="menu-item" role="menuitem" (click)="goTo(routes.selectTenant)">
+                <span class="menu-icon"><app-icon name="swap" /></span>Đổi nhà xe
+              </button>
+            }
+            <button
+              type="button"
+              class="menu-item"
+              role="menuitemcheckbox"
+              [attr.aria-checked]="theme.isDark()"
+              (click)="theme.toggle()"
+            >
+              <span class="menu-icon"><app-icon [name]="theme.isDark() ? 'moon' : 'sun'" /></span>Giao diện tối
+              <span class="switch" [class.on]="theme.isDark()" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <div class="menu-list menu-foot">
+            <button type="button" class="menu-item menu-item-danger" role="menuitem" (click)="logout()">
+              <span class="menu-icon"><app-icon name="logout" /></span>Đăng xuất
+            </button>
+          </div>
+        </div>
+      }
+    </div>
+  </header>
+
+  <aside id="sidebar" class="sidebar" aria-label="Menu chính">
+    <nav>
+      <ul class="nav-list">
+        @for (item of navItems(); track item.label) {
+          <li>
+            @if (item.path; as path) {
+              <a class="nav-link" [routerLink]="path" routerLinkActive="active" (click)="closeAll()">
+                <app-icon [name]="item.icon" />{{ item.label }}
+              </a>
+            } @else {
+              <span class="nav-link disabled" aria-disabled="true">
+                <app-icon [name]="item.icon" />{{ item.label }}
+                <span class="chip chip-muted">Sắp có</span>
+              </span>
+            }
+          </li>
+        }
+      </ul>
+    </nav>
+  </aside>
+
+  <div class="backdrop" (click)="closeAll()" aria-hidden="true"></div>
+
+  <main class="content">
+    <router-outlet />
+  </main>
+</div>

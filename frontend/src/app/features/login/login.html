@@ -1,0 +1,76 @@
+<main class="screen">
+  <app-theme-toggle class="theme-float" />
+  <div class="brand"><span class="brand-mark" aria-hidden="true">C</span>Car Rental SaaS</div>
+
+  <form class="card" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <div>
+      <h1 class="card-title">Đăng nhập</h1>
+      <p class="card-sub">Dùng tài khoản được nhà xe cấp.</p>
+    </div>
+
+    @if (notice(); as message) {
+      <div class="alert alert-info" role="status">{{ message }}</div>
+    }
+    @if (errorMessage(); as message) {
+      <div class="alert alert-error" role="alert">{{ message }}</div>
+    }
+
+    <div class="field">
+      <label for="email">Email</label>
+      <input
+        id="email"
+        class="input"
+        type="email"
+        inputmode="email"
+        autocomplete="username"
+        autocapitalize="none"
+        formControlName="email"
+        [attr.aria-invalid]="emailError() ? 'true' : null"
+      />
+      @if (emailError(); as message) {
+        <span class="field-error">{{ message }}</span>
+      }
+    </div>
+
+    <div class="field">
+      <label for="password">Mật khẩu</label>
+      <div class="input-row">
+        <input
+          id="password"
+          class="input"
+          [type]="showPassword() ? 'text' : 'password'"
+          autocomplete="current-password"
+          formControlName="password"
+          [attr.aria-invalid]="passwordError() ? 'true' : null"
+        />
+        <button
+          type="button"
+          class="input-toggle"
+          [attr.aria-label]="showPassword() ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'"
+          [attr.aria-pressed]="showPassword()"
+          (click)="showPassword.set(!showPassword())"
+        >
+          <app-icon [name]="showPassword() ? 'eyeOff' : 'eye'" />
+        </button>
+      </div>
+      @if (passwordError(); as message) {
+        <span class="field-error">{{ message }}</span>
+      }
+    </div>
+
+    <button class="btn btn-primary btn-block" type="submit" [disabled]="submitting()">
+      {{ submitting() ? 'Đang đăng nhập...' : 'Đăng nhập' }}
+    </button>
+  </form>
+
+  @if (demoAccounts.length) {
+    <section class="card demo" aria-label="Tài khoản mẫu">
+      <p class="muted">Tài khoản mẫu (chỉ hiện khi chạy dev). Bấm để điền email.</p>
+      <div class="demo-list">
+        @for (account of demoAccounts; track account.email) {
+          <button type="button" class="btn btn-ghost" (click)="fillEmail(account.email)">{{ account.label }}</button>
+        }
+      </div>
+    </section>
+  }
+</main>

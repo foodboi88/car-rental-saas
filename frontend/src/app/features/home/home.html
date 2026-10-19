@@ -1,0 +1,69 @@
+@if (user(); as u) {
+  <div class="page-head">
+    <h1 class="page-title">Xin chào, {{ u.fullname }}</h1>
+    <p class="muted">Tổng quan phiên đăng nhập hiện tại.</p>
+  </div>
+
+  @if (errorMessage(); as message) {
+    <div class="alert alert-error" role="alert">{{ message }}</div>
+  }
+
+  <section class="stat-grid" aria-label="Thông tin phiên">
+    <div class="stat">
+      <span class="stat-label">Vai trò</span>
+      <span class="stat-value"><span class="chip chip-amber">{{ u.roleCode }}</span></span>
+      <span class="stat-sub">{{ u.email }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Nhà xe</span>
+      <span class="stat-value">{{ isSuperAdmin() ? 'Toàn hệ thống' : (u.tenantName ?? 'Chưa chọn') }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Chi nhánh</span>
+      <span class="stat-value">{{ activeBranch()?.branchName ?? (isSuperAdmin() ? 'Không áp dụng' : 'Chưa chọn') }}</span>
+      @if (activeBranch()?.address; as address) {
+        <span class="stat-sub">{{ address }}</span>
+      }
+    </div>
+    <div class="stat">
+      <span class="stat-label">Access token còn</span>
+      <span class="stat-value mono">{{ tokenCountdown() }}</span>
+    </div>
+  </section>
+
+  <div class="dash">
+    <section class="card">
+      <h2 class="section-title">Quyền ({{ permissions().length }})</h2>
+      <div class="chips">
+        @for (permission of permissions(); track permission) {
+          <span class="chip">{{ permission }}</span>
+        } @empty {
+          <span class="muted">Không có quyền cụ thể</span>
+        }
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Phiên đăng nhập</h2>
+      <p class="muted">Làm mới token đưa phiên về mức người dùng, nên cần chọn lại nhà xe và chi nhánh.</p>
+      <button type="button" class="btn btn-primary" [disabled]="refreshing()" (click)="refreshToken()">
+        <app-icon name="refresh" />{{ refreshing() ? 'Đang làm mới...' : 'Làm mới token' }}
+      </button>
+    </section>
+
+    <section class="card dash-wide" aria-label="Nhật ký auth">
+      <h2 class="section-title">Nhật ký các lần gọi auth</h2>
+      <ul class="events">
+        @for (event of events(); track event) {
+          <li [class.event-error]="!event.ok">
+            <span class="mono">{{ event.at | date: 'HH:mm:ss' }}</span>
+            <strong>{{ event.action }}</strong>
+            <span class="muted">{{ event.detail }}</span>
+          </li>
+        } @empty {
+          <li class="muted">Chưa có sự kiện</li>
+        }
+      </ul>
+    </section>
+  </div>
+}

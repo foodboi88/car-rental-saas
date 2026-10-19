@@ -1,0 +1,63 @@
+:host {
+  display: block;
+}
+
+.dash {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.card {
+  align-items: flex-start;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.events {
+  align-self: stretch;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.875rem;
+}
+
+.events li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.event-error strong {
+  color: var(--danger);
+}
+
+@media (min-width: 1024px) {
+  .dash {
+    grid-template-columns: 2fr 1fr;
+  }
+
+  .dash-wide {
+    grid-column: 1 / -1;
+  }
+}

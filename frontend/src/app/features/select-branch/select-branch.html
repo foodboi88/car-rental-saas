@@ -1,0 +1,44 @@
+<main class="screen">
+  <app-theme-toggle class="theme-float" />
+  <div class="brand"><span class="brand-mark" aria-hidden="true">C</span>Car Rental SaaS</div>
+
+  <section class="card">
+    <div>
+      <h1 class="card-title">Chọn chi nhánh</h1>
+      <p class="card-sub">{{ user()?.tenantName }}: chọn chi nhánh bạn làm việc hôm nay.</p>
+    </div>
+
+    @if (errorMessage(); as message) {
+      <div class="alert alert-error" role="alert">{{ message }}</div>
+    }
+
+    <ul class="choice-list">
+      @for (branch of branches(); track branch.branchId) {
+        <li>
+          <button
+            type="button"
+            class="choice"
+            [class.choice-current]="branch.branchId === user()?.activeBranchId"
+            [disabled]="pendingBranchId() !== null"
+            (click)="choose(branch)"
+          >
+            <span>
+              <span class="choice-name">{{ branch.branchName }}</span><br />
+              <span class="choice-meta">{{ branch.address || 'Chưa có địa chỉ' }}</span>
+            </span>
+            @if (pendingBranchId() === branch.branchId) {
+              <span class="chip">Đang vào...</span>
+            } @else if (branch.branchId === user()?.activeBranchId) {
+              <span class="chip chip-amber">Đang chọn</span>
+            }
+          </button>
+        </li>
+      }
+    </ul>
+
+    @if (canChangeTenant()) {
+      <button type="button" class="btn btn-ghost btn-block" (click)="changeTenant()"><app-icon name="swap" />Đổi nhà xe</button>
+    }
+    <button type="button" class="btn btn-ghost btn-block" (click)="logout()"><app-icon name="logout" />Đăng xuất</button>
+  </section>
+</main>
