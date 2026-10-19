@@ -85,10 +85,11 @@ Tiền tố `/api/v1/auth`. Mọi phản hồi theo cấu trúc chung: thành c�
 | Thuộc đúng 1 nhà xe | Token đã có nhà xe và vai trò, `assignedBranches` có sẵn | Chọn chi nhánh (hoặc trang chủ nếu không có chi nhánh nào) |
 | Thuộc nhiều nhà xe | Token chưa có nhà xe, `availableTenants` có danh sách | Chọn nhà xe |
 
-### Làm mới token luôn đưa về mức chưa chọn nhà xe
-`refresh-token` chỉ trả token ở mức "người dùng", không mang nhà xe hay chi nhánh (Super Admin thì mang `SUPER_ADMIN`). Hệ quả cho frontend:
-- Tải lại trang: gọi `refresh-token` để khôi phục phiên, rồi người dùng phải **chọn lại nhà xe và chi nhánh**.
-- "Đổi nhà xe" có thể làm bằng cách gọi `refresh-token` để lấy lại danh sách nhà xe.
+### Làm mới token giữ nhà xe và chi nhánh đang chọn
+Từ commit `30a97b8` (nhánh dynamic-rbac), refresh token mang theo `tenant_id` và `active_branch_id`, nên `refresh-token` cấp lại access token đúng ngữ cảnh đang làm việc (Super Admin thì mang `SUPER_ADMIN`). Kết quả theo ngữ cảnh: chưa chọn nhà xe thì kèm `availableTenants`; đã chọn nhà xe thì kèm `assignedBranches` và `permissions`; đã chọn cả chi nhánh thì token đầy đủ. Hệ quả cho frontend:
+- Tải lại trang: gọi `refresh-token` để khôi phục phiên, người dùng **ở lại đúng chỗ đang làm** (trang chủ nếu đã chọn xong).
+- Hết hạn access token giữa chừng (401): bộ chặn HTTP làm mới rồi gửi lại request, không làm gián đoạn form đang nhập. Nếu nhà xe/chi nhánh sau khi làm mới khác trước thì không gửi lại mà đưa về màn chọn tương ứng.
+- `availableTenants` chỉ có ở `login` và ở `refresh-token` khi chưa chọn nhà xe. Sau khi tải lại trang ở trạng thái đã chọn nhà xe, frontend không còn danh sách nhà xe, nên nút "Đổi nhà xe" của người thuộc nhiều nhà xe **không hiện** cho đến lần đăng nhập sau (xem mục 8).
 
 ### Mỗi tài khoản một phiên
 Mỗi lần `login` tạo một mã phiên mới và làm phiên cũ mất hiệu lực. Làm mới token của phiên cũ trả **403**. Khi gặp 401 hoặc 403 mà làm mới không được, frontend xóa phiên cục bộ và đưa về màn đăng nhập kèm lý do. Access token của phiên cũ bị từ chối bằng **403** mã `AUTH_FORBIDDEN` (đã kiểm tra khi chạy thử), thông báo "Tài khoản này hiện đang có người sử dụng. Vui lòng đăng nhập lại !". Vì trùng mã với lỗi thiếu quyền thật nên frontend chỉ hiện thông báo của backend, chưa tự đưa về màn đăng nhập (xem mục 8).
@@ -154,7 +155,7 @@ Khi gộp thêm module, migration mới phải đánh số từ **V8** (V7 đã 
 | `minh.admin` (1 nhà xe, 3 chi nhánh) | `/select-branch`, chọn chi nhánh, `/home` đúng vai trò, quyền, nhà xe |
 | `multi.user` (2 nhà xe) | `/select-tenant` có 2 thẻ, chọn một nhà xe thì đi tiếp |
 | `superadmin` | Thẳng `/home`, vai trò `SUPER_ADMIN` |
-| Tải lại trang | Khôi phục phiên bằng cookie, về màn chọn nhà xe (đúng với hành vi backend: `refresh-token` trả token mức người dùng) |
+| Tải lại trang | Khôi phục phiên bằng cookie, ở lại đúng màn đang làm (đã chọn xong thì trang chủ, đúng với hành vi backend mới: refresh token giữ nhà xe và chi nhánh) |
 | Đăng xuất rồi tải lại | Ở `/login`, cookie đã bị xóa |
 | Đăng nhập cùng tài khoản ở trình duyệt khác, rồi thao tác ở phiên cũ | Backend trả 403 `AUTH_FORBIDDEN`, giao diện hiện thông báo của backend |
 | Cuộn ngang ở 360, 390, 768, 1024, 1280, 1920px | Không có |
@@ -162,7 +163,7 @@ Khi gộp thêm module, migration mới phải đánh số từ **V8** (V7 đã 
 Cookie `Secure` trên `http://localhost` hoạt động với Chrome. Có 76 test đơn vị (điều hướng, `AuthService`, bộ chặn HTTP, guard, khung ứng dụng, menu theo quyền, sáng/tối, màn đăng nhập, trang chủ) và 20 bước kiểm tra trên trình duyệt thật đều đạt.
 
 **Điều rút ra, cần bàn với người làm backend:**
-1. **Làm mới token làm mất nhà xe và chi nhánh đang chọn.** Sau 15 phút (hoặc khi tải lại trang), người dùng phải chọn lại nhà xe và chi nhánh, kể cả người chỉ thuộc một nhà xe. Nếu muốn mượt hơn, `refresh-token` nên giữ lại nhà xe và chi nhánh của phiên.
+1. **Đã xử lý ở backend:** `refresh-token` nay giữ nhà xe và chi nhánh đang chọn (commit `30a97b8`), nên không còn phải chọn lại sau 15 phút hay khi tải lại trang. Còn một khoảng trống nhỏ: khi đã chọn nhà xe, `refresh-token` trả `availableTenants = null`, nên sau khi tải lại trang người thuộc nhiều nhà xe mất nút "Đổi nhà xe". Đề nghị backend trả `availableTenants` trong `refresh-token` cho người không phải Super Admin, hoặc thêm API lấy danh sách nhà xe.
 2. **Access token của phiên bị thay thế trả 403 `AUTH_FORBIDDEN`**, trùng mã với lỗi thiếu quyền. Nên trả 401 với mã riêng (ví dụ `SESSION_REPLACED`) để frontend phân biệt và đưa về màn đăng nhập.
 
 ### Khung ứng dụng và giao diện sáng/tối (19/10/2026)

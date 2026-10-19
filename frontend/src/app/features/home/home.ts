@@ -51,7 +51,7 @@ export class Home {
     this.errorMessage.set(null);
     this.refreshing.set(true);
     this.auth.refresh().subscribe({
-      // Backend luôn trả token mức người dùng, nên thường phải chọn lại nhà xe và chi nhánh.
+      // Backend giữ nhà xe và chi nhánh đang chọn, nên thường ở lại trang chủ; chỉ điều hướng khi ngữ cảnh đổi.
       next: () => {
         // Super Admin vẫn ở lại trang chủ (đường dẫn không đổi), nên phải tự tắt trạng thái chờ.
         this.refreshing.set(false);

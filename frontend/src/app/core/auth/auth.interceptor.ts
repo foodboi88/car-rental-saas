@@ -14,9 +14,10 @@ export const SESSION_EXPIRED_REASON = 'expired';
 /**
  * Gắn `Authorization: Bearer` cho API của backend. Gặp 401 thì làm mới token đúng một lần:
  * - làm mới lỗi: xóa phiên, về màn đăng nhập;
- * - làm mới được nhưng mất nhà xe/chi nhánh đang chọn (backend luôn trả token mức người dùng):
- *   không gửi lại (sẽ bị từ chối), đưa người dùng về màn chọn tương ứng;
- * - làm mới được và ngữ cảnh giữ nguyên (ví dụ Super Admin): gửi lại request với token mới.
+ * - làm mới được và nhà xe/chi nhánh vẫn như cũ (trường hợp bình thường, backend giữ ngữ cảnh
+ *   trong refresh token): gửi lại request với token mới;
+ * - làm mới được nhưng nhà xe/chi nhánh đã khác (ví dụ nhà xe bị đổi): không gửi lại
+ *   (sẽ bị từ chối), đưa người dùng về màn chọn tương ứng.
  */
 export const authInterceptor: HttpInterceptorFn = (request, next) => {
   const auth = inject(AuthService);

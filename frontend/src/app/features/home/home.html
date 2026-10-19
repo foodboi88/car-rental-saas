@@ -45,7 +45,7 @@
 
     <section class="card">
       <h2 class="section-title">Phiên đăng nhập</h2>
-      <p class="muted">Làm mới token đưa phiên về mức người dùng, nên cần chọn lại nhà xe và chi nhánh.</p>
+      <p class="muted">Làm mới token cấp lại access token mới và giữ nguyên nhà xe, chi nhánh đang chọn.</p>
       <button type="button" class="btn btn-primary" [disabled]="refreshing()" (click)="refreshToken()">
         <app-icon name="refresh" />{{ refreshing() ? 'Đang làm mới...' : 'Làm mới token' }}
       </button>

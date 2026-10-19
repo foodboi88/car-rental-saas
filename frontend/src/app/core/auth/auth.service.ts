@@ -48,8 +48,9 @@ export class AuthService {
   }
 
   /**
-   * Cấp lại token từ cookie. Backend luôn trả token ở mức "người dùng" (chưa có nhà xe,
-   * chưa có chi nhánh), nên sau khi làm mới phải chọn lại. Nhiều request cùng gọi sẽ dùng chung một lần gọi.
+   * Cấp lại token từ cookie. Backend giữ nhà xe và chi nhánh đang chọn trong refresh token, nên
+   * người dùng ở lại đúng chỗ đang làm (chưa chọn nhà xe thì nhận lại danh sách nhà xe).
+   * Nhiều request cùng gọi sẽ dùng chung một lần gọi.
    */
   refresh(label = 'Làm mới token', logFailure = true): Observable<AuthPayload> {
     if (!this.refreshInFlight$) {
