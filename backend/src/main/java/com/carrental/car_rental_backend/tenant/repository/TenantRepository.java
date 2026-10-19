@@ -27,6 +27,7 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID>{
   boolean existsByDomainAndIdNot(String domain, UUID tenantId);
 
   // keywordPattern luôn là chuỗi viết thường dạng "%abc%" (hoặc "%"), KHÔNG được null.
+  // Dấu % trong LIKE là ký tự đại diện, thực hiện tìm có chứa từ khoá thay vì không dùng là tìm khớp từ khoá.
   // isActive được phép null (null nghĩa là lấy cả hai trạng thái).
   @Query("""
     SELECT t FROM Tenant t

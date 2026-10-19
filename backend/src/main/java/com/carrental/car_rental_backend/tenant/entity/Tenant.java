@@ -52,7 +52,8 @@ public class Tenant {
   @Column(name = "contact_phone")
   private String contactPhone;
 
-  @JdbcTypeCode(SqlTypes.JSON)
+  // Chú thích của Hibernate, trường này sẽ được ghi xuống cột kiểu JSON của DB do tenants.settings có kiểu jsonb
+  @JdbcTypeCode(SqlTypes.JSON) 
   @Column(name = "settings")
   private String settings;
 

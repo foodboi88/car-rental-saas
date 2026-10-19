@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 
 import com.carrental.car_rental_backend.account.entity.Role;
 
+// @Modifying: Báo cho Spring câu truy vấn này ghi dữ liệu (INSERT, UPDATE, DELETE) không phải chỉ đọc
 public interface TenantRoleRepository extends JpaRepository<Role, UUID> {
 
   @Modifying
@@ -25,6 +26,9 @@ public interface TenantRoleRepository extends JpaRepository<Role, UUID> {
     @Param("description") String description
   );
 
+
+  // Cấp mọi quyền cho một vai trò của nhà xe.
+  // CROSS JOIN permissions: Ghép vai trò với mọi dòng trong bảng permissions.
   @Modifying
   @Query(value = """
     INSERT INTO role_permissions (role_id, permission_id)
@@ -38,6 +42,7 @@ public interface TenantRoleRepository extends JpaRepository<Role, UUID> {
     @Param("roleCode") String roleCode
   );
 
+  // Cấp một số quyền cụ thể (chỉ những quyền nằm trong permissionCodes) cho một vai trò của nhà xe.
   @Modifying
   @Query(value = """
     INSERT INTO role_permissions (role_id, permission_id)
@@ -52,6 +57,5 @@ public interface TenantRoleRepository extends JpaRepository<Role, UUID> {
     @Param("permissionCodes") Collection<String> permissionCodes
   );
 
-  // Lấy role vừa tạo để gán cho chủ nhà xe. Không dùng RoleRepository.findByCode vì nhiều tenant cùng code
   Optional<Role> findByTenantIdAndCode(UUID tenantId, String code);
 }

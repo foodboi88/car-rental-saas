@@ -23,7 +23,7 @@ public class AdminAssignmentRequestDTO {
   @Size(max = 255, message = "Họ tên tối đa 255 ký tự")
   private String fullName;
 
-  // Chỉ bắt buộc khi email chưa có tài khoản. Tối đa 72 vì BCrypt chỉ dùng 72 byte đầu
+  // Chỉ bắt buộc khi email chưa có tài khoản, Service sẽ kiểm tra điều kiện này
   @Pattern(
     regexp = "^(?=.*[A-Za-z])(?=.*\\d).{8,72}$",
     message = "Mật khẩu ít nhất 8 ký tự, gồm chữ và số"

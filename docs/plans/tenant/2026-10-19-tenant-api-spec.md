@@ -2,8 +2,8 @@
 
 > **Phạm vi:** 8 API quản lý nhà xe (tenant) dưới `/api/v1/tenants`, chỉ dành cho **Super Admin**.
 > **Cách dùng:** tra cứu đầu vào, đầu ra, lỗi của từng API. Muốn hiểu **bối cảnh, quyết định thiết kế và cách xây dựng** thì xem [kế hoạch module](2026-10-06-tenant-crud-implementation-guide.md).
-> **Nguồn:** đọc từ code (`TenantController`, các DTO, `TenantServiceImpl`, `ErrorCode`). Tên biến, khuôn phản hồi và mã lỗi đã được **đối chiếu với phản hồi thật** khi chạy ứng dụng trên PostgreSQL thật. Mục nào chỉ suy ra từ code được ghi rõ "chưa kiểm chứng".
-> **Tra nhanh:** [Luồng chủ nhà xe](#15-luồng-xử-lý-một-chủ-nhà-xe-dùng-chung-cho-api-1-và-api-8) · [Chi tiết từng API](#2-chi-tiết-từng-api) · Phụ lục: [A. Khuôn phản hồi](#a-khuôn-phản-hồi-chung) · [B. Mã lỗi](#b-mã-lỗi-dùng-chung) · [C. Kiểu dữ liệu](#c-kiểu-dữ-liệu-dùng-chung) · [D. Đối tượng Tenant](#d-đối-tượng-tenant-xuất-hiện-ở-nhiều-phản-hồi)
+> **Nguồn:** đọc từ code (`TenantController`, các DTO, `TenantServiceImpl`, `ErrorCode`). Tên biến, cấu trúc phản hồi và mã lỗi đã được **đối chiếu với phản hồi thật** khi chạy ứng dụng trên PostgreSQL thật. Mục nào chỉ suy ra từ code được ghi rõ "chưa kiểm chứng".
+> **Tra nhanh:** [Luồng chủ nhà xe](#15-luồng-xử-lý-một-chủ-nhà-xe-dùng-chung-cho-api-1-và-api-8) · [Chi tiết từng API](#2-chi-tiết-từng-api) · Phụ lục: [A. Cấu trúc phản hồi](#a-cấu-trúc-phản-hồi-chung) · [B. Mã lỗi](#b-mã-lỗi-dùng-chung) · [C. Kiểu dữ liệu](#c-kiểu-dữ-liệu-dùng-chung) · [D. Đối tượng Tenant](#d-đối-tượng-tenant-xuất-hiện-ở-nhiều-phản-hồi)
 
 ---
 
@@ -76,7 +76,7 @@ sequenceDiagram
     H-->>C: 400, 404 hoặc 409 theo ErrorCode
   else thành công
     S-->>K: kết quả
-    K-->>C: 200 hoặc 201 trong khuôn ApiResponse
+    K-->>C: 200 hoặc 201 theo cấu trúc ApiResponse
   end
 ```
 
@@ -670,8 +670,8 @@ Các giới hạn hiện biết (tham số sai kiểu trả 500 thay vì 400, kh
 
 Bốn bảng tra cứu dùng cho mọi API ở mục 2.
 
-### A. Khuôn phản hồi chung
-Mọi phản hồi đều bọc trong cùng một khuôn:
+### A. Cấu trúc phản hồi chung
+Mọi phản hồi đều có chung một cấu trúc:
 
 | Tên biến | Kiểu | Có khi | Mô tả |
 | :--- | :--- | :--- | :--- |

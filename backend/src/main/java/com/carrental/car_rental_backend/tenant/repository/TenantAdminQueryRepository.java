@@ -12,7 +12,7 @@ import com.carrental.car_rental_backend.account.entity.UserTenantId;
 
 public interface TenantAdminQueryRepository extends JpaRepository<UserTenant, UserTenantId> {
 
-  // Mỗi phần tử là một mảng [User, UserTenant]: tài khoản và liên kết của người đó với nhà xe
+  // Lấy danh sách user theo một vai trò cụ thể trong một nhà xe.
   @Query("""
     SELECT u, ut FROM UserTenant ut
     JOIN User u ON u.id = ut.userId

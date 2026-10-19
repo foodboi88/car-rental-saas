@@ -2,7 +2,7 @@
 
 > **Dự án:** Car Rental SaaS
 > **Module:** `tenant`
-> **Mục đích tài liệu:** định hướng cách xây dựng module. Đọc từ trên xuống: hiểu bài toán, nắm các quyết định, rồi đi theo từng giai đoạn. Cùng khuôn với [kế hoạch module auth](../auth-login/2026-08-28-auth-jwt-implementation-guide.md).
+> **Mục đích tài liệu:** định hướng cách xây dựng module. Đọc từ trên xuống: hiểu bài toán, nắm các quyết định, rồi đi theo từng giai đoạn. Cách trình bày giống [kế hoạch module auth](../auth-login/2026-08-28-auth-jwt-implementation-guide.md).
 > **Nguồn thiết kế:** prototype (màn "Thêm nhà xe", "Chi tiết nhà xe"), `onboarding.md` mục 2.1 và 9.2, `Database-Schema.md`, và dữ liệu thật trong DB.
 
 ## 🔗 TÀI LIỆU LIÊN QUAN
@@ -10,7 +10,7 @@
 | Tài liệu | Dùng khi |
 | :--- | :--- |
 | [Đặc tả API tenant](2026-10-19-tenant-api-spec.md) | Tra **đầu vào, đầu ra, mã lỗi** và xem **sơ đồ tuần tự** luồng xử lý của từng API |
-| [Kế hoạch module auth](../auth-login/2026-08-28-auth-jwt-implementation-guide.md) | Khuôn mẫu, và nơi sinh ra phần đăng nhập, phân quyền mà module này dựa vào |
+| [Kế hoạch module auth](../auth-login/2026-08-28-auth-jwt-implementation-guide.md) | Tài liệu làm mẫu cho module này, và nơi sinh ra phần đăng nhập, phân quyền mà module này dựa vào |
 | [`Database-Schema.md`](../../overviews/Database-Schema.md) | Cấu trúc bảng, nguồn chuẩn về DB |
 
 ---
@@ -76,7 +76,7 @@ Mỗi giai đoạn dựa trên giai đoạn trước. **Làm từ trong ra:** en
 - Làm trên nhánh riêng tách từ `main`.
 - Chạy PostgreSQL (container `postgres-car-rental`) và backend bằng Maven. Nếu cổng 8080 bị chiếm, chạy với `--server.port=8082`.
 - Sau khi đổi nhánh chạy `mvn clean` trước, để tránh lỗi Flyway trùng phiên bản.
-- Đọc `AuthController` và `AuthServiceImpl` để nắm khuôn: Controller mỏng, Service xử lý, lỗi ném bằng `AppException`.
+- Đọc `AuthController` và `AuthServiceImpl` để nắm cách làm: Controller mỏng, Service xử lý, lỗi ném bằng `AppException`.
 - **Lưu ý `ddl-auto: validate`:** Hibernate so entity với DB lúc khởi động, sai tên cột hoặc kiểu là ứng dụng không chạy. DB là nguồn sự thật, entity phải theo DB.
 
 ### Giai đoạn 1: Entity
@@ -191,7 +191,7 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 **Xong khi:** chạy được từng hàm qua test đơn vị (xem Giai đoạn 6).
 
 ### Giai đoạn 5: Controller
-`TenantController`, `@RequestMapping("/api/v1/tenants")`, **`@PreAuthorize("hasRole('SUPER_ADMIN')")` ở cấp lớp**. Lấy người gọi bằng `@AuthenticationPrincipal UserPrincipal`. Bọc kết quả bằng `ApiResponse.success(data, "...")` theo khuôn `AuthController`; nhớ `@Valid @RequestBody` và `@PathVariable UUID`.
+`TenantController`, `@RequestMapping("/api/v1/tenants")`, **`@PreAuthorize("hasRole('SUPER_ADMIN')")` ở cấp lớp**. Lấy người gọi bằng `@AuthenticationPrincipal UserPrincipal`. Trả kết quả bằng `ApiResponse.success(data, "...")`, làm giống `AuthController`; nhớ `@Valid @RequestBody` và `@PathVariable UUID`.
 
 | API | Method | Mã thành công |
 | :--- | :---: | :---: |
