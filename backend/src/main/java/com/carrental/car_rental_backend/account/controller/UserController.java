@@ -4,6 +4,7 @@ import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,11 +32,13 @@ public class UserController {
     // gán giá trị 1 lần duy nhất, không thể gán lại giá trị khác
     private final UserService userService;
 
+    @PreAuthorize("hasAuthority('account:read')")
     @GetMapping("/api/v1/users/search")
     public ResponseEntity<ApiResponse<Page<UserDTOResponse>>> getListUser(@ModelAttribute UserDTORequest userDTORequest) {
         return ResponseEntity.ok(ApiResponse.success(userService.getListUser(userDTORequest)));
     }
 
+    @PreAuthorize("hasAuthority('account:create')")
     @PostMapping("/api/v1/users/create")
     public ResponseEntity<ApiResponse<UserDTOResponse>> createUserBranch(
         @Validated(UserDTORequest.CreateGroup.class) @RequestBody UserDTORequest.UserDTORequestToCreate requestCreate) {
@@ -45,6 +48,7 @@ public class UserController {
 
     // sử dụng PATCH để update: Cập nhật 1 phần
     // gửi những trường cần thay đổi, những trường không thay đổi thì giữ nguyên dữ liệu cũ
+    @PreAuthorize("hasAuthority('account:update')")
     @PatchMapping ("/api/v1/users/update/{id}")
     public ResponseEntity<ApiResponse<UserDTOResponse>> updateUser(
         @Validated(UserDTORequest.UpdateGroup.class)
@@ -53,6 +57,7 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(responseUpdate));
     }
 
+    @PreAuthorize("hasAuthority('account:delete')")
     @DeleteMapping ("/api/v1/users/delete/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteUser(@PathVariable UUID id) {
         userService.deleteUser(id);
