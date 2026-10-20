@@ -49,7 +49,7 @@ public class TenantController {
 
   @PostMapping
   public ResponseEntity<ApiResponse<CreateTenantResponseDTO>> createTenant(
-    // Lấy thông tin user đang đăng nhập từ hệ thống xác thực
+    // Lấy thông tin user đang đăng nhập từ SecurityContextHolder
     @AuthenticationPrincipal UserPrincipal userPrincipal,
     // @Valid kiểm tra các điều kiện trên DTO
     // @RequestBody: đọc JSON -> Object

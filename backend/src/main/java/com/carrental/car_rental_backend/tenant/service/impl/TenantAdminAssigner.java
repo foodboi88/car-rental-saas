@@ -25,8 +25,6 @@ import com.carrental.car_rental_backend.tenant.entity.Tenant;
 
 import lombok.RequiredArgsConstructor;
 
-// Luật gán một người làm chủ nhà xe (dùng chung cho tạo nhà xe, thêm chủ và tra cứu email).
-// Không tự mở giao dịch: phải được gọi từ TenantServiceImpl để việc tạo tài khoản và gán chủ cùng nằm trong một giao dịch
 @Component
 @RequiredArgsConstructor
 public class TenantAdminAssigner {
@@ -40,13 +38,17 @@ public class TenantAdminAssigner {
   private final PasswordEncoder passwordEncoder;
 
   // Một chủ nhà xe đã được kiểm tra xong: email đã chuẩn hóa, kèm tài khoản có sẵn (null nếu là email mới)
+  // record: Khai báo một class chỉ dùng chứa dữ liệu. Có sẵn constructor, hàm đọc (tên trùng trường, ví dụ: admin.existingUser)
   public record PreparedAdmin(String email, String fullName, String password, User existingUser) {}
 
-  // Kiểm tra cả danh sách chủ nhà xe (dùng cho cả khi chỉ có một người), chưa ghi gì xuống DB
+  // Kiểm tra cả danh sách chủ nhà xe, chưa ghi gì xuống DB
   public List<PreparedAdmin> prepareAll(List<AdminAssignmentRequestDTO> requests) {
     if (requests == null || requests.isEmpty()) {
       throw new AppException(ErrorCode.BAD_REQUEST, "Cần ít nhất một chủ nhà xe !");
     }
+
+    // Set: Kiểu tập hợp ko chứa phần tử trùng.
+    // seenEmails: các email đã gặp trong lần gửi này, để phát hiện trùng lặp trong danh sách gửi lên.
     Set<String> seenEmails = new HashSet<>();
     List<PreparedAdmin> prepared = new ArrayList<>();
     for (AdminAssignmentRequestDTO request : requests) {
@@ -65,6 +67,7 @@ public class TenantAdminAssigner {
       throw new AppException(ErrorCode.BAD_REQUEST, "Email chủ nhà xe bị trùng trong danh sách: " + email);
     }
 
+    // Optional: Class biểu diễn giá trị tồn tại hoặc ko (null) -> isPresent: kiểm tra có giá trị
     Optional<User> existingUser = this.userRepository.findByEmail(email);
 
     // Email đã có tài khoản trong hệ thống: nếu dùng được thì chỉ liên kết vào nhà xe, không tạo mới
@@ -90,6 +93,7 @@ public class TenantAdminAssigner {
     boolean needsNewAccount = (user == null);
 
     if (needsNewAccount) {
+      // user chưa thuộc tenant nào
       user = this.userRepository.save(
         User.builder()
           .email(admin.email())
@@ -100,6 +104,7 @@ public class TenantAdminAssigner {
           .build()
       );
     } else {
+      // user có sẵn, kiểm tra có phải member của tenant không
       this.ensureNotAlreadyMember(tenantId, adminRoleId, user);
     }
 
@@ -151,7 +156,6 @@ public class TenantAdminAssigner {
       .build();
   }
 
-  // Tài khoản có sẵn phải đang hoạt động và không phải Super Admin
   private void ensureAccountUsable(User user) {
     if (!Boolean.TRUE.equals(user.getIsActive())) {
       throw new AppException(ErrorCode.BAD_REQUEST, ACCOUNT_LOCKED_MESSAGE);

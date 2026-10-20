@@ -27,8 +27,8 @@ public interface TenantRoleRepository extends JpaRepository<Role, UUID> {
   );
 
 
-  // Cấp mọi quyền cho một vai trò của nhà xe.
-  // CROSS JOIN permissions: Ghép vai trò với mọi dòng trong bảng permissions.
+  // Cấp mọi quyền cho một role của nhà xe.
+  // CROSS JOIN permissions: Ghép role với mọi dòng trong bảng permissions.
   @Modifying
   @Query(value = """
     INSERT INTO role_permissions (role_id, permission_id)
@@ -42,7 +42,7 @@ public interface TenantRoleRepository extends JpaRepository<Role, UUID> {
     @Param("roleCode") String roleCode
   );
 
-  // Cấp một số quyền cụ thể (chỉ những quyền nằm trong permissionCodes) cho một vai trò của nhà xe.
+  // Cấp một số quyền cụ thể (chỉ những quyền nằm trong permissionCodes) cho một role của nhà xe.
   @Modifying
   @Query(value = """
     INSERT INTO role_permissions (role_id, permission_id)

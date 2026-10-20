@@ -65,7 +65,7 @@ public class TenantServiceImpl implements TenantService {
       throw new AppException(ErrorCode.TENANT_DOMAIN_ALREADY_EXISTS);
     }
     String settings = this.normalizeSettings(request.getSettings());
-    // Kiểm tra hết các chủ nhà xe TRƯỚC khi ghi bất cứ thứ gì
+    // PreparedAdmin: Chủ nhà xe đã được kiểm tra
     List<TenantAdminAssigner.PreparedAdmin> admins = this.adminAssigner.prepareAll(request.getAdmins());
     Tenant tenant = this.tenantRepository.save(
       Tenant.builder()
@@ -215,9 +215,9 @@ public class TenantServiceImpl implements TenantService {
     for (DefaultRole role : DefaultRole.values()) {
       this.tenantRoleRepository.insertSystemRole(tenantId, role.getName(), role.getCode(), role.getDescription());
       if (role.grantsAllPermissions()) {
-        this.tenantRoleRepository.grantAllPermissions(tenantId, role.getCode());
+        this.tenantRoleRepository.grantAllPermissions(tenantId, role.getCode()); // TENANT_ADMIN
       } else {
-        this.tenantRoleRepository.grantPermissions(tenantId, role.getCode(), role.getPermissionCodes());
+        this.tenantRoleRepository.grantPermissions(tenantId, role.getCode(), role.getPermissionCodes()); // STAFF + SALE
       }
     }
   }

@@ -30,13 +30,13 @@ public class TenantConfig {
   private UUID tenantId;
 
   @Column(name = "hold_timeout_minutes", nullable = false)
-  private Integer holdTimeoutMinutes;
+  private Integer holdTimeoutMinutes; // Thời gian giữ xe chờ cọc
 
   @Column(name = "late_hourly_price", nullable = false)
-  private BigDecimal lateHourlyPrice;
+  private BigDecimal lateHourlyPrice; // Phí trễ giờ
 
   @Column(name = "default_commission_rate", nullable = false)
-  private BigDecimal defaultCommissionRate;
+  private BigDecimal defaultCommissionRate; // Tỷ lệ hoa hồng CTV (%)
 
   @CreationTimestamp
   @Column(name = "created_at", nullable = false, updatable = false)
