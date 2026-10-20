@@ -1,6 +1,6 @@
 # 📋 ĐẶC TẢ API: MODULE TENANT
 
-> **Phạm vi:** 8 API quản lý nhà xe (tenant) dưới `/api/v1/tenants`, chỉ dành cho **Super Admin**.
+> **Phạm vi:** 9 API quản lý nhà xe (tenant) dưới `/api/v1/tenants`, chỉ dành cho **Super Admin**.
 > **Cách dùng:** tra cứu đầu vào, đầu ra, lỗi của từng API. Muốn hiểu **bối cảnh, quyết định thiết kế và cách xây dựng** thì xem [kế hoạch module](2026-10-06-tenant-crud-implementation-guide.md).
 > **Nguồn:** đọc từ code (`TenantController`, các DTO, `TenantServiceImpl`, `ErrorCode`). Tên biến, cấu trúc phản hồi và mã lỗi đã được **đối chiếu với phản hồi thật** khi chạy ứng dụng trên PostgreSQL thật. Mục nào chỉ suy ra từ code được ghi rõ "chưa kiểm chứng".
 > **Tra nhanh:** [Luồng chủ nhà xe](#15-luồng-xử-lý-một-chủ-nhà-xe-dùng-chung-cho-api-1-và-api-8) · [Chi tiết từng API](#2-chi-tiết-từng-api) · Phụ lục: [A. Cấu trúc phản hồi](#a-cấu-trúc-phản-hồi-chung) · [B. Mã lỗi](#b-mã-lỗi-dùng-chung) · [C. Kiểu dữ liệu](#c-kiểu-dữ-liệu-dùng-chung) · [D. Đối tượng Tenant](#d-đối-tượng-tenant-xuất-hiện-ở-nhiều-phản-hồi)
@@ -9,7 +9,7 @@
 
 ## 1. TỔNG QUAN
 
-### 1.1 Tổng quan 8 API
+### 1.1 Tổng quan 9 API
 
 | # | Việc | Method | Đường dẫn | Mã thành công |
 | :-: | :--- | :---: | :--- | :---: |
@@ -21,6 +21,7 @@
 | 6 | Xóa (xóa mềm) | `DELETE` | `/api/v1/tenants/{tenantId}` | 200 |
 | 7 | Xem các chủ nhà xe | `GET` | `/api/v1/tenants/{tenantId}/admins` | 200 |
 | 8 | Thêm chủ nhà xe | `POST` | `/api/v1/tenants/{tenantId}/admins` | 201 |
+| 9 | Tra cứu email chủ nhà xe | `POST` | `/api/v1/tenants/admin-lookup` | 200 |
 
 ### 1.2 Xác thực và phân quyền
 - Mọi API cần header `Authorization: Bearer <accessToken>`.
@@ -39,6 +40,7 @@
 | 6. Xóa mềm | đọc, ghi nếu đổi | | | | | | |
 | 7. Xem chủ nhà xe | đọc | | đọc | | | đọc | đọc |
 | 8. Thêm chủ nhà xe | đọc | | đọc | | | đọc, ghi nếu email mới | đọc và ghi |
+| 9. Tra cứu email chủ | đọc nếu có `tenantId` | | | | | đọc | đọc nếu có `tenantId` |
 
 Ô trống nghĩa là API không chạm bảng đó. Chỉ API 1 ghi vào `tenant_configs`, `roles` và `role_permissions`.
 
@@ -84,11 +86,11 @@ sequenceDiagram
 
 ### 1.5 Luồng xử lý một chủ nhà xe (dùng chung cho API 1 và API 8)
 
-Việc gán chủ nhà xe dài và nhiều nhánh, dùng chung cho **tạo nhà xe** (API 1) và **thêm chủ** (API 8), nên được vẽ riêng một lần ở đây. Sơ đồ của hai API chỉ ghi "xem sơ đồ mục 1.5".
+Việc gán chủ nhà xe dài và nhiều nhánh (luật nằm ở lớp `TenantAdminAssigner`, được `TenantServiceImpl` gọi), dùng chung cho **tạo nhà xe** (API 1) và **thêm chủ** (API 8), nên được vẽ riêng một lần ở đây. Sơ đồ của hai API chỉ ghi "xem sơ đồ mục 1.5".
 
 Hai bước **tách rời nhau**, vẽ cho **một** chủ:
-- **Bước kiểm tra** (`prepareAdmin`): chưa ghi gì vào DB. Khi tạo nhà xe, bước này chạy cho **tất cả** chủ trước khi ghi bất cứ thứ gì.
-- **Bước ghi** (`assignTenantAdmin`): tạo tài khoản nếu email mới, rồi liên kết vào nhà xe với vai trò `TENANT_ADMIN`.
+- **Bước kiểm tra** (`TenantAdminAssigner.prepareAll` hoặc `prepareOne`): chưa ghi gì vào DB. Khi tạo nhà xe, bước này chạy cho **tất cả** chủ trước khi ghi bất cứ thứ gì.
+- **Bước ghi** (`TenantAdminAssigner.assign`): tạo tài khoản nếu email mới, rồi liên kết vào nhà xe với vai trò `TENANT_ADMIN`.
 
 ```mermaid
 sequenceDiagram
@@ -96,8 +98,8 @@ sequenceDiagram
   participant G as createTenant hoặc addTenantAdmin
   participant S as Service
   participant R as Repository
-  Note over G,R: BƯỚC KIỂM TRA - prepareAdmin, chưa ghi gì
-  G->>S: prepareAdmin(email, fullName, password)
+  Note over G,R: BƯỚC KIỂM TRA - prepareOne, chưa ghi gì
+  G->>S: prepareOne(email, fullName, password)
   S->>S: chuẩn hóa email, bỏ khoảng trắng và đổi chữ thường
   alt email rỗng
     S-->>G: lỗi 400 ERR_400
@@ -119,8 +121,8 @@ sequenceDiagram
     end
   end
   S-->>G: PreparedAdmin gồm email, họ tên, mật khẩu và tài khoản có sẵn nếu có
-  Note over G,R: BƯỚC GHI - assignTenantAdmin
-  G->>S: assignTenantAdmin(tenantId, adminRoleId, PreparedAdmin)
+  Note over G,R: BƯỚC GHI - assign
+  G->>S: assign(tenantId, adminRoleId, PreparedAdmin)
   alt email mới
     S->>R: UserRepository.save(User mới, mật khẩu BCrypt)
     Note over S,R: tài khoản mới đang hoạt động, không phải Super Admin
@@ -165,7 +167,7 @@ sequenceDiagram
   S->>S: settings phải là JSON hợp lệ
   S->>S: danh sách chủ không rỗng
   loop mỗi chủ nhà xe
-    S->>S: prepareAdmin, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
+    S->>S: prepareOne, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
   end
   alt settings sai, danh sách rỗng hoặc có chủ không hợp lệ
     S-->>C: 400 ERR_400, chưa ghi gì
@@ -179,7 +181,7 @@ sequenceDiagram
   end
   S->>R: TenantRoleRepository.findByTenantIdAndCode(tenantId, TENANT_ADMIN)
   loop mỗi chủ nhà xe
-    S->>S: assignTenantAdmin, XEM SƠ ĐỒ MỤC 1.5, bước ghi
+    S->>S: assign, XEM SƠ ĐỒ MỤC 1.5, bước ghi
   end
   S-->>K: CreateTenantResponseDTO
   K-->>C: 201 Created, tenant và admins, không có mật khẩu
@@ -253,8 +255,8 @@ sequenceDiagram
 | 400 | `VALIDATION_ERROR` | Dữ liệu không hợp lệ (tên rỗng, domain sai mẫu, email sai dạng, mật khẩu yếu, thiếu `admins`...) | Chi tiết theo từng trường trong `data` |
 | 400 | `ERR_400` | `admins` rỗng | "Cần ít nhất một chủ nhà xe !" |
 | 400 | `ERR_400` | Email trùng trong danh sách | "Email chủ nhà xe bị trùng trong danh sách: {email}" |
-| 400 | `ERR_400` | Tài khoản có sẵn đang bị khóa | "Tài khoản {email} đang bị khóa !" |
-| 400 | `ERR_400` | Tài khoản có sẵn là Super Admin | "Tài khoản Super Admin không thể làm chủ nhà xe: {email}" |
+| 400 | `ERR_400` | Tài khoản có sẵn đang bị khóa | "Tài khoản đang bị khóa !" |
+| 400 | `ERR_400` | Tài khoản có sẵn là Super Admin | "Tài khoản Super Admin không thể làm chủ nhà xe" |
 | 400 | `ERR_400` | Email mới thiếu họ tên | "Vui lòng nhập họ tên cho tài khoản mới: {email}" |
 | 400 | `ERR_400` | Email mới thiếu mật khẩu | "Vui lòng nhập mật khẩu cho tài khoản mới: {email}" |
 | 400 | `ERR_400` | `settings` không phải JSON | "Trường settings không phải JSON hợp lệ !" |
@@ -611,8 +613,8 @@ sequenceDiagram
   alt nhà xe chưa có vai trò chủ
     S-->>C: 500 ERR_500
   end
-  S->>S: prepareAdmin cho một chủ, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
-  S->>S: assignTenantAdmin cho một chủ, XEM SƠ ĐỒ MỤC 1.5, bước ghi
+  S->>S: prepareOne cho một chủ, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
+  S->>S: assign cho một chủ, XEM SƠ ĐỒ MỤC 1.5, bước ghi
   alt vi phạm quy tắc ở sơ đồ 1.5
     S-->>C: 400 ERR_400 hoặc 409 TENANT_ADMIN_ALREADY_ASSIGNED
   else hợp lệ
@@ -646,13 +648,13 @@ Ví dụ: `{ "email": "chu2@binhan.vn", "fullName": "Trần Thị Hai", "passwor
 | :-: | :--- | :--- | :--- |
 | 400 | `VALIDATION_ERROR` | Dữ liệu không hợp lệ | Theo từng trường |
 | 400 | `ERR_400` | Nhà xe đang bị khóa | "Nhà xe đang bị khóa, không thể thêm chủ nhà xe !" |
-| 400 | `ERR_400` | Tài khoản có sẵn bị khóa | "Tài khoản {email} đang bị khóa !" |
-| 400 | `ERR_400` | Tài khoản có sẵn là Super Admin | "Tài khoản Super Admin không thể làm chủ nhà xe: {email}" |
-| 400 | `ERR_400` | Người này đang là nhân viên (STAFF, SALE) của nhà xe | "Người này đang là nhân viên của nhà xe, chưa hỗ trợ nâng quyền: {email}" |
+| 400 | `ERR_400` | Tài khoản có sẵn bị khóa | "Tài khoản đang bị khóa !" |
+| 400 | `ERR_400` | Tài khoản có sẵn là Super Admin | "Tài khoản Super Admin không thể làm chủ nhà xe" |
+| 400 | `ERR_400` | Người này đang là nhân viên (STAFF, SALE) của nhà xe | "Người này đang là nhân viên của nhà xe, chưa hỗ trợ nâng quyền" |
 | 400 | `ERR_400` | Email mới thiếu họ tên | "Vui lòng nhập họ tên cho tài khoản mới: {email}" |
 | 400 | `ERR_400` | Email mới thiếu mật khẩu | "Vui lòng nhập mật khẩu cho tài khoản mới: {email}" |
 | 404 | `ERR_404` | Không có nhà xe | "Không tìm thấy nhà xe !" |
-| 409 | `TENANT_ADMIN_ALREADY_ASSIGNED` | Đã là chủ nhà xe này | "Người này đã là chủ nhà xe của nhà xe này: {email}" |
+| 409 | `TENANT_ADMIN_ALREADY_ASSIGNED` | Đã là chủ nhà xe này | "Người này đã là chủ nhà xe của nhà xe này" |
 | 500 | `ERR_500` | Nhà xe chưa có vai trò chủ (dữ liệu hỏng, ví dụ nhà xe tạo tay không qua API) | "Nhà xe chưa có nhóm quyền chủ nhà xe !" |
 
 ### Dữ liệu ghi
@@ -660,9 +662,95 @@ Ví dụ: `{ "email": "chu2@binhan.vn", "fullName": "Trần Thị Hai", "passwor
 
 ---
 
+## API 9. Tra cứu email chủ nhà xe: `POST /api/v1/tenants/admin-lookup`
+
+**Mô tả:** hỏi trước một email đã có tài khoản chưa, để giao diện biết có cần hiện ô họ tên và mật khẩu hay không, và báo sớm các trường hợp chắc chắn bị từ chối. **Chỉ đọc, không ghi gì.** Gọi trước khi gửi API 1 hoặc API 8; hai API đó vẫn tự kiểm tra lại khi nhận yêu cầu.
+
+> **Vì sao POST dù chỉ đọc:** để email nằm trong body, không lọt vào log truy cập của máy chủ và proxy như khi nằm trên đường dẫn.
+
+### Luồng xử lý
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant K as Controller
+  participant S as Service
+  participant R as Repository
+  C->>K: POST /api/v1/tenants/admin-lookup kèm body email, tenantId (tùy chọn)
+  K->>S: lookupAdminByEmail(email, tenantId)
+  S->>S: chuẩn hóa email, bỏ khoảng trắng và đổi chữ thường
+  alt email rỗng
+    S-->>C: 400 ERR_400
+  end
+  opt có tenantId
+    S->>R: TenantRepository.findById(tenantId)
+    alt không có nhà xe
+      S-->>C: 404 ERR_404
+    end
+  end
+  S->>R: UserRepository.findByEmail(email)
+  alt email chưa có tài khoản
+    Note over S: gán được, sẽ tạo tài khoản mới (trừ khi nhà xe đang bị khóa)
+  else email đã có tài khoản
+    S->>S: tài khoản bị khóa hoặc là Super Admin thì không gán được
+    opt có tenantId và tài khoản dùng được
+      S->>R: UserTenantRepository.findByUserIdAndTenantId
+      Note over S: đã là chủ hoặc đang là nhân viên của nhà xe này thì không gán được
+    end
+  end
+  S-->>K: AdminLookupResponseDTO
+  K-->>C: 200 OK
+```
+
+### Đầu vào (body)
+
+| Tên biến | Kiểu | Bắt buộc | Mô tả |
+| :--- | :--- | :-: | :--- |
+| `email` | string | Có | Email cần tra, không rỗng, tối đa 255 ký tự. Tự bỏ khoảng trắng và đổi chữ thường |
+| `tenantId` | uuid | Không | Có thì kiểm tra thêm quan hệ với nhà xe này: đã là chủ, đang là nhân viên, nhà xe bị khóa. Không có thì chỉ xét tài khoản (dùng khi tạo nhà xe mới) |
+
+Ví dụ: `{ "email": "minh.admin@rentcarhanoi.vn", "tenantId": "3f2c1b7e-..." }`
+
+### Đầu ra: `200 OK`
+
+| Tên biến | Kiểu | Mô tả |
+| :--- | :--- | :--- |
+| `data.email` | string | Email đã chuẩn hóa |
+| `data.accountExists` | boolean | Email đã có tài khoản trong hệ thống |
+| `data.fullName` | string hoặc null | Họ tên của tài khoản có sẵn, `null` nếu email chưa có tài khoản |
+| `data.canBeAdmin` | boolean | Gán được làm chủ nhà xe không. Email chưa có tài khoản thì `true` (sẽ tạo tài khoản mới) |
+| `data.reason` | string hoặc null | Lý do không gán được, **cùng câu** với lỗi 400 hoặc 409 khi gửi API 1 hoặc API 8 (các câu này không kèm email, vì giao diện đã hiện email ở ô nhập). `null` nếu gán được |
+
+`message`: "Tra cứu email thành công !"
+
+**Cách giao diện dùng kết quả:**
+
+| `accountExists` | `canBeAdmin` | Giao diện |
+| :-: | :-: | :--- |
+| `false` | `true` | Hiện ô họ tên và mật khẩu (bắt buộc) để tạo tài khoản mới |
+| `true` | `true` | Báo "Đã có tài khoản {họ tên}", **không** hiện họ tên và mật khẩu |
+| bất kỳ | `false` | Hiện `reason`, không cho gửi |
+
+```json
+{ "success": true, "data": { "email": "minh.admin@rentcarhanoi.vn", "accountExists": true, "fullName": "Nguyễn Văn Minh", "canBeAdmin": true, "reason": null }, "message": "Tra cứu email thành công !" }
+```
+
+### Lỗi
+| HTTP | `error.code` | Khi nào |
+| :-: | :--- | :--- |
+| 400 | `VALIDATION_ERROR` | `email` rỗng hoặc quá dài |
+| 400 | `MALFORMED_JSON` | Body không phải JSON hợp lệ, hoặc `tenantId` không phải UUID |
+| 404 | `ERR_404` | Có `tenantId` nhưng không có nhà xe |
+| 401, 403 | | Xem Phụ lục B |
+
+Lưu ý: kết quả chỉ để gợi ý cho giao diện. Giữa lúc tra cứu và lúc gửi, dữ liệu có thể đổi, nên API 1 và API 8 vẫn kiểm tra lại đầy đủ.
+
+---
+
 ## 3. GIỚI HẠN ĐÃ BIẾT
 
-Các giới hạn hiện biết (tham số sai kiểu trả 500 thay vì 400, khóa nhà xe chưa chặn ngay người đang cầm token, trùng domain đồng thời, các API chưa có) được ghi ở mục [Phụ thuộc người khác](2026-10-06-tenant-crud-implementation-guide.md#5-phụ-thuộc-người-khác) của kế hoạch.
+Các giới hạn hiện biết (tham số sai kiểu trả 500 thay vì 400, trùng domain đồng thời, các API chưa có) được ghi ở mục [Phụ thuộc người khác](2026-10-06-tenant-crud-implementation-guide.md#5-phụ-thuộc-người-khác) của kế hoạch.
 
 ---
 

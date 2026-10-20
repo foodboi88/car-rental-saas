@@ -39,7 +39,7 @@ Hệ thống hỗ trợ quản lý nhà xe, chi nhánh/bãi xe, quản lý độ
 | **Fleet & Vehicle Module** | Quản lý loại xe, hồ sơ xe, trạng thái xe | `Đang triển khai` |
 | **Branch Management** | CRUD chi nhánh, phân công nhân sự chi nhánh | `Đang triển khai` |
 | **Booking & Pricing Engine** | Đặt cọc, giữ chỗ (HOLD), giao/nhận xe, phạt trễ giờ, bảng giá động | `Kế hoạch Phase 2` |
-| **Frontend (màn hình Auth)** | Angular, mobile-first và responsive, có khung ứng dụng (header, menu theo quyền) và giao diện sáng/tối: đăng nhập, chọn nhà xe, chọn chi nhánh, làm mới phiên, đăng xuất. Xem [kế hoạch và kết quả chạy thử](docs/plans/frontend/2026-10-19-frontend-auth-plan.md) | `Auth: đã dựng và chạy thử` |
+| **Frontend (Auth và Nhà xe)** | Angular, mobile-first và responsive, có khung ứng dụng (header, menu theo quyền) và giao diện sáng/tối: đăng nhập, chọn nhà xe, chọn chi nhánh, làm mới phiên, đăng xuất; Super Admin quản lý nhà xe (danh sách, tạo, sửa, khóa, xóa mềm, chủ nhà xe). Xem [kế hoạch và kết quả chạy thử](docs/plans/frontend/2026-10-19-frontend-auth-plan.md) | `Auth và Nhà xe: đã dựng và chạy thử` |
 
 ---
 
@@ -52,7 +52,7 @@ Hệ thống hỗ trợ quản lý nhà xe, chi nhánh/bãi xe, quản lý độ
 | **Database Migration**| Flyway Migration Tool |
 | **Authentication** | Stateless JWT (jjwt 0.12.x), Refresh Token qua cookie `HttpOnly`, BCrypt Password Encoder |
 | **API Documentation**| SpringDoc OpenAPI 3.0 / Swagger UI |
-| **Frontend** | Angular 21 (component độc lập, `signal`, không zone.js), Vitest, mobile-first và responsive, giao diện sáng/tối. Mới có màn hình Auth, xem [kế hoạch frontend](docs/plans/frontend/2026-10-19-frontend-auth-plan.md) |
+| **Frontend** | Angular 21 (component độc lập, `signal`, không zone.js), Vitest, mobile-first và responsive, giao diện sáng/tối. Hiện có màn hình Auth và quản lý nhà xe, xem [kế hoạch frontend](docs/plans/frontend/2026-10-19-frontend-auth-plan.md) |
 | **Build & Tooling** | Apache Maven 3.9+, Lombok, Docker |
 
 ---
@@ -88,7 +88,7 @@ mvn spring-boot:run
 Sau khi ứng dụng khởi chạy thành công tại cổng `8080`, mở trình duyệt truy cập:
 👉 **`http://localhost:8080/swagger-ui/index.html`**
 
-### 5. Khởi chạy Frontend (màn hình Auth)
+### 5. Khởi chạy Frontend (Auth và Nhà xe)
 Mở terminal khác, vào thư mục `frontend` và chạy máy chủ dev:
 ```powershell
 cd frontend
@@ -153,7 +153,7 @@ Tất cả tài liệu thiết kế và phân tích chuyên sâu được lưu t
 Kế hoạch và hướng dẫn triển khai từng phần nằm ở [`docs/plans/`](docs/plans/):
 
 - 🔐 **[Hướng dẫn module Auth (JWT)](docs/plans/auth-login/2026-08-28-auth-jwt-implementation-guide.md):** Cách xây dựng đăng nhập, chọn nhà xe, chọn chi nhánh, làm mới token.
-- 🖥 **[Kế hoạch Frontend (màn hình Auth)](docs/plans/frontend/2026-10-19-frontend-auth-plan.md):** Phạm vi, hợp đồng API auth, luồng màn hình và quy tắc giao diện mobile-first.
+- 🖥 **[Kế hoạch Frontend (Auth và Nhà xe)](docs/plans/frontend/2026-10-19-frontend-auth-plan.md):** Phạm vi, hợp đồng API auth, luồng màn hình và quy tắc giao diện mobile-first.
 
 ---
 

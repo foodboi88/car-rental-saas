@@ -789,7 +789,7 @@ backend/src/main/java/com/carrental/car_rental_backend/
 
 ## 12. Cấu Trúc Mã Nguồn Frontend (Frontend Source Tree)
 
-Chạy thử: xem mục "Khởi chạy Frontend" trong [README](../../README.md). Hiện mới có màn hình Auth.
+Chạy thử: xem mục "Khởi chạy Frontend" trong [README](../../README.md). Hiện có màn hình Auth và quản lý nhà xe của Super Admin.
 
 ```
 frontend/
@@ -804,4 +804,5 @@ frontend/
     ├── layout/app-shell/       # Khung chung: header, menu bên trái, vùng nội dung
     ├── shared/                 # Biểu tượng SVG, nút đổi sáng/tối
     └── features/               # login, select-tenant, select-branch, home
+        └── tenants/            # Quản lý nhà xe (Super Admin): tenant-list, tenant-form, tenant-detail, tenant.service
 ```

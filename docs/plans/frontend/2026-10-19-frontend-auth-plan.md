@@ -9,9 +9,9 @@
 
 ## 1. Phạm vi
 
-**Có làm:** đăng nhập, chọn nhà xe, chọn chi nhánh, làm mới phiên, đăng xuất, và một trang chủ hiển thị thông tin phiên (người dùng, vai trò, quyền, nhà xe, chi nhánh). Kèm khung ứng dụng dùng chung (header, menu bên trái theo quyền) và giao diện sáng/tối.
+**Có làm:** đăng nhập, chọn nhà xe, chọn chi nhánh, làm mới phiên, đăng xuất, và một trang chủ hiển thị thông tin phiên (người dùng, vai trò, quyền, nhà xe, chi nhánh). Kèm khung ứng dụng dùng chung (header, menu bên trái theo quyền) và giao diện sáng/tối. Từ 20/10/2026 có thêm **quản lý nhà xe cho Super Admin** (xem mục 9).
 
-**Chưa làm:** quản lý nhà xe, chi nhánh, xe, khách, đơn thuê. Các màn này chưa nối vào đây vì API nằm ở các nhánh khác, chưa gộp: module tenant ở `feature/huynq7-tenant`, module chi nhánh và người dùng ở `feature/giangdt`. Xe, khách, đơn thuê thì backend chưa có API.
+**Chưa làm:** chi nhánh, người dùng, xe, khách, đơn thuê. Module chi nhánh và người dùng có API ở `feature/giangdt`, chưa gộp. Xe, khách, đơn thuê thì backend chưa có API.
 
 ## 2. Công nghệ và cấu trúc
 
@@ -124,7 +124,6 @@ Quy tắc chọn màn sau mỗi lần gọi API thành công:
 
 | Phần | Lý do chưa có |
 | :--- | :--- |
-| Quản lý nhà xe của Super Admin | Module tenant ở nhánh `feature/huynq7-tenant`, chưa gộp |
 | Quản lý chi nhánh, quản lý người dùng | Đã có API ở nhánh `feature/giangdt`, chưa gộp (gộp có thể xung đột ở `AuthServiceImpl` và `UserPrincipal`) |
 | Xe, khách, đơn thuê | Backend chưa có API |
 | Gọi API nghiệp vụ có kiểm tra quyền | Chưa có API để gọi |
@@ -170,3 +169,34 @@ Cookie `Secure` trên `http://localhost` hoạt động với Chrome. Có 76 tes
 - Trang sau đăng nhập nằm trong khung chung: **header** (logo, nhà xe/chi nhánh đang làm việc, nút sáng/tối, menu người dùng) và **menu bên trái** cố định từ 1024px; dưới 1024px menu là ngăn kéo mở bằng nút ba gạch. Màn trước đăng nhập (đăng nhập, chọn nhà xe, chọn chi nhánh) giữ thẻ giữa màn hình.
 - Mục menu hiện theo quyền trong phiên (Super Admin chỉ thấy "Nhà xe"); module chưa làm hiện mờ kèm nhãn "Sắp có". Thêm module mới: một route con trong `app.routes.ts` và một dòng trong `nav-items.ts`.
 - Giao diện sáng/tối đổi bằng token màu (`:root[data-theme='dark']` trong `styles.css`), nên component không cần biết đang ở chế độ nào.
+
+## 9. Module Nhà xe cho Super Admin (20/10/2026)
+
+Backend `feature/huynq7-tenant` đã gộp vào nhánh này, nên frontend nối đủ 9 API ở [đặc tả API tenant](../tenant/2026-10-19-tenant-api-spec.md). Chỉ Super Admin thấy và vào được; người dùng nhà xe mở `/tenants` bị đưa về `/home` (`superAdminGuard`).
+
+| Đường dẫn | Màn hình | Việc làm được |
+| :--- | :--- | :--- |
+| `/tenants` | Danh sách | Tìm theo tên hoặc domain, lọc đang hoạt động hoặc đã khóa, phân trang 10 dòng, mới nhất trước |
+| `/tenants/new` | Tạo nhà xe | Nhập thông tin và một hoặc nhiều chủ nhà xe. Cấu hình vận hành dùng giá trị mặc định, không cho chỉnh lúc tạo |
+| `/tenants/:tenantId` | Chi tiết | Xem thông tin và danh sách chủ, khóa, mở khóa, xóa mềm, thêm chủ |
+| `/tenants/:tenantId/edit` | Sửa | Sửa tên, domain, gói và các trường liên hệ |
+
+**Quy tắc giao diện đáng chú ý**
+- Khóa và xóa luôn hỏi xác nhận ngay trên trang (không dùng hộp thoại của trình duyệt). Xóa là **xóa mềm**: nhà xe bị khóa, dữ liệu giữ nguyên, mở khóa lại được. Lời nhắc ghi rõ điều này.
+- Domain được cắt khoảng trắng và đổi chữ thường trước khi kiểm tra và gửi (backend chỉ nhận chữ thường). Email cũng cắt khoảng trắng thừa, vì người dùng hay dán thừa dấu cách.
+- Chủ nhà xe: giao diện **hỏi trước** email đã có tài khoản chưa (API tra cứu, gọi khi rời ô email hoặc khi bấm gửi) rồi mới hiện đúng ô cần nhập: email mới thì hiện họ tên và mật khẩu (bắt buộc); email có sẵn thì chỉ báo "Đã có tài khoản {họ tên}" và không hiện hai ô đó; email không gán được (tài khoản bị khóa, là Super Admin, đã là chủ hoặc nhân viên của nhà xe, nhà xe bị khóa) thì báo lý do ngay và không cho gửi. Sửa email thì kết quả cũ bị bỏ. Hai dòng chủ cùng email (không phân biệt hoa thường, bỏ khoảng trắng) thì dòng sau báo ngay "Email này đã nhập ở chủ nhà xe số N" và không cho gửi; backend vẫn kiểm tra trùng như chốt cuối. Nếu không tra cứu được (lỗi mạng...) thì hiện đủ ô và để backend quyết khi gửi; lần rời ô email sau sẽ thử tra cứu lại. Độ mạnh mật khẩu do **backend** kiểm tra, giao diện không chặn trước và không hiện dòng gợi ý; câu báo lỗi của backend hiện dưới ô mật khẩu.
+- Khi **tạo**, ô tùy chọn để trống thì không gửi để backend dùng mặc định. Khi **sửa**, ô để trống được gửi dưới dạng chuỗi rỗng, nghĩa là xóa giá trị cũ (đúng quy tắc "không gửi là giữ, rỗng là xóa" của API 4).
+- Trường `settings` (JSON tự do) **không có ô nhập** ở cả tạo và sửa, và không bao giờ được gửi, nên backend giữ nguyên hoặc dùng `{}`. Trang chi tiết chỉ hiện nó (chỉ xem) khi khác `{}`. Lý do: chưa có tính năng nào đọc `settings`, và cấu hình vận hành đã chốt dùng giá trị mặc định lúc tạo.
+- Lỗi từng ô lấy từ `VALIDATION_ERROR` (kể cả đường dẫn kiểu `admins[0].email`); domain trùng (409) hiện ngay dưới ô domain; các lỗi nghiệp vụ khác hiện thành thông báo chung.
+- Tạo xong hoặc sửa xong chuyển sang trang chi tiết kèm thông báo (tài khoản nào được tạo mới, tài khoản nào chỉ được gán). Thông báo đi theo trạng thái điều hướng, không nằm trên địa chỉ.
+- Nhà xe đang khóa: nút "Thêm chủ" bị tắt kèm lời giải thích (backend từ chối thêm chủ cho nhà xe đã khóa).
+- Danh sách chỉ giữ kết quả của lần gọi mới nhất, tránh câu trả lời cũ về muộn ghi đè.
+- Điện thoại (dưới 640px): nút ở đầu trang (Thêm nhà xe, Sửa, Khóa, Xóa) chiếm hết bề ngang, chia đều và cao 44px để dễ chạm. Khung "Thông tin" tự chia cột theo bề ngang (1 cột trên điện thoại, 3 cột ở 768px). Cột nhãn trong danh sách rộng cố định để các cột thẳng hàng giữa các dòng. Đã kiểm tra ở 360, 390, 480, 768 và 1280px, không cuộn ngang.
+
+**Cấu trúc:** `features/tenants/` gồm `tenant.service.ts` (9 API), `admin-lookup.ts` (tra cứu email chủ), `admin-lookup-note/` (dòng phản hồi dưới ô email, dùng chung), `tenant-validators.ts` (domain, email), `tenant-list`, `tenant-form` (dùng chung cho tạo và sửa), `tenant-detail`; kiểu dữ liệu ở `core/models/tenant.models.ts`.
+
+**Kết quả kiểm tra (20/10/2026):** thêm 70 test đơn vị, tổng **146 test** đạt (backend: thêm 21 test cho API tra cứu và thứ tự ưu tiên lý do, tổng 108). Chạy thật với backend đã gộp (PostgreSQL riêng, cổng 8090) bằng Chrome: **40 bước đạt**, gồm tìm kiếm và lọc, tạo nhà xe với hai chủ (một mới, một tài khoản có sẵn, ô họ tên và mật khẩu hiện hoặc ẩn theo kết quả tra cứu), email Super Admin bị từ chối ngay, hai chủ trùng email bị chặn ngay, trùng domain, thiếu họ tên, sửa và xóa giá trị, khóa, mở khóa, thêm chủ (kể cả chủ đã có của nhà xe bị từ chối ngay), xóa mềm, tải lại trang ở trang chi tiết, người dùng nhà xe bị chặn, và không cuộn ngang ở 390px.
+
+**Khóa nhà xe có hiệu lực ngay:** theo code của `dynamic-rbac` (`CustomUserDetailsServiceImpl`), người của nhà xe bị khóa nhận 403 "Nhà xe của bạn đang chọn đã bị khóa" ở mọi request, kể cả khi còn access token (đọc từ code, chưa chạy thử).
+
+**Giới hạn còn lại (thuộc backend):** mã nhà xe sai dạng UUID trên đường dẫn trả 500 thay vì 400; chưa có API gỡ hoặc đổi chủ nhà xe nên màn chi tiết chỉ xem và thêm chủ.

@@ -164,11 +164,11 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 | `listTenantAdmins` | Nhà xe phải tồn tại; trả các thành viên có vai trò `TENANT_ADMIN`, xếp theo ngày tham gia |
 
 **`createTenant`: kiểm tra hết rồi mới ghi.**
-1. *Kiểm tra, chưa ghi gì:* domain (làm gọn, đã có người dùng thì 409); `settings` phải là JSON hợp lệ; **cả danh sách chủ** (ít nhất 1 người, email không trùng nhau, từng người qua `prepareAdmin`).
+1. *Kiểm tra, chưa ghi gì:* domain (làm gọn, đã có người dùng thì 409); `settings` phải là JSON hợp lệ; **cả danh sách chủ** (ít nhất 1 người, email không trùng nhau, từng người qua `TenantAdminAssigner.prepareAll`).
 2. *Ghi, theo thứ tự:* lưu `Tenant` (`.isActive(true)`, gói mặc định `FREE`) → lưu `TenantConfig` (30, 100000, 5.00 truyền tường minh) → sinh 3 vai trò và 22 quyền → lấy lại vai trò `TENANT_ADMIN` → gán từng chủ.
 3. Ghi log (người gọi, nhà xe, số chủ, **không log mật khẩu**) và trả `CreateTenantResponseDTO`.
 
-**Gán chủ nhà xe** (`prepareAdmin` để kiểm tra, `assignTenantAdmin` để ghi, dùng chung cho tạo nhà xe và thêm chủ):
+**Gán chủ nhà xe** (`TenantAdminAssigner.prepareAll`/`prepareOne` để kiểm tra, `assign` để ghi, dùng chung cho tạo nhà xe và thêm chủ):
 
 | Tình huống | Kết quả |
 | :--- | :--- |
@@ -203,13 +203,14 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 | `/api/v1/tenants/{id}` (xóa mềm) | `DELETE` | 200 |
 | `/api/v1/tenants/{id}/admins` | `GET` | 200 |
 | `/api/v1/tenants/{id}/admins` | `POST` | 201 |
+| `/api/v1/tenants/admin-lookup` (tra cứu email chủ nhà xe, body: `email`, `tenantId` tùy chọn) | `POST` | 200 |
 
 **Chú ý:**
 - **Phân trang tự dựng, không nhận `sort` từ client:** `page` âm thành 0, `size` kẹp từ 1 đến 100, luôn sắp theo `createdAt` giảm dần (tham số `sort` đi thẳng vào câu truy vấn, sai tên trường gây lỗi). Trả `PagedModel`, không trả `Page`.
 - **Hai API gán người vào nhà xe tách riêng:** API gán chủ (module này, Super Admin gọi, nhà xe lấy từ URL, chỉ gán `TENANT_ADMIN`) khác API tạo nhân viên (module account, chủ nhà xe gọi, nhà xe lấy từ token chống IDOR, chỉ gán `STAFF` hoặc `SALE`). Không gộp một endpoint để khỏi rẽ nhánh theo vai trò và leo quyền. **Phần lõi** "tìm hoặc tạo tài khoản rồi liên kết" viết một chỗ để quy tắc không lệch.
 - Spring kiểm tra **định dạng body trước quyền**: người không có quyền gửi body sai nhận 400 chứ chưa phải 403.
 
-**Xong khi:** gọi được cả 8 API, người không phải Super Admin nhận 403.
+**Xong khi:** gọi được cả 9 API, người không phải Super Admin nhận 403.
 
 ### Giai đoạn 6: Kiểm thử
 **Cần chuẩn bị:** DB mới chạy migration **chưa có Super Admin** (README ghi tài khoản nhưng DB không có). Test thủ công thì bật cờ `is_super_admin` bằng SQL cho **một tài khoản riêng** (không để tài khoản đó vừa là Super Admin vừa thuộc nhà xe, vì nhánh Super Admin ở `login` chạy trước). Test tự động thì tự thêm một tài khoản trong lúc chuẩn bị.
@@ -227,7 +228,7 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 | Sửa | Giữ cũ khi không gửi, xóa khi gửi chuỗi rỗng, ghi đè khi có giá trị; domain trùng nhà xe khác; `created_at` giữ, `updated_at` đổi |
 | Khóa, xóa | Khóa thì đăng nhập bị từ chối; mở khóa dùng lại được; xóa hai lần vẫn thành công và dữ liệu liên quan còn |
 | Danh sách | Tìm theo từ khóa, lọc `isActive`, giới hạn `size` ở 100, 404 khi không có nhà xe |
-| Phân quyền | **Cả 8 API:** không token 401, không phải Super Admin 403; chủ nhà xe này không khóa được nhà xe khác |
+| Phân quyền | **Cả 9 API:** không token 401, không phải Super Admin 403; chủ nhà xe này không khóa được nhà xe khác |
 
 **Kiểm tra test có giá trị:** cố ý phá code (bỏ `@PreAuthorize`, bỏ một quyền của `STAFF`, bỏ điều kiện giữ trường cũ...) rồi xem test có báo đỏ không.
 **Xong khi:** `mvn clean test` xanh và ứng dụng khởi động không lỗi Flyway.
@@ -237,7 +238,7 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 ## 5. PHỤ THUỘC NGƯỜI KHÁC
 
 1. **Tài khoản Super Admin:** DB chưa có. Hỏi người làm auth xem seed ở migration nào. Lâu dài cần cách tạo chính thức (migration hoặc lệnh khởi tạo, mật khẩu từ biến môi trường).
-2. **Khóa nhà xe có thể chưa có tác dụng ngay với người đang đăng nhập:** bộ lọc JWT và `switch-branch` (module auth) cần kiểm tra nhà xe còn hoạt động. Khóa **tài khoản** (`users.is_active`) thì có hiệu lực ngay. Báo người làm auth.
+2. **Khóa nhà xe có hiệu lực ngay (đã xử lý ở nhánh `dynamic-rbac`):** `CustomUserDetailsServiceImpl` kiểm tra nhà xe còn hoạt động ở mỗi request nên người của nhà xe bị khóa nhận 403 dù còn access token (đọc từ code, chưa chạy thử). Riêng `switch-branch` chưa kiểm chứng. Khóa **tài khoản** (`users.is_active`) cũng có hiệu lực ngay.
 3. **`GlobalExceptionHandler` có thể trả 500 cho tham số sai kiểu** (UUID sai dạng, boolean sai kiểu), lẽ ra 400. Cần xác nhận và báo người làm module chung.
 4. **Dùng chung entity và repository của module account** (`User`, `UserTenant`, `UserRepository`, `UserTenantRepository`): chỉ **dùng**, không sửa; báo họ nếu đổi tên trường hay hàm.
 5. **Phần lõi "tìm hoặc tạo tài khoản rồi liên kết"** dùng chung với API tạo nhân viên: khi module account làm, hai bên thống nhất rút ra một lớp chung.
