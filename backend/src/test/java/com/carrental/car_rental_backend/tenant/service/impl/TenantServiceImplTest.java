@@ -725,6 +725,7 @@ class TenantServiceImplTest {
   @Test
   void should_refuse_even_a_new_email_when_the_tenant_is_locked() {
     when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(inactiveTenant()));
+    this.stubAdminRoleLookup();
     when(userRepository.findByEmail("moi@x.vn")).thenReturn(Optional.empty());
 
     AdminLookupResponseDTO result = tenantService.lookupAdminByEmail("moi@x.vn", TENANT_ID);
@@ -738,6 +739,7 @@ class TenantServiceImplTest {
   void should_report_the_locked_tenant_first_when_both_the_tenant_and_the_account_are_locked() {
     // Luồng gán thật kiểm tra nhà xe bị khóa trước tài khoản, nên lý do tra cứu phải là "nhà xe bị khóa"
     when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(inactiveTenant()));
+    this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(false, false));
 
     AdminLookupResponseDTO result = tenantService.lookupAdminByEmail(EXISTING_EMAIL, TENANT_ID);
@@ -745,6 +747,17 @@ class TenantServiceImplTest {
     assertThat(result.isAccountExists()).isTrue();
     assertThat(result.isCanBeAdmin()).isFalse();
     assertThat(result.getReason()).isEqualTo("Nhà xe đang bị khóa, không thể thêm chủ nhà xe !");
+  }
+
+  @Test
+  void should_throw_internal_error_when_looking_up_for_a_tenant_without_an_admin_role() {
+    // Nhà xe tạo tay, không qua API nên thiếu nhóm quyền chủ: báo lỗi dữ liệu hỏng với mọi email, kể cả email mới
+    when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(activeTenant()));
+    when(tenantRoleRepository.findByTenantIdAndCode(TENANT_ID, "TENANT_ADMIN")).thenReturn(Optional.empty());
+
+    assertAppException(() -> tenantService.lookupAdminByEmail("moi@x.vn", TENANT_ID), ErrorCode.INTERNAL_SERVER_ERROR);
+
+    verify(userRepository, never()).findByEmail(anyString());
   }
 
   @Test
@@ -778,6 +791,7 @@ class TenantServiceImplTest {
   @Test
   void should_allow_an_existing_account_that_is_not_yet_a_member_of_the_tenant_and_write_nothing() {
     when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(activeTenant()));
+    this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(true, false));
     when(userTenantRepository.findByUserIdAndTenantId(EXISTING_USER_ID, TENANT_ID)).thenReturn(Optional.empty());
 

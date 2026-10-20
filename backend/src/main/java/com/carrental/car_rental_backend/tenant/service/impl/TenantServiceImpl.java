@@ -184,7 +184,7 @@ public class TenantServiceImpl implements TenantService {
     }
     Role adminRole = this.findAdminRoleOrThrow(tenantId);
 
-    TenantAdminAssigner.PreparedAdmin admin = this.adminAssigner.prepareOne(request);
+    TenantAdminAssigner.PreparedAdmin admin = this.adminAssigner.prepareAll(List.of(request)).get(0);
     CreateTenantResponseDTO.AdminResult result = this.adminAssigner.assign(tenantId, adminRole.getId(), admin);
     log.info("Người dùng {} thêm chủ nhà xe cho nhà xe {} (id = {}), tài khoản mới: {}", actorId, tenant.getName(), tenantId, result.isAccountCreated());
     return result;
@@ -206,7 +206,8 @@ public class TenantServiceImpl implements TenantService {
   @Transactional(readOnly = true)
   public AdminLookupResponseDTO lookupAdminByEmail(String email, UUID tenantId) {
     Tenant tenant = tenantId == null ? null : this.findTenantOrThrow(tenantId);
-    return this.adminAssigner.lookupByEmail(email, tenant, () -> this.findAdminRoleOrThrow(tenantId).getId());
+    UUID adminRoleId = tenant == null ? null : this.findAdminRoleOrThrow(tenantId).getId();
+    return this.adminAssigner.lookupByEmail(email, tenant, adminRoleId);
   }
 
   // Tạo 3 nhóm quyền mặc định cho nhà xe mới, kèm quyền của từng nhóm
