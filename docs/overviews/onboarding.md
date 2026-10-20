@@ -25,8 +25,8 @@ Kiến trúc phân quyền của dự án là sự kết hợp giữa **Dynamic 
 | :--- | :--- | :--- |
 | **SUPER_ADMIN** | Toàn hệ thống | Tài khoản điều hành của đội ngũ phát triển SaaS. Cấu hình hệ thống, tạo Tenant mới, quản lý loại xe `vehicle_types` toàn hệ thống và duyệt thanh toán dịch vụ. Vai trò này lưu bằng cờ `is_super_admin = true` trong bảng `users` và bypass toàn bộ RLS. |
 | **TENANT_ADMIN** | 1 Tenant | Chủ nhà xe (quy định bằng `code = 'TENANT_ADMIN'` trong bảng `roles`). Có toàn quyền quản lý nhân sự, phân quyền động (`roles`/`permissions`), cấu hình giá xe, CRUD chi nhánh (`branches`), xe và xem báo cáo doanh thu toàn hệ thống. Mặc định có quyền truy cập tất cả các chi nhánh thuộc tenant. |
-| **STAFF** | 1+ Chi nhánh | Nhân viên nghiệp vụ (liên kết qua `role_id` ở `user_tenants`). Thực hiện tạo Booking, làm thủ tục bàn giao xe (`handover_by`), nhận lại xe (`returned_by`). Bắt buộc phải được gán vào ít nhất một chi nhánh trong bảng `user_branches` (`status = 1: ACTIVE`) và chỉ thao tác được trên xe/booking thuộc chi nhánh đó. |
-| **SALE** | 1+ Chi nhánh | Cộng tác viên/Nhân viên kinh doanh (liên kết qua `role_id` ở `user_tenants`). Có quyền tạo booking cho khách hàng, xem trạng thái xe trống để tư vấn. Khi tạo đơn, hệ thống ghi nhận cố định `created_by = sale_user_id` để tính hoa hồng chốt sale (`commission_amount`), độc lập với nhân viên làm thủ tục bàn giao xe. |
+| **STAFF** | 1+ Chi nhánh được phân công | Nhân viên vận hành (liên kết qua `role_id` ở `user_tenants`). Khi tạo tài khoản nhân viên, Chủ xe (`TENANT_ADMIN`) chọn các chi nhánh phân công cho Staff (`branchIds`), hệ thống lưu các chi nhánh này vào `user_branches` (`status = 1: ACTIVE`). Khi đăng nhập và chọn Tenant, nhân viên chọn 1 chi nhánh tác nghiệp cụ thể (`active_branch_id` trong JWT & Cookie refresh token) trong số các chi nhánh được phân công để thực hiện giao xe (`handover_by`), nhận lại xe (`returned_by`), quản lý xe tại bãi. Có thể linh hoạt đổi giữa các chi nhánh được phân công qua API switch-branch. |
+| **SALE** | Toàn bộ Chi nhánh Tenant | Cộng tác viên/Nhân viên kinh doanh (liên kết qua `role_id` ở `user_tenants`, 1 tài khoản có thể làm việc ở nhiều tenant). Khi tạo tài khoản SALE, form không cần chọn chi nhánh; hệ thống tự động gán toàn bộ các chi nhánh đang hoạt động của Tenant vào `user_branches`. Khi làm việc, **SALE vẫn phải chọn chi nhánh làm việc** để `accessToken` và `refreshToken` mang `active_branch_id` giúp Backend xác định ngữ cảnh xử lý (chi nhánh quản lý khách hàng/tạo booking/chốt hợp đồng). Khi tạo đơn, hệ thống ghi nhận cố định `created_by = sale_user_id` để tính hoa hồng chốt sale (`commission_amount`), và gắn `branch_id = active_branch_id` cho booking. |
 
 ### 2.2 Sơ đồ Quan Hệ Phân Quyền (User-Tenant-Branch & Dynamic RBAC)
 
@@ -427,14 +427,24 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 4. **Đổi Chi Nhánh Làm Việc (`POST /api/v1/auth/switch-branch`)**:
     * Header: `Authorization: Bearer <accessToken>`
     * Request Body: `{ "activeBranchId": "uuid-branch-selected" }`
-    * Backend xác minh quyền truy cập chi nhánh:
-      * Với `TENANT_ADMIN`: Có quyền chọn bất kỳ chi nhánh nào đang hoạt động thuộc tenant.
-      * Với `STAFF` / `SALE`: Kiểm tra chi nhánh phải nằm trong danh sách được phân công (`user_branches`).
+    * Backend xác minh chi nhánh và quyền truy cập:
+      * Chi nhánh phải thuộc sở hữu của nhà xe (`branchInfo.getTenantId().equals(tenantUUID)`) và đang hoạt động (`branchInfo.isActive() = true`).
+      * Với `TENANT_ADMIN`: Mặc định bypass kiểm tra `user_branches` (Chủ nhà xe vào được mọi chi nhánh đang mở của mình).
+      * Với `STAFF` & `SALE`: Bắt buộc kiểm tra qua `userBranchRepository.findByTenantIdAndUserIdAndBranchId`. Phải có bản ghi phân công và trạng thái công tác phải là `UserBranchStatus.ACTIVE (1)`. Bị đình chỉ hoặc nghỉ việc (`status != ACTIVE`) ➔ Báo lỗi `403 Forbidden`.
+      * Cả `STAFF` và `SALE` đều phải chọn chi nhánh làm việc để `accessToken` và `refreshToken` mang `active_branch_id` định danh ngữ cảnh xử lý (quản lý xe, giao nhận, tạo đơn booking, tính doanh thu/kho bãi chi nhánh).
     * Tái cấp (Re-issue) **Access JWT mới** chứa claim `active_branch_id = branchId` và Refresh Token mới tương ứng.
 
-5. **Làm Mới Token Tự Động (Silent Refresh - `POST /api/v1/auth/refresh-token`)**:
+5. **Làm Mới Token Tự Động (Silent Refresh - `POST /api/v1/auth/refresh-token`) & Kịch Bản Điều Hướng FE Khi Bị Khóa**:
     * Request Cookie: `refreshToken` (Tự động đính kèm khi bật `withCredentials = true`). Request Body: *Trống*.
-    * Backend xác thực Refresh Token (hạn dùng, session id, `token_type = REFRESH`), bóc tách `tenant_id` và `active_branch_id` để tái tạo Access Token mới mang đầy đủ ngữ cảnh hiện tại. Không làm gián đoạn form đang nhập của người dùng.
+    * Backend xác thực Refresh Token (hạn dùng, session id, `token_type = REFRESH`), bóc tách `tenant_id` và `active_branch_id` từ JWT Claims.
+    * **Xác thực thời gian thực & Kịch bản điều hướng Frontend (FE Navigation Flow):**
+      * 🏢 **Nếu Nhà xe (Tenant) bị khóa (`tenant.isActive = false`):**
+        * **Backend:** Ném lỗi `403 Forbidden` kèm thông báo *"Nhà xe của bạn đang chọn đã bị khóa"*.
+        * **Frontend:** Bắt lỗi 403, hiển thị Toast cảnh báo, xóa context `tenantId` & `activeBranchId`, sau đó **bắn người dùng về màn hình Chọn Nhà Xe (`/select-tenant`)** để chọn nhà xe khác (nếu làm việc cho $\ge 2$ nhà xe) hoặc về `/login` nếu chỉ có 1 nhà xe.
+      * 📍 **Nếu Chi nhánh (Branch) bị khóa (`branch.isActive = false`) hoặc Nhân viên bị thu hồi quyền (`user_branches.status != ACTIVE`):**
+        * **Backend:** Ném lỗi `403 Forbidden` kèm thông báo *"Chi nhánh của bạn không còn tồn tại hoặc đã bị ngưng hoạt động"* hoặc *"Tài khoản của bạn đã bị thu hồi quyền nhân viên ở chi nhánh này"*.
+        * **Frontend:** Bắt lỗi 403, hiển thị Toast cảnh báo, xóa context `activeBranchId`, và **bắn người dùng về màn hình Chọn Chi Nhánh (`/select-branch`)** để chọn chi nhánh làm việc khác còn hoạt động.
+      * ✅ **Trường hợp bình thường:** Cấp lại cặp Access Token & Refresh Token mới mang đầy đủ ngữ cảnh hiện tại. Form đang nhập của người dùng được submit tiếp tục mà không bị gián đoạn hay mất dữ liệu.
 
 #### D. Cấu trúc Token & TenantContext
 * **Access JWT Payload**:
@@ -481,11 +491,17 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
      * Nếu email **đã tồn tại** VÀ **đã liên kết với Tenant hiện tại** trong `user_tenants` -> Ném lỗi `BadRequestException` (*"Account with this email already exists in your organization"*).
      * Nếu email **đã tồn tại** nhưng **chưa thuộc Tenant hiện tại** -> KHÔNG tạo bản ghi `User` mới, KHÔNG mã hóa hay cập nhật lại `password_hash`. Tiến hành tạo liên kết `user_tenants` mới với `tenant_id` hiện tại và vai trò được chọn, sau đó gán chi nhánh tương ứng.
      * Nếu email **chưa tồn tại** trên hệ thống -> Tạo mới bản ghi `User` (bật `is_active = true`, mã hóa password qua `BCryptPasswordEncoder`), tạo liên kết `user_tenants` và `user_branches`.
-4. **Quy tắc Ràng buộc Chi nhánh (`branchIds`)**:
-   * **Loại bỏ trùng lặp**: Danh sách `branchIds` được tự động de-duplicate trước khi xử lý (`distinct()`).
-   * **Đối với vai trò `STAFF` (role = 2)**: Bắt buộc phải gán vào **ít nhất 1 chi nhánh** (`distinctBranchIds` không được rỗng).
-   * **Đối với vai trò `SALE` (role = 3)**: **Bắt buộc `branchIds` phải rỗng/null**. Nếu người dùng gửi `branchIds` cho tài khoản Sale, hệ thống reject ngay với lỗi `BadRequestException` (*"Sale account must not be assigned to any branch"*).
-   * **Xác minh chính chủ**: Tất cả các `branchIds` được truyền lên phải thực sự thuộc sở hữu của Tenant hiện tại (`findAllByTenantId(tenantId)`). Nếu chứa chi nhánh của Tenant khác, ném lỗi `TenantAccessDeniedException`.
+4. **Quy tắc Phân công Chi nhánh (`branchIds`)**:
+   * **Đối với vai trò `STAFF` (role = 2)**:
+     * Trên Form FE: **Bắt buộc Admin phải chọn ít nhất 1 chi nhánh** (hiển thị danh sách Checkbox các chi nhánh đang hoạt động của Tenant để chọn).
+     * Request gửi lên: Chứa danh sách `branchIds` (được tự động de-duplicate). Nếu rỗng hoặc null -> Báo lỗi `BadRequestException` (*"Staff account must be assigned to at least one branch"*).
+     * Xác minh chính chủ: Tất cả các `branchIds` được truyền lên phải thực sự thuộc sở hữu của Tenant hiện tại và đang hoạt động (`branches.is_active = true`). Nếu chứa chi nhánh của Tenant khác, ném lỗi `TenantAccessDeniedException`.
+     * Lưu vào bảng `user_branches` với trạng thái `UserBranchStatus.ACTIVE (1)`.
+   * **Đối với vai trò `SALE` (role = 3)**:
+     * Trên Form FE: **Không cần chọn chi nhánh** (Form tự động ẩn phần chọn chi nhánh khi chọn vai trò SALE).
+     * Request gửi lên: `branchIds` có thể để null hoặc rỗng.
+     * Backend xử lý: **Tự động truy vấn toàn bộ chi nhánh đang hoạt động (`branches.is_active = true`) của Tenant hiện tại** và lưu tất cả vào `user_branches` cho nhân viên SALE đó với trạng thái `UserBranchStatus.ACTIVE (1)`.
+   * **Ngữ cảnh tác nghiệp**: Cả `STAFF` và `SALE` khi đăng nhập và chọn Nhà xe (`select-tenant`) đều nhận được danh sách `assignedBranches`. Cả hai vai trò đều **bắt buộc phải chọn chi nhánh làm việc (`switch-branch`)** để `accessToken` và `refreshToken` mang claim `active_branch_id` xác định ngữ cảnh xử lý cho Backend.
 
 ```java
 public class CreateAccountRequestDTO {
@@ -515,6 +531,8 @@ public class CreateAccountRequestDTO {
     @Max(value = 3, message = "Role must be 2 (STAFF) or 3 (SALE)")
     private Integer role;
 
+    // Bắt buộc chọn ít nhất 1 chi nhánh đối với STAFF (role = 2). 
+    // Không cần truyền đối với SALE (role = 3) do Backend tự động gán toàn bộ active branches của Tenant.
     private List<UUID> branchIds;
 }
 ```
@@ -542,8 +560,8 @@ public class CreateAccountRequestDTO {
 2. **Danh sách Card Nhân viên (Employee Card List)**:
    * Mỗi nhân viên hiển thị dạng Card bo góc gồm:
      * *Header Card*: Avatar tròn (chữ cái đầu) | Họ & Tên (in đậm) | Badge Vai trò:
-       * 👷 `[Staff - CN Q.1, Q.3]` (Badge màu xanh dương)
-       * 💼 `[Sale - Toàn hệ thống]` (Badge màu tím)
+       * 👷 `[Staff - CN Q.1, Q.3]` (Badge màu xanh dương - liệt kê chi nhánh được phân công)
+       * 💼 `[Sale - Toàn bộ chi nhánh]` (Badge màu tím - tự động gán toàn bộ)
      * *Body Card*: Email, SĐT (Clickable tự động gọi điện/zalo), Badge Trạng thái (`🟢 Hoạt động` / `🔴 Đã khóa`).
      * *Action Button*: Icon `⋮` ở góc phải card -> Bấm mở **Bottom Sheet** thao tác.
 
@@ -555,9 +573,9 @@ public class CreateAccountRequestDTO {
          * 🔴 **Nếu Email MỚI**: Hiện các ô nhập *Mật khẩu `*` (có icon 👁️)*, *Họ và tên `*`*, *Số điện thoại `*`*.
          * 🔵 **Nếu Email ĐÃ TỒN TẠI**: Hiện Banner thông báo *"Email đã có tài khoản trên hệ thống SaaS. Giữ nguyên Họ tên, SĐT và Mật khẩu"*, đồng thời **Tự động ẨN** các ô Mật khẩu, Họ tên, SĐT.
      * *Phân đoạn 2: Vai trò & Phân công Chi nhánh*:
-       * **Chọn Vai trò** `*`: `[👷 STAFF (Nhân viên)]` | `[💼 SALE (Kinh doanh)]`
-       * ➔ **Khi chọn STAFF**: Hiện danh sách Checkbox chọn **Chi nhánh được phân công** `*` (Bắt buộc chọn ít nhất 1 chi nhánh).
-       * ➔ **Khi chọn SALE**: **Tự động ẨN** phần chọn Chi nhánh (kèm ghi chú *"Tài khoản Sale chỉ được dùng chức năng tạo đơn đặt xe cho các branch trên toàn hệ thống"*).
+       * **Chọn Vai trò** `*`: `[👷 STAFF (Nhân viên vận hành)]` | `[💼 SALE (Nhân viên kinh doanh)]`
+       * ➔ **Khi chọn STAFF**: Hiển thị danh sách Checkbox **Chi nhánh được phân công** `*` (Bắt buộc Admin tích chọn ít nhất 1 chi nhánh).
+       * ➔ **Khi chọn SALE**: **Tự động ẨN** phần chọn Chi nhánh (kèm ghi chú *"Tài khoản Sale mặc định được hệ thống tự động gán toàn bộ chi nhánh đang hoạt động của nhà xe"*).
 
 4. **Bottom Sheet Thao tác & Responsive Dialog Xác nhận**:
    * Bấm nút `⋮` trượt Bottom Sheet thao tác: ✏️ *Chỉnh sửa & Phân công lại*, 🔑 *Reset mật khẩu*, 🔒/🔓 *Khóa/Kích hoạt tài khoản*, 🚪 *Gỡ khỏi nhà xe*.
@@ -576,7 +594,8 @@ public class CreateAccountRequestDTO {
 #### B. Quy tắc Phân quyền & Quota Cước
 1. **Phân quyền**:
    * `TENANT_ADMIN` (Role ID = 1): **Quyền duy nhất** được Thêm mới, Cập nhật, Bật/Tắt hoạt động và Xóa Chi nhánh.
-   * `STAFF` (Role ID = 2) & `SALE` (Role ID = 3): Chỉ có quyền Xem danh sách & Chi tiết các Chi nhánh được phân công (Read-only qua `user_branches`).
+   * `STAFF` (Role ID = 2): Chỉ có quyền Xem danh sách & Chi tiết các Chi nhánh được phân công (Read-only qua `user_branches`).
+   * `SALE` (Role ID = 3): Có quyền Xem danh sách tất cả các Chi nhánh đang hoạt động của Tenant (`/api/v1/branches/active` hoặc combobox) để tư vấn và tạo đơn booking nhận/trả xe cho khách.
 2. **Mô hình Hybrid SaaS Quota (`max_branches` & `max_vehicles`)**:
    * Gói **Starter**: Tối đa 1 Chi nhánh, max 15 Xe.
    * Gói **Growth**: Tối đa 3 Chi nhánh, max 50 Xe.
