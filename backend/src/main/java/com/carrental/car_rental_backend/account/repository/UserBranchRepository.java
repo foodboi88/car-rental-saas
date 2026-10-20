@@ -10,4 +10,5 @@ import com.carrental.car_rental_backend.account.entity.UserBranchId;
 
 public interface UserBranchRepository extends JpaRepository<UserBranch, UserBranchId> {
   Optional<UserBranch> findByUserIdAndBranchId(UUID userId, UUID branchId);
+  Optional<UserBranch> findByTenantIdAndUserIdAndBranchId(UUID tenantId, UUID userId, UUID branchId);
 }
