@@ -1,6 +1,6 @@
 import { Routes } from '@angular/router';
 
-import { guestGuard, homeGuard, selectBranchGuard, selectTenantGuard } from './core/auth/auth.guards';
+import { guestGuard, homeGuard, selectBranchGuard, selectTenantGuard, superAdminGuard } from './core/auth/auth.guards';
 
 export const routes: Routes = [
   // Màn trước đăng nhập: thẻ nằm giữa màn hình, không có khung ứng dụng.
@@ -27,6 +27,22 @@ export const routes: Routes = [
     loadComponent: () => import('./layout/app-shell/app-shell').then((m) => m.AppShell),
     children: [
       { path: 'home', loadComponent: () => import('./features/home/home').then((m) => m.Home) },
+      {
+        path: 'tenants',
+        canActivate: [superAdminGuard],
+        children: [
+          { path: '', loadComponent: () => import('./features/tenants/tenant-list/tenant-list').then((m) => m.TenantList) },
+          { path: 'new', loadComponent: () => import('./features/tenants/tenant-form/tenant-form').then((m) => m.TenantForm) },
+          {
+            path: ':tenantId',
+            loadComponent: () => import('./features/tenants/tenant-detail/tenant-detail').then((m) => m.TenantDetail),
+          },
+          {
+            path: ':tenantId/edit',
+            loadComponent: () => import('./features/tenants/tenant-form/tenant-form').then((m) => m.TenantForm),
+          },
+        ],
+      },
       { path: '', pathMatch: 'full', redirectTo: 'home' },
     ],
   },

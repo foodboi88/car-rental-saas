@@ -12,6 +12,13 @@ describe('visibleNavItems', () => {
     expect(labels(userInfo({ roleCode: 'SUPER_ADMIN', permissions: null }))).toEqual(['Tổng quan', 'Nhà xe']);
   });
 
+  it('should_link_tenant_management_to_the_tenants_page', () => {
+    const user = userInfo({ roleCode: 'SUPER_ADMIN', permissions: null });
+    const item = visibleNavItems(user).find((entry) => entry.label === 'Nhà xe');
+
+    expect(item?.path).toBe('/tenants');
+  });
+
   it('should_hide_tenant_management_from_tenant_users', () => {
     expect(labels(userInfo({ permissions: ['booking:read'] }))).not.toContain('Nhà xe');
   });

@@ -29,6 +29,14 @@ export const selectBranchGuard: CanActivateFn = () => {
   return canPickBranch ? true : redirectToNextStep(auth, router);
 };
 
+/** Trang chỉ dành cho Super Admin (quản lý nhà xe): người khác về trang chủ, chưa đăng nhập thì về màn đăng nhập. */
+export const superAdminGuard: CanActivateFn = () => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+  if (!auth.session()) return router.parseUrl(ROUTES.login);
+  return auth.isSuperAdmin() ? true : router.parseUrl(ROUTES.home);
+};
+
 /** Trang chủ: chỉ vào khi đã hoàn tất các bước chọn nhà xe và chi nhánh. */
 export const homeGuard: CanActivateFn = () => {
   const auth = inject(AuthService);

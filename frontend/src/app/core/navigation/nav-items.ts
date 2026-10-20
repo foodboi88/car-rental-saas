@@ -14,7 +14,7 @@ export interface NavItem {
 /** Thêm module mới: thêm một dòng ở đây và một route con trong `app.routes.ts`. */
 export const NAV_ITEMS: readonly NavItem[] = [
   { label: 'Tổng quan', icon: 'home', path: '/home' },
-  { label: 'Nhà xe', icon: 'building', superAdminOnly: true },
+  { label: 'Nhà xe', icon: 'building', path: '/tenants', superAdminOnly: true },
   { label: 'Chi nhánh', icon: 'branch', permission: 'branch:manage' },
   { label: 'Người dùng', icon: 'users', permission: 'account:manage' },
   { label: 'Xe', icon: 'car', permission: 'vehicle:read' },

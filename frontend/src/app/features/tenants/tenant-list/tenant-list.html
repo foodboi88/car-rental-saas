@@ -1,0 +1,78 @@
+<div class="page-head-row">
+  <div class="page-head">
+    <h1 class="page-title">Nhà xe</h1>
+    <p class="muted">Quản lý các nhà xe trên hệ thống.</p>
+  </div>
+  <a class="btn btn-primary" routerLink="/tenants/new"><app-icon name="plus" />Thêm nhà xe</a>
+</div>
+
+<form class="toolbar" role="search" (submit)="$event.preventDefault(); search()">
+  <input
+    class="input"
+    type="search"
+    name="keyword"
+    placeholder="Tìm theo tên hoặc domain"
+    aria-label="Tìm theo tên hoặc domain"
+    autocomplete="off"
+    [ngModel]="keyword()"
+    (ngModelChange)="keyword.set($event)"
+  />
+  <select
+    class="input"
+    name="status"
+    aria-label="Lọc theo trạng thái"
+    [ngModel]="status()"
+    (ngModelChange)="status.set($event); search()"
+  >
+    <option value="all">Tất cả trạng thái</option>
+    <option value="active">Đang hoạt động</option>
+    <option value="locked">Đã khóa</option>
+  </select>
+  <button class="btn btn-ghost" type="submit"><app-icon name="search" />Tìm</button>
+</form>
+
+@if (errorMessage(); as message) {
+  <div class="alert alert-error" role="alert">{{ message }}</div>
+}
+
+<section class="panel" aria-label="Danh sách nhà xe" [attr.aria-busy]="loading()">
+  @if (result(); as data) {
+    @if (data.content.length) {
+      <ul class="rows">
+        @for (tenant of data.content; track tenant.id) {
+          <li>
+            <a class="row" [routerLink]="['/tenants', tenant.id]">
+              <span class="row-main">
+                <span class="row-name">{{ tenant.name }}</span>
+                <span class="muted">{{ tenant.domain }}</span>
+              </span>
+              <span class="row-contact muted">{{ tenant.contactEmail ?? tenant.contactPhone ?? 'Chưa có liên hệ' }}</span>
+              <span class="row-date muted">{{ tenant.createdAt | date: 'dd/MM/yyyy' }}</span>
+              <span class="row-tags">
+                <span class="chip chip-muted">{{ tenant.planTier }}</span>
+                <span class="chip" [class.chip-ok]="tenant.isActive" [class.chip-danger]="!tenant.isActive">
+                  {{ tenant.isActive ? 'Hoạt động' : 'Đã khóa' }}
+                </span>
+              </span>
+            </a>
+          </li>
+        }
+      </ul>
+      <div class="pager">
+        <button type="button" class="btn btn-ghost btn-sm" [disabled]="!hasPrevious() || loading()" (click)="goTo(page() - 1)">
+          <app-icon name="chevronLeft" />Trước
+        </button>
+        <span>Trang {{ data.page.number + 1 }}/{{ data.page.totalPages }} · {{ data.page.totalElements }} nhà xe</span>
+        <button type="button" class="btn btn-ghost btn-sm" [disabled]="!hasNext() || loading()" (click)="goTo(page() + 1)">
+          Sau<app-icon name="chevronRight" />
+        </button>
+      </div>
+    } @else {
+      <p class="empty">{{ filtered() ? 'Không tìm thấy nhà xe phù hợp.' : 'Chưa có nhà xe nào.' }}</p>
+    }
+  } @else if (loading()) {
+    <p class="empty" role="status">Đang tải...</p>
+  } @else {
+    <p class="empty">Không tải được danh sách.</p>
+  }
+</section>

@@ -1,0 +1,152 @@
+<a class="link-back" [routerLink]="isEdit ? ['/tenants', tenantId] : '/tenants'">
+  <app-icon name="arrowLeft" />{{ isEdit ? 'Về chi tiết nhà xe' : 'Về danh sách nhà xe' }}
+</a>
+
+<div class="page-head">
+  <h1 class="page-title">{{ title }}</h1>
+  @if (!isEdit) {
+    <p class="muted">Tạo nhà xe cùng cấu hình vận hành mặc định, 3 nhóm quyền và ít nhất một chủ nhà xe.</p>
+  }
+</div>
+
+@if (errorMessage(); as message) {
+  <div class="alert alert-error" role="alert">{{ message }}</div>
+}
+
+@if (loading()) {
+  <p class="empty" role="status">Đang tải...</p>
+} @else if (!loadFailed()) {
+  <form class="stack" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <section class="panel panel-pad" aria-label="Thông tin nhà xe">
+      <h2 class="section-title">Thông tin nhà xe</h2>
+      <div class="form-grid">
+        <div class="field">
+          <label for="name">Tên nhà xe</label>
+          <input id="name" class="input" formControlName="name" autocomplete="off"
+            [attr.aria-invalid]="error('name', form.controls.name) ? 'true' : null" />
+          @if (error('name', form.controls.name); as message) {
+            <span class="field-error">{{ message }}</span>
+          }
+        </div>
+
+        <div class="field">
+          <label for="domain">Domain</label>
+          <input id="domain" class="input" formControlName="domain" autocomplete="off" autocapitalize="none"
+            placeholder="vi-du-binhan-car"
+            [attr.aria-invalid]="error('domain', form.controls.domain) ? 'true' : null" />
+          @if (error('domain', form.controls.domain); as message) {
+            <span class="field-error">{{ message }}</span>
+          }
+        </div>
+
+        <div class="field">
+          <label for="planTier">Gói dịch vụ</label>
+          <select id="planTier" class="input" formControlName="planTier">
+            @for (tier of planTiers; track tier) {
+              <option [value]="tier">{{ tier }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="contactEmail">Email liên hệ</label>
+          <input id="contactEmail" class="input" type="email" inputmode="email" formControlName="contactEmail"
+            autocomplete="off" autocapitalize="none"
+            [attr.aria-invalid]="error('contactEmail', form.controls.contactEmail) ? 'true' : null" />
+          @if (error('contactEmail', form.controls.contactEmail); as message) {
+            <span class="field-error">{{ message }}</span>
+          }
+        </div>
+
+        <div class="field">
+          <label for="contactPhone">Số điện thoại liên hệ</label>
+          <input id="contactPhone" class="input" type="tel" inputmode="tel" formControlName="contactPhone"
+            autocomplete="off"
+            [attr.aria-invalid]="error('contactPhone', form.controls.contactPhone) ? 'true' : null" />
+          @if (error('contactPhone', form.controls.contactPhone); as message) {
+            <span class="field-error">{{ message }}</span>
+          }
+        </div>
+
+        <div class="field">
+          <label for="logoUrl">Địa chỉ logo</label>
+          <input id="logoUrl" class="input" type="url" inputmode="url" formControlName="logoUrl" autocomplete="off"
+            [attr.aria-invalid]="error('logoUrl', form.controls.logoUrl) ? 'true' : null" />
+          @if (error('logoUrl', form.controls.logoUrl); as message) {
+            <span class="field-error">{{ message }}</span>
+          }
+        </div>
+      </div>
+    </section>
+
+    @if (!isEdit) {
+      <section class="panel panel-pad" aria-label="Chủ nhà xe">
+        <div>
+          <h2 class="section-title">Chủ nhà xe</h2>
+          <p class="hint">Nhập email trước, hệ thống tự kiểm tra email đã có tài khoản chưa để hiện đúng các ô cần nhập.</p>
+        </div>
+
+        <div formArrayName="admins" class="stack">
+          @for (admin of admins.controls; track admin; let i = $index) {
+            <div class="admin" [formGroupName]="i">
+              <div class="admin-head">
+                <strong>Chủ nhà xe {{ i + 1 }}</strong>
+                @if (canRemoveAdmin()) {
+                  <button type="button" class="btn btn-ghost btn-sm" (click)="removeAdmin(i)">
+                    <app-icon name="trash" />Bỏ
+                  </button>
+                }
+              </div>
+              <div class="form-grid">
+                <div class="field field-wide">
+                  <label [for]="'admin-email-' + i">Email</label>
+                  <input [id]="'admin-email-' + i" class="input" type="email" inputmode="email" formControlName="email"
+                    autocomplete="off" autocapitalize="none"
+                    (input)="onAdminEmailInput(admin)" (blur)="checkAdmin(admin)"
+                    [attr.aria-invalid]="error('admins[' + i + '].email', $any(admin).controls.email) || duplicateOf(admin) || lookupOf(admin).status() === 'blocked' ? 'true' : null" />
+                  @if (error('admins[' + i + '].email', $any(admin).controls.email); as message) {
+                    <span class="field-error">{{ message }}</span>
+                  } @else if (duplicateOf(admin); as position) {
+                    <span class="field-error" role="alert">Email này đã nhập ở chủ nhà xe số {{ position }}</span>
+                  } @else {
+                    <app-admin-lookup-note [lookup]="lookupOf(admin)" />
+                  }
+                </div>
+                @if (lookupOf(admin).needsAccountDetails()) {
+                  <div class="field">
+                    <label [for]="'admin-name-' + i">Họ tên</label>
+                    <input [id]="'admin-name-' + i" class="input" formControlName="fullName" autocomplete="off"
+                      [attr.aria-invalid]="error('admins[' + i + '].fullName', $any(admin).controls.fullName) ? 'true' : null" />
+                    @if (error('admins[' + i + '].fullName', $any(admin).controls.fullName); as message) {
+                      <span class="field-error">{{ message }}</span>
+                    }
+                  </div>
+                  <div class="field">
+                    <label [for]="'admin-password-' + i">Mật khẩu</label>
+                    <input [id]="'admin-password-' + i" class="input" type="password" formControlName="password"
+                      autocomplete="new-password"
+                      [attr.aria-invalid]="error('admins[' + i + '].password', $any(admin).controls.password) ? 'true' : null" />
+                    @if (error('admins[' + i + '].password', $any(admin).controls.password); as message) {
+                      <span class="field-error">{{ message }}</span>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+          }
+        </div>
+
+        <div>
+          <button type="button" class="btn btn-ghost btn-sm" (click)="addAdmin()"><app-icon name="plus" />Thêm chủ nhà xe</button>
+        </div>
+      </section>
+    }
+
+    <div class="actions">
+      <button class="btn btn-primary" type="submit" [disabled]="submitting()">
+        {{ submitting() ? 'Đang lưu...' : isEdit ? 'Lưu thay đổi' : 'Tạo nhà xe' }}
+      </button>
+      <a class="btn btn-ghost" [routerLink]="isEdit ? ['/tenants', tenantId] : '/tenants'">Hủy</a>
+    </div>
+  </form>
+}

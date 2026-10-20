@@ -6,7 +6,7 @@ import { ActivatedRouteSnapshot, CanActivateFn, provideRouter, RouterStateSnapsh
 import { AuthPayload } from '../models/auth.models';
 import { authPayload, BRANCH_1, success, TENANT_A } from '../testing/auth-fixtures';
 import { ROUTES } from './auth-routing';
-import { guestGuard, homeGuard, selectBranchGuard, selectTenantGuard } from './auth.guards';
+import { guestGuard, homeGuard, selectBranchGuard, selectTenantGuard, superAdminGuard } from './auth.guards';
 import { AUTH_API, AuthService } from './auth.service';
 
 describe('auth guards', () => {
@@ -106,5 +106,21 @@ describe('auth guards', () => {
     loginAs(authPayload({ user: { roleCode: 'SUPER_ADMIN' } }));
 
     expect(run(homeGuard)).toBe(true);
+  });
+
+  it('should_send_guests_to_login_from_super_admin_pages', () => {
+    expect(run(superAdminGuard)).toBe(ROUTES.login);
+  });
+
+  it('should_let_super_admin_open_super_admin_pages', () => {
+    loginAs(authPayload({ user: { roleCode: 'SUPER_ADMIN', permissions: null } }));
+
+    expect(run(superAdminGuard)).toBe(true);
+  });
+
+  it('should_send_tenant_users_home_from_super_admin_pages', () => {
+    loginAs(fullSessionPayload());
+
+    expect(run(superAdminGuard)).toBe(ROUTES.home);
   });
 });

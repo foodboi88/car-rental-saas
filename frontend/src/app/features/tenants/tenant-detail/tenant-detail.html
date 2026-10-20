@@ -1,0 +1,165 @@
+<a class="link-back" routerLink="/tenants"><app-icon name="arrowLeft" />Về danh sách nhà xe</a>
+
+@if (notice(); as message) {
+  <div class="alert alert-success" role="status">{{ message }}</div>
+}
+@if (errorMessage(); as message) {
+  <div class="alert alert-error" role="alert">{{ message }}</div>
+}
+
+@if (tenant(); as t) {
+  <div class="page-head-row">
+    <div class="page-head">
+      <h1 class="page-title">{{ t.name }}</h1>
+      <p class="head-tags">
+        <span class="chip chip-muted">{{ t.planTier }}</span>
+        <span class="chip" [class.chip-ok]="t.isActive" [class.chip-danger]="!t.isActive">
+          {{ t.isActive ? 'Hoạt động' : 'Đã khóa' }}
+        </span>
+      </p>
+    </div>
+    <div class="actions">
+      <a class="btn btn-ghost btn-sm" [routerLink]="['/tenants', t.id, 'edit']"><app-icon name="edit" />Sửa</a>
+      @if (t.isActive) {
+        <button type="button" class="btn btn-ghost btn-sm" [disabled]="busy()" (click)="ask('lock')">
+          <app-icon name="lock" />Khóa
+        </button>
+        <button type="button" class="btn btn-danger btn-sm" [disabled]="busy()" (click)="ask('remove')">
+          <app-icon name="trash" />Xóa
+        </button>
+      } @else {
+        <button type="button" class="btn btn-ghost btn-sm" [disabled]="busy()" (click)="ask('unlock')">
+          <app-icon name="unlock" />Mở khóa
+        </button>
+      }
+    </div>
+  </div>
+
+  @if (pending(); as action) {
+    <div class="confirm" role="alertdialog" aria-labelledby="confirm-text">
+      <p id="confirm-text">
+        @switch (action) {
+          @case ('lock') {
+            Khóa nhà xe <strong>{{ t.name }}</strong>? Người của nhà xe sẽ không đăng nhập hoặc chọn nhà xe được cho đến khi mở khóa.
+          }
+          @case ('unlock') {
+            Mở khóa nhà xe <strong>{{ t.name }}</strong>?
+          }
+          @case ('remove') {
+            Xóa nhà xe <strong>{{ t.name }}</strong>? Đây là xóa mềm: nhà xe bị khóa, toàn bộ dữ liệu (chi nhánh, xe, đơn thuê) vẫn được giữ và có thể mở khóa lại.
+          }
+        }
+      </p>
+      <div class="actions">
+        <button type="button" class="btn btn-sm" [class.btn-danger-solid]="action !== 'unlock'"
+          [class.btn-primary]="action === 'unlock'" [disabled]="busy()" (click)="confirm()">
+          {{ busy() ? 'Đang xử lý...' : 'Xác nhận' }}
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" [disabled]="busy()" (click)="cancel()">Hủy</button>
+      </div>
+    </div>
+  }
+
+  <div class="detail-grid">
+    <section class="panel panel-pad" aria-label="Thông tin nhà xe">
+      <h2 class="section-title">Thông tin</h2>
+      <dl class="facts">
+        <div><dt>Domain</dt><dd>{{ t.domain }}</dd></div>
+        <div><dt>Email liên hệ</dt><dd>{{ t.contactEmail ?? 'Chưa có' }}</dd></div>
+        <div><dt>Số điện thoại</dt><dd>{{ t.contactPhone ?? 'Chưa có' }}</dd></div>
+        <div><dt>Địa chỉ logo</dt><dd>{{ t.logoUrl ?? 'Chưa có' }}</dd></div>
+        <div><dt>Ngày tạo</dt><dd>{{ t.createdAt | date: 'dd/MM/yyyy HH:mm' }}</dd></div>
+        <div><dt>Cập nhật gần nhất</dt><dd>{{ t.updatedAt | date: 'dd/MM/yyyy HH:mm' }}</dd></div>
+      </dl>
+      @if (t.settings !== '{}') {
+        <details>
+          <summary>Cấu hình nâng cao (chỉ xem)</summary>
+          <pre class="settings">{{ t.settings }}</pre>
+        </details>
+      }
+    </section>
+
+    <section class="panel panel-pad" aria-label="Chủ nhà xe">
+      <div class="section-head">
+        <h2 class="section-title">Chủ nhà xe</h2>
+        <button type="button" class="btn btn-ghost btn-sm" [disabled]="!t.isActive" (click)="toggleAdminForm()"
+          [attr.aria-expanded]="showAdminForm()">
+          <app-icon name="plus" />Thêm chủ
+        </button>
+      </div>
+      @if (!t.isActive) {
+        <p class="hint">Nhà xe đang bị khóa, mở khóa trước khi thêm chủ nhà xe.</p>
+      }
+
+      @if (showAdminForm()) {
+        <form class="admin-form" [formGroup]="adminForm" (ngSubmit)="addAdmin()" novalidate>
+          @if (adminError(); as message) {
+            <div class="alert alert-error" role="alert">{{ message }}</div>
+          }
+          <div class="field">
+            <label for="add-email">Email</label>
+            <input id="add-email" class="input" type="email" inputmode="email" formControlName="email"
+              autocomplete="off" autocapitalize="none" (input)="onEmailInput()" (blur)="checkEmail()"
+              [attr.aria-invalid]="adminFieldError('email') || lookup.status() === 'blocked' ? 'true' : null" />
+            @if (adminFieldError('email'); as message) {
+              <span class="field-error">{{ message }}</span>
+            } @else {
+              <app-admin-lookup-note [lookup]="lookup" />
+            }
+          </div>
+          @if (lookup.needsAccountDetails()) {
+            <div class="field">
+              <label for="add-name">Họ tên</label>
+              <input id="add-name" class="input" formControlName="fullName" autocomplete="off"
+                [attr.aria-invalid]="adminFieldError('fullName') ? 'true' : null" />
+              @if (adminFieldError('fullName'); as message) {
+                <span class="field-error">{{ message }}</span>
+              }
+            </div>
+            <div class="field">
+              <label for="add-password">Mật khẩu</label>
+              <input id="add-password" class="input" type="password" formControlName="password"
+                autocomplete="new-password" [attr.aria-invalid]="adminFieldError('password') ? 'true' : null" />
+              @if (adminFieldError('password'); as message) {
+                <span class="field-error">{{ message }}</span>
+              }
+            </div>
+          }
+          <div class="actions">
+            <button class="btn btn-primary btn-sm" type="submit" [disabled]="addingAdmin()">
+              {{ addingAdmin() ? 'Đang thêm...' : 'Thêm chủ nhà xe' }}
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" (click)="toggleAdminForm()">Hủy</button>
+          </div>
+        </form>
+      }
+
+      @if (adminsError(); as message) {
+        <div class="alert alert-error" role="alert">{{ message }}</div>
+      } @else if (admins(); as list) {
+        <ul class="admins">
+          @for (admin of list; track admin.userId) {
+            <li>
+              <span class="admin-main">
+                <span class="admin-name">{{ admin.fullName }}</span>
+                <span class="muted">{{ admin.email }}</span>
+              </span>
+              <span class="admin-side">
+                @if (!admin.isActive) {
+                  <span class="chip chip-danger">Tài khoản bị khóa</span>
+                }
+                <span class="muted">Từ {{ admin.joinedAt | date: 'dd/MM/yyyy' }}</span>
+              </span>
+            </li>
+          } @empty {
+            <li class="muted">Chưa có chủ nhà xe nào.</li>
+          }
+        </ul>
+      } @else {
+        <p class="muted" role="status">Đang tải...</p>
+      }
+    </section>
+  </div>
+} @else if (loading()) {
+  <p class="empty" role="status">Đang tải...</p>
+}

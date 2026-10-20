@@ -198,6 +198,11 @@ p {
   color: var(--blue-text);
 }
 
+.lookup-ok {
+  color: var(--ok);
+  font-size: 0.875rem;
+}
+
 .field-error {
   color: var(--danger);
   font-size: 0.875rem;
@@ -262,6 +267,11 @@ p {
 .alert-info {
   background: var(--amber-soft);
   color: var(--amber-text);
+}
+
+.alert-success {
+  background: rgb(22 163 74 / 14%);
+  color: var(--ok);
 }
 
 /* ---------- Thẻ lớn để chọn nhà xe, chi nhánh ---------- */
@@ -404,5 +414,203 @@ p {
 @media (min-width: 1024px) {
   .stat-grid {
     grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* ---------- Trang quản lý (danh sách, biểu mẫu, chi tiết) ---------- */
+.page-head-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.page-head-row .page-head {
+  margin-bottom: 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.link-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  text-decoration: none;
+}
+
+.link-back:hover {
+  color: var(--blue-text);
+}
+
+a.btn {
+  text-decoration: none;
+}
+
+.btn-sm {
+  min-height: 40px;
+  padding: 6px 14px;
+  font-size: 0.9375rem;
+}
+
+.btn-danger {
+  background: var(--card);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
+.btn-danger-solid {
+  background: #dc2626;
+  color: #fff;
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+
+/* Mũi tên tự vẽ (xám trung tính, đọc được ở cả giao diện sáng và tối) để cách mép phải đều với các ô khác. */
+select.input {
+  appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 18px;
+  cursor: pointer;
+}
+
+textarea.input {
+  min-height: 96px;
+  resize: vertical;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.9375rem;
+}
+
+.chip-ok {
+  background: rgb(22 163 74 / 14%);
+  color: var(--ok);
+}
+
+.chip-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.toolbar .input {
+  flex: 1 1 220px;
+  width: auto;
+}
+
+.toolbar select.input {
+  flex: 0 1 200px;
+}
+
+.panel {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.panel-pad {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border: 1.5px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+/* Điện thoại: nút ở đầu trang chiếm hết bề ngang và chia đều, đủ lớn để chạm. */
+@media (max-width: 639px) {
+  .page-head-row > .btn {
+    width: 100%;
+  }
+
+  .toolbar select.input {
+    flex: 1 1 140px;
+  }
+
+  .page-head-row .actions {
+    width: 100%;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+  }
+
+  .page-head-row .actions .btn {
+    min-height: 44px;
+    padding-inline: 8px;
+  }
+}
+
+@media (min-width: 768px) {
+  .form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .form-grid .field-wide {
+    grid-column: 1 / -1;
   }
 }
