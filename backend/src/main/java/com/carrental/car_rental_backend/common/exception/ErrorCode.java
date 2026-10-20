@@ -18,7 +18,9 @@ public enum ErrorCode {
   // Business Custom Errors
   TENANT_ACCESS_DENIED("TENANT_ACCESS_DENIED", "Bạn không thuộc Tenant này", HttpStatus.FORBIDDEN),
   VEHICLE_NOT_AVAILABLE("VEHICLE_NOT_AVAILABLE", "Xe đã có lịch đặt hoặc đang bảo dưỡng", HttpStatus.CONFLICT),
-  BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST);
+  BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST),
+  TENANT_DOMAIN_ALREADY_EXISTS("TENANT_DOMAIN_ALREADY_EXISTS", "Domain đã được sử dụng", HttpStatus.CONFLICT),
+  TENANT_ADMIN_ALREADY_ASSIGNED("TENANT_ADMIN_ALREADY_ASSIGNED", "Người này đã là chủ nhà xe của nhà xe này", HttpStatus.CONFLICT);
 
   private final String code;
   private final String message;

@@ -3,7 +3,9 @@ package com.carrental.car_rental_backend.tenant.entity;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
 import com.carrental.car_rental_backend.common.enums.plan_tier.PlanTierTenant;
@@ -17,9 +19,11 @@ import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.NoArgsConstructor;
 
 @Getter
+@Setter
 @Entity
 @Builder
 @NoArgsConstructor
@@ -48,16 +52,19 @@ public class Tenant {
   @Column(name = "contact_phone")
   private String contactPhone;
 
-  @JdbcTypeCode(SqlTypes.JSON)
+  // Chú thích của Hibernate, trường này sẽ được ghi xuống cột kiểu JSON của DB do tenants.settings có kiểu jsonb
+  @JdbcTypeCode(SqlTypes.JSON) 
   @Column(name = "settings")
   private String settings;
 
   @Column(name = "is_active")
   private boolean isActive;
 
-  @Column(name = "created_at")
+  @CreationTimestamp
+  @Column(name = "created_at", updatable = false)
   private Instant createdAt;
 
+  @UpdateTimestamp
   @Column(name = "updated_at")
   private Instant updatedAt;
 }
