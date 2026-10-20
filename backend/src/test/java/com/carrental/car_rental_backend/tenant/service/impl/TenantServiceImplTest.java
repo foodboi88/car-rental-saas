@@ -16,10 +16,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -40,6 +40,7 @@ import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.tenant.dto.request.AdminAssignmentRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.CreateTenantRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.UpdateTenantRequestDTO;
+import com.carrental.car_rental_backend.tenant.dto.response.AdminLookupResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.CreateTenantResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantAdminResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantResponseDTO;
@@ -69,7 +70,15 @@ class TenantServiceImplTest {
   @Mock private PasswordEncoder passwordEncoder;
   @Spy private ObjectMapper objectMapper = new ObjectMapper();
 
-  @InjectMocks private TenantServiceImpl tenantService;
+  private TenantServiceImpl tenantService;
+
+  // Dựng bằng tay để dùng TenantAdminAssigner thật (với các repository giả), vì đây là phần luật gán chủ được kiểm thử qua service
+  @BeforeEach
+  void setUp() {
+    TenantAdminAssigner adminAssigner = new TenantAdminAssigner(userRepository, userTenantRepository, passwordEncoder);
+    tenantService = new TenantServiceImpl(
+      tenantRepository, tenantConfigRepository, tenantRoleRepository, tenantAdminQueryRepository, adminAssigner, objectMapper);
+  }
 
   // ---------- Dữ liệu và stub dùng chung ----------
 
@@ -650,5 +659,132 @@ class TenantServiceImplTest {
     assertThat(admins.get(0).getFullName()).isEqualTo("Có Sẵn");
     assertThat(admins.get(0).getIsActive()).isTrue();
     assertThat(admins.get(0).getJoinedAt()).isEqualTo(joinedAt);
+  }
+
+  // ---------- tra cứu email trước khi gán làm chủ nhà xe ----------
+
+  @Test
+  void should_throw_bad_request_when_looking_up_a_blank_email() {
+    assertAppException(() -> tenantService.lookupAdminByEmail("   ", null), ErrorCode.BAD_REQUEST);
+    assertAppException(() -> tenantService.lookupAdminByEmail(null, null), ErrorCode.BAD_REQUEST);
+  }
+
+  @Test
+  void should_report_a_new_account_when_the_email_is_not_in_the_system() {
+    when(userRepository.findByEmail("moi@x.vn")).thenReturn(Optional.empty());
+
+    AdminLookupResponseDTO result = tenantService.lookupAdminByEmail("  Moi@X.vn ", null);
+
+    assertThat(result.getEmail()).isEqualTo("moi@x.vn");
+    assertThat(result.isAccountExists()).isFalse();
+    assertThat(result.getFullName()).isNull();
+    assertThat(result.isCanBeAdmin()).isTrue();
+    assertThat(result.getReason()).isNull();
+  }
+
+  @Test
+  void should_return_name_and_allow_assigning_when_the_account_exists_and_is_usable() {
+    this.stubExistingUserLookup(existingUser(true, false));
+
+    AdminLookupResponseDTO result = tenantService.lookupAdminByEmail(" CO.SAN@x.vn ", null);
+
+    assertThat(result.isAccountExists()).isTrue();
+    assertThat(result.getFullName()).isEqualTo("Có Sẵn");
+    assertThat(result.isCanBeAdmin()).isTrue();
+    assertThat(result.getReason()).isNull();
+  }
+
+  @Test
+  void should_refuse_a_locked_account_with_the_same_reason_as_the_assign_error() {
+    this.stubExistingUserLookup(existingUser(false, false));
+
+    AdminLookupResponseDTO result = tenantService.lookupAdminByEmail(EXISTING_EMAIL, null);
+
+    assertThat(result.isAccountExists()).isTrue();
+    assertThat(result.isCanBeAdmin()).isFalse();
+    assertThat(result.getReason()).isEqualTo("Tài khoản đang bị khóa !");
+  }
+
+  @Test
+  void should_refuse_a_super_admin_account() {
+    this.stubExistingUserLookup(existingUser(true, true));
+
+    AdminLookupResponseDTO result = tenantService.lookupAdminByEmail(EXISTING_EMAIL, null);
+
+    assertThat(result.isCanBeAdmin()).isFalse();
+    assertThat(result.getReason()).contains("Super Admin").doesNotContain(EXISTING_EMAIL);
+  }
+
+  @Test
+  void should_throw_not_found_when_looking_up_for_a_missing_tenant() {
+    when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.empty());
+
+    assertAppException(() -> tenantService.lookupAdminByEmail(EXISTING_EMAIL, TENANT_ID), ErrorCode.RESOURCE_NOT_FOUND);
+  }
+
+  @Test
+  void should_refuse_even_a_new_email_when_the_tenant_is_locked() {
+    when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(inactiveTenant()));
+    when(userRepository.findByEmail("moi@x.vn")).thenReturn(Optional.empty());
+
+    AdminLookupResponseDTO result = tenantService.lookupAdminByEmail("moi@x.vn", TENANT_ID);
+
+    assertThat(result.isAccountExists()).isFalse();
+    assertThat(result.isCanBeAdmin()).isFalse();
+    assertThat(result.getReason()).contains("Nhà xe đang bị khóa");
+  }
+
+  @Test
+  void should_report_the_locked_tenant_first_when_both_the_tenant_and_the_account_are_locked() {
+    // Luồng gán thật kiểm tra nhà xe bị khóa trước tài khoản, nên lý do tra cứu phải là "nhà xe bị khóa"
+    when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(inactiveTenant()));
+    this.stubExistingUserLookup(existingUser(false, false));
+
+    AdminLookupResponseDTO result = tenantService.lookupAdminByEmail(EXISTING_EMAIL, TENANT_ID);
+
+    assertThat(result.isAccountExists()).isTrue();
+    assertThat(result.isCanBeAdmin()).isFalse();
+    assertThat(result.getReason()).isEqualTo("Nhà xe đang bị khóa, không thể thêm chủ nhà xe !");
+  }
+
+  @Test
+  void should_refuse_an_account_that_is_already_admin_of_the_tenant() {
+    when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(activeTenant()));
+    this.stubAdminRoleLookup();
+    this.stubExistingUserLookup(existingUser(true, false));
+    when(userTenantRepository.findByUserIdAndTenantId(EXISTING_USER_ID, TENANT_ID))
+      .thenReturn(Optional.of(UserTenant.builder().userId(EXISTING_USER_ID).tenantId(TENANT_ID).roleId(ADMIN_ROLE_ID).build()));
+
+    AdminLookupResponseDTO result = tenantService.lookupAdminByEmail(EXISTING_EMAIL, TENANT_ID);
+
+    assertThat(result.isCanBeAdmin()).isFalse();
+    assertThat(result.getReason()).contains("đã là chủ nhà xe").doesNotContain(EXISTING_EMAIL);
+  }
+
+  @Test
+  void should_refuse_an_account_that_is_staff_of_the_tenant() {
+    when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(activeTenant()));
+    this.stubAdminRoleLookup();
+    this.stubExistingUserLookup(existingUser(true, false));
+    when(userTenantRepository.findByUserIdAndTenantId(EXISTING_USER_ID, TENANT_ID))
+      .thenReturn(Optional.of(UserTenant.builder().userId(EXISTING_USER_ID).tenantId(TENANT_ID).roleId(STAFF_ROLE_ID).build()));
+
+    AdminLookupResponseDTO result = tenantService.lookupAdminByEmail(EXISTING_EMAIL, TENANT_ID);
+
+    assertThat(result.isCanBeAdmin()).isFalse();
+    assertThat(result.getReason()).contains("nhân viên");
+  }
+
+  @Test
+  void should_allow_an_existing_account_that_is_not_yet_a_member_of_the_tenant_and_write_nothing() {
+    when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(activeTenant()));
+    this.stubExistingUserLookup(existingUser(true, false));
+    when(userTenantRepository.findByUserIdAndTenantId(EXISTING_USER_ID, TENANT_ID)).thenReturn(Optional.empty());
+
+    AdminLookupResponseDTO result = tenantService.lookupAdminByEmail(EXISTING_EMAIL, TENANT_ID);
+
+    assertThat(result.isCanBeAdmin()).isTrue();
+    verify(userRepository, never()).save(any(User.class));
+    verify(userTenantRepository, never()).save(any(UserTenant.class));
   }
 }

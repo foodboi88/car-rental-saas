@@ -1,26 +1,20 @@
 package com.carrental.car_rental_backend.tenant.service.impl;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.carrental.car_rental_backend.account.entity.Role;
 import com.carrental.car_rental_backend.account.entity.User;
 import com.carrental.car_rental_backend.account.entity.UserTenant;
-import com.carrental.car_rental_backend.account.repository.UserRepository;
-import com.carrental.car_rental_backend.account.repository.UserTenantRepository;
 import com.carrental.car_rental_backend.common.constant.RoleConstant;
 import com.carrental.car_rental_backend.common.enums.plan_tier.PlanTierTenant;
 import com.carrental.car_rental_backend.common.exception.AppException;
@@ -29,6 +23,7 @@ import com.carrental.car_rental_backend.tenant.constant.DefaultRole;
 import com.carrental.car_rental_backend.tenant.dto.request.AdminAssignmentRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.CreateTenantRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.UpdateTenantRequestDTO;
+import com.carrental.car_rental_backend.tenant.dto.response.AdminLookupResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.CreateTenantResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantAdminResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantResponseDTO;
@@ -60,13 +55,8 @@ public class TenantServiceImpl implements TenantService {
   private final TenantConfigRepository tenantConfigRepository;
   private final TenantRoleRepository tenantRoleRepository;
   private final TenantAdminQueryRepository tenantAdminQueryRepository;
-  private final UserRepository userRepository;
-  private final UserTenantRepository userTenantRepository;
-  private final PasswordEncoder passwordEncoder;
+  private final TenantAdminAssigner adminAssigner;
   private final ObjectMapper objectMapper;
-
-  // Một chủ nhà xe đã được kiểm tra xong: email đã chuẩn hóa, kèm tài khoản có sẵn (null nếu là email mới)
-  private record PreparedAdmin(String email, String fullName, String password, User existingUser) {}
 
   @Override
   public CreateTenantResponseDTO createTenant(CreateTenantRequestDTO request, UUID actorId) {
@@ -76,7 +66,7 @@ public class TenantServiceImpl implements TenantService {
     }
     String settings = this.normalizeSettings(request.getSettings());
     // Kiểm tra hết các chủ nhà xe TRƯỚC khi ghi bất cứ thứ gì
-    List<PreparedAdmin> admins = this.prepareAdminList(request.getAdmins());
+    List<TenantAdminAssigner.PreparedAdmin> admins = this.adminAssigner.prepareAll(request.getAdmins());
     Tenant tenant = this.tenantRepository.save(
       Tenant.builder()
         .name(request.getName().trim())
@@ -86,7 +76,7 @@ public class TenantServiceImpl implements TenantService {
         .contactEmail(request.getContactEmail())
         .contactPhone(request.getContactPhone())
         .settings(settings)
-        .isActive(true) // Builder không biết mặc định của DB, quên dòng này thì nhà xe mới bị khóa
+        .isActive(true)
         .build()
     );
 
@@ -103,8 +93,8 @@ public class TenantServiceImpl implements TenantService {
     Role adminRole = this.findAdminRoleOrThrow(tenant.getId());
 
     List<CreateTenantResponseDTO.AdminResult> adminResults = new ArrayList<>();
-    for (PreparedAdmin admin : admins) {
-      adminResults.add(this.assignTenantAdmin(tenant.getId(), adminRole.getId(), admin));
+    for (TenantAdminAssigner.PreparedAdmin admin : admins) {
+      adminResults.add(this.adminAssigner.assign(tenant.getId(), adminRole.getId(), admin));
     }
 
     log.info("Người dùng {} tạo nhà xe {} (id = {}) với {} chủ nhà xe", actorId, tenant.getName(), tenant.getId(), adminResults.size());
@@ -182,7 +172,7 @@ public class TenantServiceImpl implements TenantService {
 
   @Override
   public void deleteTenant(UUID tenantId, UUID actorId) {
-    // Xóa mềm: chỉ đặt is_active = false. Không gọi repository.delete vì khóa ngoại ON DELETE CASCADE sẽ xóa sạch dữ liệu nhà xe
+    // Xóa mềm: chỉ đặt is_active = false.
     this.changeStatus(tenantId, false, actorId);
   }
 
@@ -190,13 +180,12 @@ public class TenantServiceImpl implements TenantService {
   public CreateTenantResponseDTO.AdminResult addTenantAdmin(UUID tenantId, AdminAssignmentRequestDTO request, UUID actorId) {
     Tenant tenant = this.findTenantOrThrow(tenantId);
     if (!tenant.isActive()) {
-      throw new AppException(ErrorCode.BAD_REQUEST, "Nhà xe đang bị khóa, không thể thêm chủ nhà xe !");
+      throw new AppException(ErrorCode.BAD_REQUEST, TenantAdminAssigner.TENANT_LOCKED_MESSAGE);
     }
     Role adminRole = this.findAdminRoleOrThrow(tenantId);
 
-    // Chỉ có một email nên không có gì để so trùng trong danh sách: truyền một tập rỗng
-    PreparedAdmin admin = this.prepareAdmin(request, new HashSet<>());
-    CreateTenantResponseDTO.AdminResult result = this.assignTenantAdmin(tenantId, adminRole.getId(), admin);
+    TenantAdminAssigner.PreparedAdmin admin = this.adminAssigner.prepareOne(request);
+    CreateTenantResponseDTO.AdminResult result = this.adminAssigner.assign(tenantId, adminRole.getId(), admin);
     log.info("Người dùng {} thêm chủ nhà xe cho nhà xe {} (id = {}), tài khoản mới: {}", actorId, tenant.getName(), tenantId, result.isAccountCreated());
     return result;
   }
@@ -213,6 +202,13 @@ public class TenantServiceImpl implements TenantService {
     return result;
   }
 
+  @Override
+  @Transactional(readOnly = true)
+  public AdminLookupResponseDTO lookupAdminByEmail(String email, UUID tenantId) {
+    Tenant tenant = tenantId == null ? null : this.findTenantOrThrow(tenantId);
+    return this.adminAssigner.lookupByEmail(email, tenant, () -> this.findAdminRoleOrThrow(tenantId).getId());
+  }
+
   // Tạo 3 nhóm quyền mặc định cho nhà xe mới, kèm quyền của từng nhóm
   private void createDefaultRoles(UUID tenantId) {
     for (DefaultRole role : DefaultRole.values()) {
@@ -225,107 +221,9 @@ public class TenantServiceImpl implements TenantService {
     }
   }
 
-  // Kiểm tra cả danh sách chủ nhà xe (gọi prepareAdmin cho từng người), chưa ghi gì xuống DB
-  private List<PreparedAdmin> prepareAdminList(List<AdminAssignmentRequestDTO> requests) {
-    if (requests == null || requests.isEmpty()) {
-      throw new AppException(ErrorCode.BAD_REQUEST, "Cần ít nhất một chủ nhà xe !");
-    }
-    Set<String> seenEmails = new HashSet<>();
-    List<PreparedAdmin> prepared = new ArrayList<>();
-    for (AdminAssignmentRequestDTO request : requests) {
-      prepared.add(this.prepareAdmin(request, seenEmails));
-    }
-    return prepared;
-  }
-
-  private PreparedAdmin prepareAdmin(AdminAssignmentRequestDTO request, Set<String> seenEmails) {
-    String email = this.normalizeEmail(request.getEmail());
-    if (email.isEmpty()) {
-      throw new AppException(ErrorCode.BAD_REQUEST, "Email chủ nhà xe không được để trống !");
-    }
-    // add() vừa thêm email vào tập seenEmails (các email đã gặp trong lần gửi này).
-    if (!seenEmails.add(email)) {
-      throw new AppException(ErrorCode.BAD_REQUEST, "Email chủ nhà xe bị trùng trong danh sách: " + email);
-    }
-
-    Optional<User> existingUser = this.userRepository.findByEmail(email);
-
-    // Email đã có tài khoản trong hệ thống: nếu dùng được thì chỉ liên kết vào nhà xe, không tạo mới
-    if (existingUser.isPresent()) {
-      User user = existingUser.get();
-     
-      if (!Boolean.TRUE.equals(user.getIsActive())) {
-        throw new AppException(ErrorCode.BAD_REQUEST, "Tài khoản " + email + " đang bị khóa !");
-      }
-      if (Boolean.TRUE.equals(user.getIsSuperAdmin())) {
-        throw new AppException(ErrorCode.BAD_REQUEST, "Tài khoản Super Admin không thể làm chủ nhà xe: " + email);
-      }
-      // Tài khoản đã có: bỏ qua họ tên và mật khẩu gửi lên, không đổi gì của tài khoản
-      return new PreparedAdmin(email, null, null, user);
-    }
-
-    // Email mới: bắt buộc họ tên và mật khẩu (DTO đã kiểm tra dạng mật khẩu, ở đây kiểm tra có gửi hay không)
-    if (request.getFullName() == null || request.getFullName().isBlank()) {
-      throw new AppException(ErrorCode.BAD_REQUEST, "Vui lòng nhập họ tên cho tài khoản mới: " + email);
-    }
-    if (request.getPassword() == null || request.getPassword().isBlank()) {
-      throw new AppException(ErrorCode.BAD_REQUEST, "Vui lòng nhập mật khẩu cho tài khoản mới: " + email);
-    }
-    return new PreparedAdmin(email, request.getFullName().trim(), request.getPassword(), null);
-  }
-
-  // Gán một người làm chủ nhà xe: tạo tài khoản nếu chưa có, rồi liên kết vào nhà xe với nhóm quyền TENANT_ADMIN
-  private CreateTenantResponseDTO.AdminResult assignTenantAdmin(UUID tenantId, UUID adminRoleId, PreparedAdmin admin) {
-    User user = admin.existingUser();
-    boolean accountCreated = (user == null);
-
-    if (accountCreated) {
-      user = this.userRepository.save(
-        User.builder()
-          .email(admin.email())
-          .passwordHash(this.passwordEncoder.encode(admin.password()))
-          .fullname(admin.fullName())
-          .isActive(true) // Boolean không có mặc định phía Java, để null thì sau này login bị NullPointerException
-          .isSuperAdmin(false)
-          .build()
-      );
-    } else {
-      this.ensureNotAlreadyMember(tenantId, adminRoleId, user);
-    }
-
-    this.userTenantRepository.save(
-      UserTenant.builder()
-        .userId(user.getId())
-        .tenantId(tenantId)
-        .roleId(adminRoleId)
-        .joinedAt(Instant.now())
-        .build()
-    );
-    return CreateTenantResponseDTO.AdminResult.builder()
-      .email(admin.email())
-      .accountCreated(accountCreated)
-      .build();
-  }
-
-  // Một người chỉ có một vai trò mỗi nhà xe (khóa chính user_tenants là user_id + tenant_id)
-  private void ensureNotAlreadyMember(UUID tenantId, UUID adminRoleId, User user) {
-    Optional<UserTenant> membership = this.userTenantRepository.findByUserIdAndTenantId(user.getId(), tenantId);
-    if (membership.isEmpty()) {
-      return;
-    }
-    if (adminRoleId.equals(membership.get().getRoleId())) {
-      throw new AppException(ErrorCode.TENANT_ADMIN_ALREADY_ASSIGNED, "Người này đã là chủ nhà xe của nhà xe này: " + user.getEmail());
-    }
-    throw new AppException(ErrorCode.BAD_REQUEST, "Người này đang là nhân viên của nhà xe, chưa hỗ trợ nâng quyền: " + user.getEmail());
-  }
-
   // Chuỗi rỗng hoặc toàn dấu cách nghĩa là xóa giá trị (lưu null)
   private String blankToNull(String value) {
     return value.isBlank() ? null : value.trim();
-  }
-
-  private String normalizeEmail(String email) {
-    return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
   }
 
   private String normalizeSettings(String settings) {
@@ -340,7 +238,6 @@ public class TenantServiceImpl implements TenantService {
     return settings;
   }
 
-  // Nhóm quyền TENANT_ADMIN của nhà xe. Thiếu là dữ liệu hỏng (nhà xe tạo tay, không qua API) nên báo 500
   private Role findAdminRoleOrThrow(UUID tenantId) {
     Optional<Role> adminRole = this.tenantRoleRepository.findByTenantIdAndCode(tenantId, RoleConstant.TENANT_ADMIN);
     if (adminRole.isEmpty()) {

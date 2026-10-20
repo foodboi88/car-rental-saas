@@ -9,6 +9,7 @@ import org.springframework.data.domain.Pageable;
 import com.carrental.car_rental_backend.tenant.dto.request.AdminAssignmentRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.CreateTenantRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.UpdateTenantRequestDTO;
+import com.carrental.car_rental_backend.tenant.dto.response.AdminLookupResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.CreateTenantResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantAdminResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantResponseDTO;
@@ -22,4 +23,5 @@ public interface TenantService {
   public void deleteTenant(UUID tenantId, UUID actorId);
   public CreateTenantResponseDTO.AdminResult addTenantAdmin(UUID tenantId, AdminAssignmentRequestDTO request, UUID actorId);
   public List<TenantAdminResponseDTO> listTenantAdmins(UUID tenantId);
+  public AdminLookupResponseDTO lookupAdminByEmail(String email, UUID tenantId);
 }

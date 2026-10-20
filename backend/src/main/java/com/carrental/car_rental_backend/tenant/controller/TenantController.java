@@ -25,9 +25,11 @@ import org.springframework.web.bind.annotation.RestController;
 import com.carrental.car_rental_backend.common.dto.ApiResponse;
 import com.carrental.car_rental_backend.security.principal.UserPrincipal;
 import com.carrental.car_rental_backend.tenant.dto.request.AdminAssignmentRequestDTO;
+import com.carrental.car_rental_backend.tenant.dto.request.AdminLookupRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.CreateTenantRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.UpdateTenantRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.UpdateTenantStatusRequestDTO;
+import com.carrental.car_rental_backend.tenant.dto.response.AdminLookupResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.CreateTenantResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantAdminResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantResponseDTO;
@@ -76,6 +78,15 @@ public class TenantController {
 
     return ResponseEntity.ok(
       ApiResponse.success(new PagedModel<>(response), "Lấy danh sách nhà xe thành công !")
+    );
+  }
+
+  @PostMapping("/admin-lookup")
+  public ResponseEntity<ApiResponse<AdminLookupResponseDTO>> lookupAdminByEmail(@Valid @RequestBody AdminLookupRequestDTO request) {
+    AdminLookupResponseDTO response = this.tenantService.lookupAdminByEmail(request.getEmail(), request.getTenantId());
+
+    return ResponseEntity.ok(
+      ApiResponse.success(response, "Tra cứu email thành công !")
     );
   }
 
