@@ -89,7 +89,7 @@ sequenceDiagram
 Việc gán chủ nhà xe dài và nhiều nhánh (luật nằm ở lớp `TenantAdminAssigner`, được `TenantServiceImpl` gọi), dùng chung cho **tạo nhà xe** (API 1) và **thêm chủ** (API 8), nên được vẽ riêng một lần ở đây. Sơ đồ của hai API chỉ ghi "xem sơ đồ mục 1.5".
 
 Hai bước **tách rời nhau**, vẽ cho **một** chủ:
-- **Bước kiểm tra** (`TenantAdminAssigner.prepareAll` hoặc `prepareOne`): chưa ghi gì vào DB. Khi tạo nhà xe, bước này chạy cho **tất cả** chủ trước khi ghi bất cứ thứ gì.
+- **Bước kiểm tra** (`TenantAdminAssigner.prepareAll`): chưa ghi gì vào DB. Khi tạo nhà xe, bước này chạy cho **tất cả** chủ trước khi ghi bất cứ thứ gì.
 - **Bước ghi** (`TenantAdminAssigner.assign`): tạo tài khoản nếu email mới, rồi liên kết vào nhà xe với vai trò `TENANT_ADMIN`.
 
 ```mermaid
@@ -98,8 +98,8 @@ sequenceDiagram
   participant G as createTenant hoặc addTenantAdmin
   participant S as Service
   participant R as Repository
-  Note over G,R: BƯỚC KIỂM TRA - prepareOne, chưa ghi gì
-  G->>S: prepareOne(email, fullName, password)
+  Note over G,R: BƯỚC KIỂM TRA - prepareAll, chưa ghi gì
+  G->>S: prepareAll(email, fullName, password)
   S->>S: chuẩn hóa email, bỏ khoảng trắng và đổi chữ thường
   alt email rỗng
     S-->>G: lỗi 400 ERR_400
@@ -167,7 +167,7 @@ sequenceDiagram
   S->>S: settings phải là JSON hợp lệ
   S->>S: danh sách chủ không rỗng
   loop mỗi chủ nhà xe
-    S->>S: prepareOne, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
+    S->>S: prepareAll, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
   end
   alt settings sai, danh sách rỗng hoặc có chủ không hợp lệ
     S-->>C: 400 ERR_400, chưa ghi gì
@@ -613,7 +613,7 @@ sequenceDiagram
   alt nhà xe chưa có vai trò chủ
     S-->>C: 500 ERR_500
   end
-  S->>S: prepareOne cho một chủ, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
+  S->>S: prepareAll cho một chủ, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
   S->>S: assign cho một chủ, XEM SƠ ĐỒ MỤC 1.5, bước ghi
   alt vi phạm quy tắc ở sơ đồ 1.5
     S-->>C: 400 ERR_400 hoặc 409 TENANT_ADMIN_ALREADY_ASSIGNED
@@ -679,22 +679,28 @@ sequenceDiagram
   participant R as Repository
   C->>K: POST /api/v1/tenants/admin-lookup kèm body email, tenantId (tùy chọn)
   K->>S: lookupAdminByEmail(email, tenantId)
-  S->>S: chuẩn hóa email, bỏ khoảng trắng và đổi chữ thường
-  alt email rỗng
-    S-->>C: 400 ERR_400
-  end
   opt có tenantId
     S->>R: TenantRepository.findById(tenantId)
     alt không có nhà xe
       S-->>C: 404 ERR_404
     end
+    S->>R: TenantRoleRepository.findByTenantIdAndCode(tenantId, TENANT_ADMIN)
+    alt nhà xe chưa có nhóm quyền chủ
+      S-->>C: 500 ERR_500
+    end
+  end
+  S->>S: chuẩn hóa email, bỏ khoảng trắng và đổi chữ thường
+  alt email rỗng
+    S-->>C: 400 ERR_400
   end
   S->>R: UserRepository.findByEmail(email)
-  alt email chưa có tài khoản
-    Note over S: gán được, sẽ tạo tài khoản mới (trừ khi nhà xe đang bị khóa)
-  else email đã có tài khoản
+  Note over S: kiểm tra theo đúng thứ tự của API 8, lỗi đầu tiên gặp là lý do duy nhất được báo
+  opt có tenantId và nhà xe đang bị khóa
+    Note over S: không gán được, dù email mới hay có sẵn
+  end
+  opt email đã có tài khoản
     S->>S: tài khoản bị khóa hoặc là Super Admin thì không gán được
-    opt có tenantId và tài khoản dùng được
+    opt có tenantId
       S->>R: UserTenantRepository.findByUserIdAndTenantId
       Note over S: đã là chủ hoặc đang là nhân viên của nhà xe này thì không gán được
     end
@@ -742,6 +748,7 @@ Ví dụ: `{ "email": "minh.admin@rentcarhanoi.vn", "tenantId": "3f2c1b7e-..." }
 | 400 | `VALIDATION_ERROR` | `email` rỗng hoặc quá dài |
 | 400 | `MALFORMED_JSON` | Body không phải JSON hợp lệ, hoặc `tenantId` không phải UUID |
 | 404 | `ERR_404` | Có `tenantId` nhưng không có nhà xe |
+| 500 | `ERR_500` | Có `tenantId` nhưng nhà xe chưa có nhóm quyền chủ (dữ liệu hỏng, ví dụ nhà xe tạo tay không qua API). Xảy ra với mọi email, vì nhóm quyền chủ được lấy trước khi tra email |
 | 401, 403 | | Xem Phụ lục B |
 
 Lưu ý: kết quả chỉ để gợi ý cho giao diện. Giữa lúc tra cứu và lúc gửi, dữ liệu có thể đổi, nên API 1 và API 8 vẫn kiểm tra lại đầy đủ.

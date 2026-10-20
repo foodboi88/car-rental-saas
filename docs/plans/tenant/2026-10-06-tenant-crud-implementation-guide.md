@@ -168,7 +168,7 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 2. *Ghi, theo thứ tự:* lưu `Tenant` (`.isActive(true)`, gói mặc định `FREE`) → lưu `TenantConfig` (30, 100000, 5.00 truyền tường minh) → sinh 3 vai trò và 22 quyền → lấy lại vai trò `TENANT_ADMIN` → gán từng chủ.
 3. Ghi log (người gọi, nhà xe, số chủ, **không log mật khẩu**) và trả `CreateTenantResponseDTO`.
 
-**Gán chủ nhà xe** (`TenantAdminAssigner.prepareAll`/`prepareOne` để kiểm tra, `assign` để ghi, dùng chung cho tạo nhà xe và thêm chủ):
+**Gán chủ nhà xe** (`TenantAdminAssigner.prepareAll` để kiểm tra, `assign` để ghi, dùng chung cho tạo nhà xe và thêm chủ):
 
 | Tình huống | Kết quả |
 | :--- | :--- |
