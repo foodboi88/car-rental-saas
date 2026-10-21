@@ -32,6 +32,7 @@ public class UserController {
     // gán giá trị 1 lần duy nhất, không thể gán lại giá trị khác
     private final UserService userService;
 
+    //check user có permission để gọi api hay không, check jwt authen (security context holder)
     @PreAuthorize("hasAuthority('account:read')")
     @GetMapping("/api/v1/users/search")
     public ResponseEntity<ApiResponse<Page<UserDTOResponse>>> getListUser(@ModelAttribute UserDTORequest userDTORequest) {

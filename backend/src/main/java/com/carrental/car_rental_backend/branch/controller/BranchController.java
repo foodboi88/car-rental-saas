@@ -6,7 +6,6 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.carrental.car_rental_backend.branch.dto.BranchDTORequest;
@@ -17,6 +16,7 @@ import com.carrental.car_rental_backend.branch.dto.BranchSummaryDTO;
 import com.carrental.car_rental_backend.branch.service.BranchService;
 import com.carrental.car_rental_backend.common.dto.ApiResponse;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -57,7 +57,7 @@ public class BranchController {
     @PreAuthorize("hasAuthority('branch:create')")
     @PostMapping("/api/v1/branchs/create")
     public ResponseEntity<ApiResponse<BranchDTOResponse>> createBranch(
-         @RequestBody @Validated(BranchDTORequest.CreateGroup.class) BranchDTORequest.BranchDTORequestToCreate requestToCreate) {
+         @RequestBody @Valid BranchDTORequest.BranchDTORequestToCreate requestToCreate) {
         return ResponseEntity.ok().body(ApiResponse.success(branchService.createBranch(requestToCreate)));
     }
 
@@ -73,7 +73,7 @@ public class BranchController {
     @PostMapping("/api/v1/branchs/update/{id}")
     public ResponseEntity<ApiResponse<BranchDTOResponse>> updateBranch(
             @PathVariable UUID id, 
-            @Validated(BranchDTORequest.UpdateGroup.class) @RequestBody BranchDTORequest.BranchDTORequestToUpdate branchDTORequestToUpdate) {
+            @Valid @RequestBody BranchDTORequest.BranchDTORequestToUpdate branchDTORequestToUpdate) {
         return ResponseEntity.ok(ApiResponse.success(branchService.updateBranch(id, branchDTORequestToUpdate)));
     }
     

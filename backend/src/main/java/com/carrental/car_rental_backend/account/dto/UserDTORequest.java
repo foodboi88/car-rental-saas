@@ -63,6 +63,7 @@ public class UserDTORequest {
         @Size(groups = UpdateGroup.class, max = 255, message = "Họ và tên không được vượt quá 255 ký tự")
         private String fullname;
 
+        //giải thích tại sao lại cần groups = UpdateGroup.class
         @Pattern(groups = UpdateGroup.class, regexp = "^0[35789]\\d{8}$", message = "Số điện thoại không đúng định dạng")
         private String phone;
 

@@ -26,6 +26,7 @@ public interface BranchMapper {
     // Lấy ra danh sách branch
     // List<BranchDTOResponse> getListBranch(List<Branch> entities);
 
+    // gán giá trị mặc định khi khởi tạo = true
     @Mapping (target = "isActive", constant = "true")
     // Thêm mới branch
     Branch toEntity(BranchDTORequest.BranchDTORequestToCreate dtoRequestToCreate);

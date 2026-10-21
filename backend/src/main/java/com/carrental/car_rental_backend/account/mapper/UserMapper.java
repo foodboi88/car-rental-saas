@@ -10,9 +10,10 @@ import com.carrental.car_rental_backend.account.dto.UserDTORequest;
 import com.carrental.car_rental_backend.account.dto.UserDTOResponse;
 import com.carrental.car_rental_backend.account.entity.User;
 
-
+// MapStruct: chạy lúc complie code, đọc interface sau đó tự tạo ra các getter và setter
 // uses = PasswordEncoderMapper.class
 // khai báo để sử dụng các logic phức tạp khác trong PasswordEncoderMapper
+// khai báo Mapper(componentModel = "spring") để có thể inject để sử dụng
 @Mapper(componentModel = "spring", uses = PasswordEncoderMapper.class)
 public interface UserMapper {
 

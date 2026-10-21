@@ -19,10 +19,6 @@ import lombok.NoArgsConstructor;
 // Nested Class (class lồng)
 public class BranchDTORequest {
 
-    //sử dụng để áp dụng validate
-    public interface CreateGroup {}
-    public interface UpdateGroup {}
-
     private UUID id;
     private String name;
     private String phone;
@@ -38,11 +34,11 @@ public class BranchDTORequest {
     public static class BranchDTORequestToCreate {
         private UUID tenantId;
 
-        @NotBlank(groups = CreateGroup.class, message = "Tên chi nhánh không được để trống")
-        @Size(groups = CreateGroup.class, max = 255, message = "Tên chi nhánh không được vượt quá 255 ký tự")
+        @NotBlank(message = "Tên chi nhánh không được để trống")
+        @Size(max = 255, message = "Tên chi nhánh không được vượt quá 255 ký tự")
         private String name;
 
-        @Pattern(groups = CreateGroup.class, regexp = "^0[35789]\\d{8}$", message = "Số điện thoại không đúng định dạng")
+        @Pattern(regexp = "^0[35789]\\d{8}$", message = "Số điện thoại không đúng định dạng")
         private String phone;
 
         @Email
@@ -52,10 +48,10 @@ public class BranchDTORequest {
 
     @Data 
     public static class  BranchDTORequestToUpdate {
-        @Size(groups = UpdateGroup.class, max = 255, message = "Tên chi nhánh không được vượt quá 255 ký tự")
+        @Size(max = 255, message = "Tên chi nhánh không được vượt quá 255 ký tự")
         private String name;
 
-        @Pattern(groups = UpdateGroup.class, regexp = "^0[35789]\\d{8}$", message = "Số điện thoại không đúng định dạng")
+        @Pattern(regexp = "^0[35789]\\d{8}$", message = "Số điện thoại không đúng định dạng")
         private String phone;
 
         @Email
