@@ -5,7 +5,12 @@
   <section class="card">
     <div>
       <h1 class="card-title">Chọn nhà xe</h1>
-      <p class="card-sub">Xin chào {{ user()?.fullname }}. Bạn thuộc nhiều nhà xe, hãy chọn nơi muốn làm việc.</p>
+      @if (tenants().length > 1) {
+        <p class="card-sub">Xin chào {{ user()?.fullname }}. Bạn thuộc nhiều nhà xe, hãy chọn nơi muốn làm việc.</p>
+      } @else {
+        <!-- Màn này chỉ hiện khi tài khoản có từ 2 nhà xe; danh sách chỉ giữ nhà xe đang hoạt động, nên chỉ còn 1 hoặc 0 là do các nhà xe kia tạm ngưng -->
+        <p class="card-sub">Xin chào {{ user()?.fullname }}. Các nhà xe khác của bạn đang tạm ngưng hoạt động.</p>
+      }
     </div>
 
     @if (errorMessage(); as message) {
@@ -39,7 +44,7 @@
         }
       </ul>
     } @else {
-      <div class="alert alert-info" role="status">Tài khoản này chưa thuộc nhà xe nào. Hãy liên hệ quản trị viên.</div>
+      <div class="alert alert-info" role="status">Không có nhà xe nào đang hoạt động để chọn (nhà xe của bạn đang tạm ngưng). Hãy liên hệ quản trị viên.</div>
     }
 
     <button type="button" class="btn btn-ghost btn-block" (click)="logout()"><app-icon name="logout" />Đăng xuất</button>
