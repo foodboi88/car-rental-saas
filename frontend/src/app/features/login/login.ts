@@ -9,14 +9,30 @@ import { SESSION_EXPIRED_REASON } from '../../core/auth/auth.interceptor';
 import { Icon } from '../../shared/icon/icon';
 import { ThemeToggle } from '../../shared/theme-toggle/theme-toggle';
 
-/** Email tài khoản mẫu (chỉ hiện khi chạy dev) để bấm điền nhanh. Mật khẩu vẫn phải tự nhập. */
-const DEMO_ACCOUNTS = [
-  { label: 'Chủ nhà xe Hà Nội', email: 'minh.admin@rentcarhanoi.vn' },
-  { label: 'Nhân viên Hà Nội', email: 'lan.staff@rentcarhanoi.vn' },
-  { label: 'Chủ nhà xe Sài Gòn', email: 'mai.admin@saigonauto.vn' },
-  { label: 'Thuộc 2 nhà xe', email: 'multi.user@carrental.vn' },
+/**
+ * Mật khẩu chung của các tài khoản mẫu trong dữ liệu seed (đã ghi trong README), chỉ dùng cho môi trường dev.
+ * Các tài khoản này do backend nạp khi chạy với profile `dev` (thư mục db/dev-seed).
+ */
+const SEED_PASSWORD = 'Hieudvt@123';
+
+interface DemoAccount {
+  label: string;
+  email: string;
+}
+
+/** Tài khoản mẫu (chỉ hiện khi chạy dev) để bấm điền nhanh, mỗi vai trò và mỗi tình huống đăng nhập một tài khoản. */
+const DEMO_ACCOUNTS: DemoAccount[] = [
   { label: 'Super Admin', email: 'superadmin@carrental.vn' },
+  { label: 'Chủ nhà xe Hà Nội', email: 'minh.admin@rentcarhanoi.vn' },
+  { label: 'Chủ nhà xe Sài Gòn', email: 'mai.admin@saigonauto.vn' },
+  { label: 'Chủ nhà xe (chưa có chi nhánh)', email: 'chu.thu@thunghiem.vn' },
+  { label: 'Nhân viên Hà Nội', email: 'lan.staff@rentcarhanoi.vn' },
+  { label: 'Nhân viên Sài Gòn', email: 'bao.staff@saigonauto.vn' },
+  { label: 'Nhân viên (2 nhà xe)', email: 'multi.user@carrental.vn' },
+  { label: 'Sale Hà Nội', email: 'ha.sale@rentcarhanoi.vn' },
+  { label: 'Sale Sài Gòn', email: 'anh.sale@saigonauto.vn' },
   { label: 'Tài khoản bị khóa', email: 'locked.user@rentcarhanoi.vn' },
+  { label: 'Nhà xe bị khóa', email: 'chu.khoa@thunghiem.vn' },
 ];
 
 @Component({
@@ -48,8 +64,9 @@ export class Login {
       : null,
   );
 
-  fillEmail(email: string): void {
-    this.form.controls.email.setValue(email);
+  /** Điền email và mật khẩu chung của tài khoản mẫu. */
+  fillAccount(account: DemoAccount): void {
+    this.form.patchValue({ email: account.email, password: SEED_PASSWORD });
     this.errorMessage.set(null);
   }
 

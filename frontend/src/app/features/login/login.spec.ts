@@ -44,4 +44,47 @@ describe('Login', () => {
 
     expect(passwordInput().type).toBe('password');
   });
+
+  describe('demo accounts', () => {
+    const settle = () => TestBed.inject(ApplicationRef).whenStable();
+    const emailInput = () => root.querySelector<HTMLInputElement>('#email')!;
+    const demoButton = (label: string) =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.demo-list button')).find((b) => b.textContent?.trim() === label)!;
+
+    it('should_offer_one_account_for_each_role_and_each_login_situation', () => {
+      const labels = Array.from(root.querySelectorAll('.demo-list button')).map((b) => b.textContent?.trim());
+
+      expect(labels).toEqual([
+        'Super Admin',
+        'Chủ nhà xe Hà Nội',
+        'Chủ nhà xe Sài Gòn',
+        'Chủ nhà xe (chưa có chi nhánh)',
+        'Nhân viên Hà Nội',
+        'Nhân viên Sài Gòn',
+        'Nhân viên (2 nhà xe)',
+        'Sale Hà Nội',
+        'Sale Sài Gòn',
+        'Tài khoản bị khóa',
+        'Nhà xe bị khóa',
+      ]);
+    });
+
+    it('should_fill_both_the_email_and_the_shared_seed_password', async () => {
+      demoButton('Super Admin').click();
+      await settle();
+
+      expect(emailInput().value).toBe('superadmin@carrental.vn');
+      expect(passwordInput().value).toBe('Hieudvt@123');
+    });
+
+    it('should_replace_the_previous_email_when_another_account_is_chosen', async () => {
+      demoButton('Sale Hà Nội').click();
+      await settle();
+      demoButton('Tài khoản bị khóa').click();
+      await settle();
+
+      expect(emailInput().value).toBe('locked.user@rentcarhanoi.vn');
+      expect(passwordInput().value).toBe('Hieudvt@123');
+    });
+  });
 });

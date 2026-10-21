@@ -741,7 +741,7 @@ CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
 | `mai.admin@saigonauto.vn` | `TENANT_ADMIN` | Sài Gòn Auto | Toàn bộ 3 chi nhánh Sài Gòn | Kiểm tra chống tấn công chéo nhà xe (IDOR) |
 | `locked.user@rentcarhanoi.vn` (*) | `STAFF` | RentCar Hà Nội | Đã bị khóa (`is_active = false`) | Kiểm tra chặn đăng nhập tài khoản bị khóa (401) |
 
-> (*) Ba tài khoản này **không có trong dữ liệu mẫu** (migration `V2` chỉ nạp 10 tài khoản). Tạo thêm bằng khối SQL trong mục "Dữ Liệu Tài Khoản Kiểm Thử" của [README](../../README.md).
+> (*) Các tài khoản này **không nằm trong dữ liệu gốc** (migration `V2` chỉ nạp 10 tài khoản) mà do thư mục `db/dev-seed` nạp, chỉ khi chạy backend với profile `dev`. Xem mục "Dữ Liệu Tài Khoản Kiểm Thử" của [README](../../README.md).
 
 ### 10.2 Các Bước Kiểm Thử API Trên Swagger UI (`/swagger-ui/index.html`)
 

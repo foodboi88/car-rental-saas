@@ -1,0 +1,5 @@
+# Chỉ được nạp khi chạy với profile `dev`: mvn spring-boot:run -Dspring-boot.run.profiles=dev
+spring:
+  flyway:
+    # Thêm thư mục dữ liệu mẫu cho dev. Production không bật profile này nên không bao giờ thấy dữ liệu thử.
+    locations: classpath:db/migration,classpath:db/dev-seed

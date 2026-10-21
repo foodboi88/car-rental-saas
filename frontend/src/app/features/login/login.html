@@ -65,10 +65,10 @@
 
   @if (demoAccounts.length) {
     <section class="card demo" aria-label="Tài khoản mẫu">
-      <p class="muted">Tài khoản mẫu (chỉ hiện khi chạy dev). Bấm để điền email.</p>
+      <p class="muted">Tài khoản mẫu (chỉ hiện khi chạy dev). Bấm để điền email và mật khẩu.</p>
       <div class="demo-list">
         @for (account of demoAccounts; track account.email) {
-          <button type="button" class="btn btn-ghost" (click)="fillEmail(account.email)">{{ account.label }}</button>
+          <button type="button" class="btn btn-ghost" (click)="fillAccount(account)">{{ account.label }}</button>
         }
       </div>
     </section>
