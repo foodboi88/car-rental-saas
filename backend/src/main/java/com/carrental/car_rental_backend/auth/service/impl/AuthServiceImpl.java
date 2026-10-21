@@ -106,9 +106,9 @@ public class AuthServiceImpl implements AuthService{
       String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), roleInfo.getCode(), userTenant.getTenantId(), null, currentSessionId);
       String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId(), currentSessionId, userTenant.getTenantId(), null);
       Optional<Tenant> tenant = this.tenantRepository.findById(userTenant.getTenantId());
-      if (tenant.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Nhà xe của User không tồn tại !");
+      if (tenant.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, String.format("Nhà xe có Id %s của User không tồn tại !", userTenant.getTenantId()));
       Tenant tenantInfo = tenant.get();
-      if (!tenantInfo.isActive()) throw new AppException(ErrorCode.FORBIDDEN, "Nhà xe của User hiện đang tạm ngưng hoạt động hoặc bị khóa");
+      if (!tenantInfo.isActive()) throw new AppException(ErrorCode.FORBIDDEN, String.format("Nhà xe %s của User hiện đang tạm ngưng hoạt động hoặc bị khóa", tenantInfo.getName()));
       TenantSummaryDTO tenantSummaryDTO = TenantSummaryDTO.builder()
         .domain(tenantInfo.getDomain())
         .isActive(tenantInfo.isActive())
@@ -303,7 +303,7 @@ public class AuthServiceImpl implements AuthService{
     if (user.get().getCurrentSessionId() == null) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản này đã đăng xuất, vui lòng đăng nhập lại !");
 
     String currentSessionId = claims.get(ClaimKey.CURRENT_SESSION_ID, String.class);
-    if (!StringUtils.hasText(currentSessionId) || !UUID.fromString(currentSessionId).equals(user.get().getCurrentSessionId())) throw new AppException(ErrorCode.FORBIDDEN, "Phiên làm việc cũ này của bạn đã hết hạn !");
+    if (!StringUtils.hasText(currentSessionId) || !UUID.fromString(currentSessionId).equals(user.get().getCurrentSessionId())) throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản của bạn đang được đăng nhập ở nơi khác. Vui lòng đăng nhập lại !");
 
     User userInfo = user.get();
 
