@@ -1,6 +1,7 @@
 package com.carrental.car_rental_backend.branch.repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,8 +13,14 @@ public interface BranchRepository extends JpaRepository<Branch, UUID> {
   @Query(value = """
     SELECT branches.* FROM branches
     INNER JOIN user_branches ON branches.id = user_branches.branch_id
-    WHERE user_branches.user_id = :userId and user_branches.tenant_id = :tenantId
+    WHERE
+      branches.is_active = true and
+      user_branches.user_id = :userId and 
+      user_branches.tenant_id = :tenantId and
+      user_branches.status = 1
   """, nativeQuery = true)
   List<Branch> findAllAssignedBranchesByUserIdTenantId(@Param("userId") UUID userId, @Param("tenantId") UUID tenantId);
   List<Branch> findByTenantId(UUID tenantId);
+  List<Branch> findByTenantIdAndIsActiveTrue(UUID tenantId);
+  Optional<Branch> findByIdAndTenantId(UUID branchId, UUID tenantId);
 }

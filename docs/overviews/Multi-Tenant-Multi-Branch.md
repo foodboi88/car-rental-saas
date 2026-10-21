@@ -440,12 +440,14 @@ CREATE TABLE user_tenants (
 -- vì SUPER_ADMIN có toàn quyền trên tất cả Tenant
 
 -- N-N: Trong phạm vi 1 Tenant, User được gán vào những Branch nào
--- Chỉ áp dụng cho STAFF và SALE (TENANT_ADMIN toàn quyền tất cả Branch)
+-- Áp dụng cho STAFF (Admin chọn danh sách branch để phân công) và SALE (Hệ thống tự động gán toàn bộ active branches của Tenant).
+-- Cả STAFF và SALE đều phải chọn active_branch_id khi tác nghiệp. TENANT_ADMIN bypass kiểm tra user_branches.
 CREATE TABLE user_branches (
     user_id UUID NOT NULL,
     tenant_id UUID NOT NULL,
     branch_id UUID NOT NULL,
     assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status SMALLINT DEFAULT 1, -- 1: ACTIVE, 0: INACTIVE
     PRIMARY KEY (user_id, branch_id),
     -- FK composite: đảm bảo user thuộc cùng tenant với branch
     CONSTRAINT fk_user_branch_user_tenant FOREIGN KEY (user_id, tenant_id) 
@@ -461,19 +463,19 @@ CREATE TABLE user_branches (
 | Role | Giá trị số | Phạm vi Tenant | Phạm vi Branch | Ghi chú |
 |------|:---:|---------------|----------------|---------|
 | `SUPER_ADMIN` | N/A | Tất cả Tenant (bypass RLS) | Tất cả Branch | Lưu trực tiếp trên `users`, không cần `user_tenants` |
-| `TENANT_ADMIN`| `1` | 1 Tenant | Tất cả Branch trong Tenant | Có `user_tenants`, không cần `user_branches` |
-| `STAFF`       | `2` | 1 Tenant | 1+ Branch được gán | Có `user_tenants` + `user_branches` (giao, nhận xe và tạo đơn) |
-| `SALE`        | `3` | 1 Tenant | 1+ Branch được gán | Có `user_tenants` + `user_branches` (chỉ được tạo đơn, không được giao/nhận xe) |
+| `TENANT_ADMIN`| `1` | 1 Tenant | Tất cả Branch trong Tenant | Có `user_tenants`, không cần `user_branches` (bypass) |
+| `STAFF`       | `2` | 1 Tenant | 1+ Branch được phân công | Admin chọn danh sách branch trên form (`branchIds`), lưu vào `user_branches`. Chọn `active_branch_id` khi tác nghiệp (giao, nhận xe, quản lý bãi). |
+| `SALE`        | `3` | 1 Tenant | Toàn bộ Branch của Tenant | 1 Sale có thể thuộc nhiều Tenant. Form không cần chọn branch, Backend tự động gán full active branches vào `user_branches`. Bắt buộc chọn `active_branch_id` khi tác nghiệp để BE biết ngữ cảnh xử lý. |
 
 **Ví dụ thực tế:**
 ```
 User "Nguyen Van A" (email: anv@email.com)
 ├── Tenant "RentCar VN":     role = 1 (TENANT_ADMIN) → toàn quyền tất cả Branch
-└── Tenant "Xe Điện Sài Gòn": role = 2 (STAFF)        → chỉ được gán Branch B1
+└── Tenant "Xe Điện Sài Gòn": role = 2 (STAFF)        → Admin phân công vào Branch B1, B2 (chọn 1 Branch để trực)
 
 User "Tran Thi B" (email: btt@email.com)
-├── Tenant "RentCar VN":     role = 2 (STAFF)        → chỉ được gán Branch A1, A2
-└── Tenant "Taxi Nha Trang": role = 3 (SALE)         → chỉ được gán Branch C1 (tạo đơn)
+├── Tenant "RentCar VN":     role = 2 (STAFF)        → Admin phân công vào Branch A1
+└── Tenant "Taxi Nha Trang": role = 3 (SALE)         → kinh doanh tại Taxi Nha Trang (tự động gán toàn bộ Branch, chọn 1 Branch để tác nghiệp)
 ```
 
 **Lợi ích của thiết kế này:**
@@ -561,10 +563,10 @@ BƯỚC 4: CHỌN / CHUYỂN ĐỔI CHI NHÁNH LÀM VIỆC (switch-branch)
 → User chọn chi nhánh làm việc: "Chi nhánh Quận 1"
 → POST /api/v1/auth/switch-branch { "activeBranchId": "branch-uuid" }
 → Kiểm tra:
-  * Chi nhánh có thuộc đúng tenant_id trong context không? (Chống IDOR)
-  * Chi nhánh có đang hoạt động (isActive) không?
+  * Chi nhánh có thuộc đúng tenant_id trong context không? (`branchInfo.getTenantId().equals(tenantUUID)` - Chống IDOR)
+  * Chi nhánh có đang hoạt động (`isActive = true`) không?
   * Nếu là TENANT_ADMIN: Có toàn quyền vào mọi chi nhánh active (bỏ qua bảng user_branches)
-  * Nếu là Nhân viên (STAFF/SALE): Bắt buộc phải có bản ghi phân công trong user_branches
+  * Nếu là STAFF hoặc SALE: Bắt buộc phải có bản ghi phân công trong `user_branches` theo đúng tenant VÀ trạng thái công tác phải là `status = 1 (ACTIVE)`. Bị đình chỉ hoặc thu hồi quyền ➔ 403 Forbidden. Cả STAFF và SALE đều chọn chi nhánh làm việc để token có `active_branch_id` cho Backend biết ngữ cảnh xử lý.
 → Cấp Access Token hoàn chỉnh mang active_branch_id:
     {
       "sub": "user-uuid",
@@ -580,10 +582,14 @@ BƯỚC 5: LÀM MỚI PHIÊN LÀM VIỆC TỰ ĐỘNG (SILENT REFRESH - refresh-
 Khi Access Token hết hạn (15 phút), Frontend tự động gọi ngầm:
 → POST /api/v1/auth/refresh-token (Đính kèm HttpOnly Cookie: refreshToken)
 → Backend kiểm tra chữ ký, hạn sử dụng, session id và bóc tách tenant_id, active_branch_id từ refresh token
-→ Xử lý thông minh bảo tồn ngữ cảnh làm việc (Zero-Interruption UX):
+→ Xử lý thông minh bảo tồn ngữ cảnh làm việc (Zero-Interruption UX) & Kịch bản Fallback FE:
   * Nếu đang ở màn chọn Nhà xe (Pre-tenant) → Cấp token tạm thời + danh sách availableTenants.
-  * Nếu đang ở màn chọn Chi nhánh → Cấp token mang tenant_id, roleCode + danh sách assignedBranches.
-  * Nếu đang làm việc tại Chi nhánh (Dashboard/Booking) → Cấp token đầy đủ tenant_id, active_branch_id, roleCode, permissions.
+  * Nếu đang ở màn chọn Chi nhánh → Cấp token mang tenant_id, roleCode + danh sách assignedBranches (chỉ lấy chi nhánh active & status = 1).
+  * Nếu đang làm việc tại Chi nhánh (Dashboard/Booking):
+    - Xác thực lại Chi nhánh (`findByIdAndTenantId`, active) và phân quyền nhân viên (`status = 1`, trừ TENANT_ADMIN).
+    - **Nếu Chi nhánh bị khóa / ngừng hoạt động / nhân viên bị thu hồi quyền:** Backend trả lỗi `403 Forbidden` ➔ Frontend bắt lỗi, hiển thị Toast cảnh báo và **tự động bắn người dùng về màn Chọn Chi Nhánh (`/select-branch`)** để chọn chi nhánh khác.
+    - **Nếu Nhà xe bị khóa:** Backend trả lỗi `403 Forbidden` ➔ Frontend bắt lỗi, hiển thị Toast cảnh báo và **tự động bắn người dùng về màn Chọn Nhà Xe (`/select-tenant`)** để chọn nhà xe khác (hoặc về `/login` nếu chỉ có 1 nhà xe).
+    - **Nếu bình thường:** Cấp token đầy đủ tenant_id, active_branch_id, roleCode, permissions.
 → Trả về Access Token mới trong Response Body và Refresh Token mới qua Set-Cookie header. Form đang nhập của người dùng được submit tiếp tục mà không bị gián đoạn hay mất dữ liệu!
 ```
 

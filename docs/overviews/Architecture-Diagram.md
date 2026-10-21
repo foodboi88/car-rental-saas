@@ -263,11 +263,11 @@ sequenceDiagram
     Filter ->> Ctx: TenantContext.setTenantId(tenantUUID)
     Filter ->> Ctrl: Forward request
     Ctrl ->> Svc: switchBranch(userId, activeBranchId)
-    Svc ->> DB: Kiểm tra branch thuộc tenant & đang active
+    Svc ->> DB: Kiểm tra branch thuộc tenant & đang active (findByIdAndTenantId)
     alt Role là TENANT_ADMIN
         Note over Svc: Bypass kiểm tra user_branches (Chủ xe vào mọi chi nhánh)
-    else Role là Nhân viên (STAFF)
-        Svc ->> DB: Kiểm tra user_branches(userId, activeBranchId)
+    else Role là Nhân viên vận hành (STAFF)
+        Svc ->> DB: Kiểm tra user_branches(tenantId, userId, activeBranchId) với status = 1 (ACTIVE)
     end
     Svc -->> Ctrl: Cấp JWT hoàn chỉnh { role, tenant_id, active_branch_id } + RefreshToken mới
     Ctrl -->> Client: 200 OK (Mở khóa toàn bộ chức năng chi nhánh) + Set-Cookie: refreshToken
@@ -277,7 +277,10 @@ sequenceDiagram
     Client ->> Filter: POST /refresh-token + Cookie: refreshToken (withCredentials: true)
     Filter ->> Ctrl: Bỏ qua kiểm tra AccessToken (Endpoint permitAll)
     Ctrl ->> Svc: refreshToken(cookieRefreshToken)
-    Svc ->> DB: Validate user, currentSessionId & tra cứu context từ claims (tenantId, activeBranchId)
+    Svc ->> DB: Validate user, currentSessionId, tenant & bóc tách context (tenantId, activeBranchId)
+    opt Token có activeBranchId
+        Svc ->> DB: Xác thực lại branch (findByIdAndTenantId, active) & user_branches (status = ACTIVE)
+    end
     Svc -->> Ctrl: Cấp cặp AccessToken & RefreshToken mới bảo tồn nguyên vẹn context
     Ctrl -->> Client: 200 OK + accessToken mới + Set-Cookie: refreshToken mới
     Note over Client: HTTP Interceptor lấy token mới retry submit form ngay lập tức!

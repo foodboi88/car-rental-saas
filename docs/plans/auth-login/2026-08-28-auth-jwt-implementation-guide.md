@@ -220,6 +220,19 @@
 - **Annotation:** `@Repository`
 - **Method:** `Optional<Role> findByIdAndTenantId(UUID id, UUID tenantId)`
 
+#### e. `UserBranchRepository.java`
+- **Khai báo:** `public interface UserBranchRepository extends JpaRepository<UserBranch, UserBranchId>`
+- **Annotation:** `@Repository`
+- **Method:** `Optional<UserBranch> findByTenantIdAndUserIdAndBranchId(UUID tenantId, UUID userId, UUID branchId)`
+  - **💡 Vai trò thực tế:** Kiểm tra quyền làm việc của nhân sự tại một chi nhánh cụ thể trong phạm vi cách ly dữ liệu Multi-tenant, trả về trạng thái công tác (`status`: ACTIVE, SUSPENDED, RESIGNED).
+
+#### f. `BranchRepository.java` (Các truy vấn phục vụ Auth)
+- **Khai báo:** `public interface BranchRepository extends JpaRepository<Branch, UUID>`
+- **Annotation:** `@Repository`
+- **Methods:**
+  - `Optional<Branch> findByIdAndTenantId(UUID branchId, UUID tenantId)`: Kiểm tra chi nhánh có tồn tại và thuộc quyền sở hữu của Nhà xe (chống IDOR).
+  - `List<Branch> findAllAssignedBranchesByUserIdTenantId(UUID userId, UUID tenantId)`: Lấy các chi nhánh đang hoạt động (`branches.is_active = true`) mà nhân viên đang công tác hợp lệ (`user_branches.status = 1`).
+
 ---
 
 ## 🛡️ GIAI ĐOẠN 3: HẠ TẦNG BẢO MẬT (SECURITY / PRINCIPAL / JWT)
@@ -439,20 +452,30 @@
 6. Trả về `AuthServiceResult` với `availableTenants = null`, `activeBranchId = null`, `assignedBranches`, `permissions`.
 
 #### 🔹 Quy trình xử lý hàm `switchBranch(UUID currentUserId, SwitchBranchRequestDTO request)`:
-1. Kiểm tra `tenantId` trong `TenantContext`.
-2. Xác minh chi nhánh thuộc tenant và đang hoạt động. Nếu là nhân viên, kiểm tra quyền trong `user_branches`.
-3. Sinh cặp Access Token & Refresh Token hoàn chỉnh mang cả `tenantId` và `activeBranchId`.
-4. Trả về `AuthServiceResult` mở khóa toàn bộ chức năng tác nghiệp chi nhánh.
+1. Lấy `tenantUUID` an toàn từ `TenantContext.getTenantId()`.
+2. Xác minh thông tin Nhà xe (phải tồn tại và đang `isActive`).
+3. Kiểm tra chi nhánh (`request.getActiveBranchId()`):
+   - Phải tồn tại trong hệ thống.
+   - Phải thuộc quyền sở hữu của Nhà xe hiện tại (`branchInfo.getTenantId().equals(tenantUUID)` - chống IDOR).
+   - Chi nhánh phải đang mở cửa hoạt động (`branchInfo.isActive() = true`).
+4. Kiểm tra phân quyền nhân sự chi nhánh (`findByTenantIdAndUserIdAndBranchId`):
+   - **Chủ nhà xe (`TENANT_ADMIN`):** Tự động bypass kiểm tra (có quyền làm việc tại mọi chi nhánh của nhà xe mà không cần bản ghi trong `user_branches`).
+   - **Nhân viên vận hành (`STAFF`) & Kinh doanh (`SALE`):** Bắt buộc phải có bản ghi phân công trong `user_branches` VÀ trạng thái công tác phải là `UserBranchStatus.ACTIVE (1)`. Cả STAFF và SALE đều phải chọn chi nhánh làm việc để token có `active_branch_id` xác định ngữ cảnh xử lý (quản lý xe, giao nhận, tạo đơn booking, doanh số chi nhánh). Nếu không thuộc chi nhánh hoặc bị đình chỉ / thu hồi quyền (`status != ACTIVE`), từ chối với mã lỗi `403 Forbidden`.
+5. Sinh cặp Access Token (`activeBranchId`, `tenantUUID`, `currentSessionId`) và Refresh Token (`tenantUUID`, `activeBranchUUID`, `currentSessionId`).
+6. Trả về `AuthServiceResult` kèm danh sách chi nhánh và permissions, mở khóa toàn bộ chức năng tác nghiệp chi nhánh.
 
 #### 🔹 Quy trình xử lý hàm `refreshToken(String inputRefreshToken)`:
 1. Kiểm tra tính hợp lệ của Refresh Token (đọc từ HttpOnly Cookie `@CookieValue`), kiểm tra chữ ký, hạn dùng và `token_type = REFRESH`.
 2. Kiểm tra `currentSessionId` trong token có khớp với DB không (chống dùng lại token cũ sau khi đăng xuất hoặc bị đá phiên).
 3. Bóc tách `tenantId` và `activeBranchId` từ claims của `inputRefreshToken`.
-4. **Phân nhánh xử lý bảo tồn ngữ cảnh (Silent Refresh):**
-   - **Nhánh Super Admin:** Cấp lại token Super Admin.
+4. **Phân nhánh xử lý bảo tồn ngữ cảnh (Silent Refresh - Zero-Interruption UX):**
+   - **Nhánh Super Admin:** Cấp lại token Super Admin (`role = SUPER_ADMIN`).
    - **Nhánh Pre-Tenant (chưa chọn nhà xe):** Cấp lại token tạm thời + danh sách `availableTenants`.
    - **Nhánh Đã chọn Nhà xe (chưa chọn chi nhánh):** Xác thực lại tenant và vai trò trong DB, cấp token mang `tenantUUID`, `roleCode`, danh sách `assignedBranches` và `permissions` mới nhất.
-   - **Nhánh Đang làm việc tại Chi nhánh:** Cấp token mang đầy đủ `tenantUUID`, `activeBranchUUID`, `roleCode` và `permissions` mới nhất. Form đang nhập của người dùng được submit tiếp tục mà không bị gián đoạn.
+   - **Nhánh Đang làm việc tại Chi nhánh (Tenant & Branch đã chọn):**
+     - **Kiểm tra Nhà xe:** Nếu Nhà xe bị khóa (`tenant.isActive = false`) ➔ Ném `403 Forbidden` ("Nhà xe của bạn đang chọn đã bị khóa"). Frontend sẽ bắt lỗi này, hiển thị Toast thông báo và **bắn người dùng về màn Chọn Nhà xe (`/select-tenant`)**.
+     - **Kiểm tra Chi nhánh:** Xác thực qua `branchRepository.findByIdAndTenantId(activeBranchUUID, tenantUUID)`. Nếu chi nhánh bị đóng cửa (`isActive = false`) hoặc nhân viên bị thu hồi quyền (`user_branches.status != ACTIVE`, trừ `TENANT_ADMIN`) ➔ Ném `403 Forbidden` ("Chi nhánh của bạn không còn tồn tại hoặc đã bị ngưng hoạt động"). Frontend sẽ bắt lỗi này, hiển thị Toast cảnh báo, xóa `activeBranchId` và **bắn người dùng về màn Chọn Chi nhánh (`/select-branch`)** để chọn lại.
+     - **Hợp lệ:** Cấp cặp Access Token & Refresh Token mang đầy đủ `tenantUUID`, `activeBranchUUID`, `roleCode` và `permissions` mới nhất. Form đang nhập của người dùng được submit tiếp tục mà không bị gián đoạn hay mất dữ liệu.
 
 #### 🔹 Quy trình xử lý hàm `logout()`:
 1. Lấy `userId` từ `TenantContext`, gán `currentSessionId = null` trong DB.
@@ -499,7 +522,8 @@ if (res.data.user.roleCode === 'SUPER_ADMIN') {
     // 2. Chuyển hướng vào màn hình chọn Nhà xe (Tenant Picker)
     router.navigate(['/select-tenant']);
 } else if (res.data.user.tenantId && !res.data.user.activeBranchId) {
-    // 3. Chuyển hướng vào màn hình chọn Chi nhánh (Branch Picker)
+    // 3. Nếu đã chọn Tenant nhưng chưa chọn Branch -> Chuyển hướng vào màn hình chọn Chi nhánh (Branch Picker)
+    // Áp dụng cho cả STAFF và SALE (đều phải chọn branch để token có active_branch_id)
     router.navigate(['/select-branch']);
 } else if (res.data.user.tenantId && res.data.user.activeBranchId) {
     // 4. Vào thẳng Dashboard nghiệp vụ chi nhánh
@@ -514,7 +538,37 @@ Khi Access Token (15 phút) hết hạn:
 3. Tự động gọi `POST /api/v1/auth/refresh-token` (với `withCredentials: true`).
 4. Lấy `accessToken` mới từ response body cập nhật vào biến lưu trữ bộ nhớ (RAM / NgRx / Signal / BehaviorSubject).
 5. Cập nhật header `Authorization: Bearer <new_accessToken>` cho request bị 401 lúc nãy và gửi lại (retry). User tiếp tục làm việc bình thường.
-6. Chỉ khi nào API `/refresh-token` cũng trả về lỗi (401/403 - Refresh Token hết hạn 7 ngày hoặc bị thu hồi) thì mới xóa state và chuyển hướng về màn `/login`.
+6. Nếu API `/refresh-token` trả về lỗi (401/403), Interceptor xử lý theo kịch bản Fallback Navigation ở Mục 4 dưới đây.
+
+### 4. Xử Lý Điều Hướng Fallback Khi Nhà Xe / Chi Nhánh Bị Khóa (Fallback Navigation)
+Khi người dùng đang thao tác, nếu Nhà xe hoặc Chi nhánh bị Chủ xe / Super Admin khóa hoặc nhân viên bị thu hồi quyền, request refresh token sẽ trả về mã `403 Forbidden`. Frontend cần phân tích `error.message` (hoặc error payload) để điều hướng phù hợp thay vì đăng xuất toàn bộ:
+
+```typescript
+// Trong Interceptor xử lý lỗi từ /api/v1/auth/refresh-token:
+if (error.status === 403) {
+    const errorMsg = error.error?.error?.message || '';
+
+    if (errorMsg.includes('Chi nhánh')) {
+        // 1. Chi nhánh bị ngưng hoạt động hoặc nhân viên bị thu hồi quyền tại chi nhánh
+        toastService.error('Chi nhánh làm việc hiện tại đã tạm ngưng hoạt động hoặc quyền làm việc của bạn đã thay đổi.');
+        authStore.clearActiveBranch(); // Xóa activeBranchId trong state
+        router.navigate(['/select-branch']); // Bắn về màn hình chọn chi nhánh
+    } else if (errorMsg.includes('Nhà xe')) {
+        // 2. Nhà xe bị tạm ngưng hoạt động / khóa
+        toastService.error('Nhà xe hiện đang tạm ngưng hoạt động hoặc bị khóa.');
+        authStore.clearTenantAndBranch(); // Xóa tenantId và activeBranchId
+        if (authStore.availableTenants?.length > 1) {
+            router.navigate(['/select-tenant']); // Bắn về màn chọn nhà xe khác
+        } else {
+            router.navigate(['/login']); // Chỉ có 1 nhà xe thì logout về login
+        }
+    } else {
+        // Các trường hợp bị cấm khác: Đăng xuất về login
+        authStore.logout();
+        router.navigate(['/login']);
+    }
+}
+```
 
 ---
 
