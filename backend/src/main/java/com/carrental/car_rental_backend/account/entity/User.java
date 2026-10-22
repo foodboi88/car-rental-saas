@@ -54,6 +54,9 @@ public class User {
   @Column(name = "last_login_at")
   private Instant lastLoginAt;
 
+  @Column(name = "current_session_id")
+  private UUID currentSessionId;
+
   @CreationTimestamp
   @Column(name = "created_at")
   private Instant createdAt;

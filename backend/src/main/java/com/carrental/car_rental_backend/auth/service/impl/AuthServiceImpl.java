@@ -6,8 +6,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
 import com.carrental.car_rental_backend.account.entity.Role;
 import com.carrental.car_rental_backend.account.entity.User;
 import com.carrental.car_rental_backend.account.entity.UserBranch;
@@ -18,17 +22,19 @@ import com.carrental.car_rental_backend.account.repository.UserBranchRepository;
 import com.carrental.car_rental_backend.account.repository.UserRepository;
 import com.carrental.car_rental_backend.account.repository.UserTenantRepository;
 import com.carrental.car_rental_backend.auth.dto.request.LoginRequestDTO;
-import com.carrental.car_rental_backend.auth.dto.request.RefreshTokenRequestDTO;
 import com.carrental.car_rental_backend.auth.dto.request.SelectTenantRequestDTO;
 import com.carrental.car_rental_backend.auth.dto.request.SwitchBranchRequestDTO;
-import com.carrental.car_rental_backend.auth.dto.response.AuthResponseDTO;
+import com.carrental.car_rental_backend.auth.dto.response.AuthServiceResult;
 import com.carrental.car_rental_backend.auth.dto.response.BranchSummaryDTO;
 import com.carrental.car_rental_backend.auth.dto.response.TenantSummaryDTO;
 import com.carrental.car_rental_backend.auth.dto.response.UserInfoResponseDTO;
 import com.carrental.car_rental_backend.auth.service.AuthService;
 import com.carrental.car_rental_backend.branch.entity.Branch;
 import com.carrental.car_rental_backend.branch.repository.BranchRepository;
+import com.carrental.car_rental_backend.common.constant.ClaimKey;
 import com.carrental.car_rental_backend.common.constant.RoleConstant;
+import com.carrental.car_rental_backend.common.constant.TokenType;
+import com.carrental.car_rental_backend.common.enums.user_branch_status.UserBranchStatus;
 import com.carrental.car_rental_backend.common.exception.AppException;
 import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.security.context.TenantContext;
@@ -56,16 +62,20 @@ public class AuthServiceImpl implements AuthService{
 
   @Override
   @Transactional
-  public AuthResponseDTO login(LoginRequestDTO request) {
+  public AuthServiceResult login(LoginRequestDTO request) {
     Optional<User> user = this.userRepository.findByEmail(request.getEmail());
-    if(user.isEmpty() || !this.passwordEncoder.matches(request.getPassword(), user.get().getPasswordHash())) throw new AppException(ErrorCode.UNAUTHORIZED, "Sai tài khoản hoặc mật khẩu !");
+    if (user.isEmpty() || !this.passwordEncoder.matches(request.getPassword(), user.get().getPasswordHash())) throw new AppException(ErrorCode.UNAUTHORIZED, "Sai tài khoản hoặc mật khẩu !");
     User userInfo = user.get();
-    if(!userInfo.getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
+    if (!userInfo.getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
+
+    UUID currentSessionId = UUID.randomUUID();
+    userInfo.setCurrentSessionId(currentSessionId);
+    this.userRepository.save(userInfo);
 
     if(Boolean.TRUE.equals(userInfo.getIsSuperAdmin())){
-      String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), RoleConstant.SUPER_ADMIN, null, null);
-      String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId());
-      return AuthResponseDTO.builder()
+      String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), RoleConstant.SUPER_ADMIN, null, null, currentSessionId);
+      String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId(), currentSessionId, null, null);
+      return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(null)
@@ -93,12 +103,12 @@ public class AuthServiceImpl implements AuthService{
       Optional<Role> role = this.roleRepository.findById(userTenant.getRoleId());
       if (role.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn chưa được phân công vào Nhà xe nào !");
       Role roleInfo = role.get();
-      String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), roleInfo.getCode(), userTenant.getTenantId(), null);
-      String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId());
+      String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), roleInfo.getCode(), userTenant.getTenantId(), null, currentSessionId);
+      String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId(), currentSessionId, userTenant.getTenantId(), null);
       Optional<Tenant> tenant = this.tenantRepository.findById(userTenant.getTenantId());
-      if (tenant.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Nhà xe của User không tồn tại !");
+      if (tenant.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, String.format("Nhà xe có Id %s của User không tồn tại !", userTenant.getTenantId()));
       Tenant tenantInfo = tenant.get();
-      if (!tenantInfo.isActive()) throw new AppException(ErrorCode.FORBIDDEN, "Nhà xe của User hiện đang tạm ngưng hoạt động hoặc bị khóa");
+      if (!tenantInfo.isActive()) throw new AppException(ErrorCode.FORBIDDEN, String.format("Nhà xe %s của User hiện đang tạm ngưng hoạt động hoặc bị khóa", tenantInfo.getName()));
       TenantSummaryDTO tenantSummaryDTO = TenantSummaryDTO.builder()
         .domain(tenantInfo.getDomain())
         .isActive(tenantInfo.isActive())
@@ -110,7 +120,7 @@ public class AuthServiceImpl implements AuthService{
       List<BranchSummaryDTO> listBranchSummaryDTO = this.getBranchSummaryDTOListFromUserIdAndTenantId(userInfo.getId(), tenantInfo.getId(), roleInfo.getCode());
       List<String> listPermission = this.permissionRepository.findAllPermissionCodeByRoleId(roleInfo.getId());
 
-      return AuthResponseDTO.builder()
+      return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(listTenant)
@@ -131,10 +141,10 @@ public class AuthServiceImpl implements AuthService{
         .build();
 
     }else if(listUserTenant.size() > 1){ // Trường hợp user thuọc nhiều nhà xe -> Trả list tenant cho user chọn
-      String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), null, null, null);
-      String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId());
+      String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), null, null, null, currentSessionId);
+      String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId(), currentSessionId, null, null);
       List<TenantSummaryDTO> tenantSummaryDTOList = this.getTenantSummaryDTOListFromUserId(userInfo);
-      return AuthResponseDTO.builder()
+      return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(tenantSummaryDTOList) // Danh sách tenant cho user chọn
@@ -159,7 +169,7 @@ public class AuthServiceImpl implements AuthService{
   }
 
   @Override
-  public AuthResponseDTO selectTenant(UUID currentUserId, SelectTenantRequestDTO request) {
+  public AuthServiceResult selectTenant(UUID currentUserId, SelectTenantRequestDTO request) {
     Optional<User> user = this.userRepository.findById(currentUserId);
     if (user.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin User !");
     if(!user.get().getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
@@ -176,13 +186,15 @@ public class AuthServiceImpl implements AuthService{
     if (role.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Người dùng chưa được phân quyền ở nhà xe này");
     Role roleInfo = role.get();
 
-    String accessToken = this.jwtProvider.generateAccessToken(currentUserId, userInfo.getEmail(), roleInfo.getCode(), request.getTenantId(), null);
-    String refreshToken = this.jwtProvider.generateRefreshToken(currentUserId);
+    UUID currentSessionId = TenantContext.getCurrentSessionId();
+
+    String accessToken = this.jwtProvider.generateAccessToken(currentUserId, userInfo.getEmail(), roleInfo.getCode(), request.getTenantId(), null, currentSessionId);
+    String refreshToken = this.jwtProvider.generateRefreshToken(currentUserId, currentSessionId, request.getTenantId(), null);
 
     List<BranchSummaryDTO> listBranchSummaryDTO = this.getBranchSummaryDTOListFromUserIdAndTenantId(userInfo.getId(), request.getTenantId(), roleInfo.getCode());
 
     List<String> listPermission = this.permissionRepository.findAllPermissionCodeByRoleId(roleInfo.getId());
-    return AuthResponseDTO.builder()
+    return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(null) // Đã chọn tenant rồi thì không cần trả list tenant nữa. Lần sau thì call api list tenant
@@ -204,7 +216,7 @@ public class AuthServiceImpl implements AuthService{
   }
 
   @Override
-  public AuthResponseDTO switchBranch(UUID currentUserId, SwitchBranchRequestDTO request) {
+  public AuthServiceResult switchBranch(UUID currentUserId, SwitchBranchRequestDTO request) {
     Optional<User> user = this.userRepository.findById(currentUserId);
     if (user.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin User !");
     if(!user.get().getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
@@ -218,29 +230,36 @@ public class AuthServiceImpl implements AuthService{
     if (tenant.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin Nhà xe !");
     Tenant tenantInfo = tenant.get();
 
+    if (!tenantInfo.isActive()) throw new AppException(ErrorCode.FORBIDDEN, "Nhà xe của bạn đang chọn đã bị khóa");
+
     Optional<Role> role = this.roleRepository.findRoleByUserIdAndTenantId(currentUserId, tenantUUID);
     if (role.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Người dùng chưa được phân quyền ở nhà xe này");
     Role roleInfo = role.get();
 
-    Optional<Branch> branch = this.branchRepository.findById(request.getActiveBranchId());
-    if (branch.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy chi nhánh này trong hệ thống !");
+    Optional<Branch> branch = this.branchRepository.findByIdAndTenantId(request.getActiveBranchId(), tenantUUID);
+    if (branch.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy chi nhánh này trong hệ thống hoặc không thuộc nhà xe của bạn !");
     Branch branchInfo = branch.get();
-    if (!branchInfo.getTenantId().equals(tenantUUID)) throw new AppException(ErrorCode.BAD_REQUEST, "Chi nhánh này không thuộc nhà xe của bạn !");
     if (!branchInfo.isActive()) throw new AppException(ErrorCode.BAD_REQUEST, "Chi nhánh này hiện đang tạm ngưng hoạt động!");
 
-    Optional<UserBranch> userBranch = this.userBranchRepository.findByUserIdAndBranchId(currentUserId, request.getActiveBranchId());
+    Optional<UserBranch> userBranch = this.userBranchRepository.findByTenantIdAndUserIdAndBranchId(tenantUUID, currentUserId, request.getActiveBranchId());
     if (
       userBranch.isEmpty() &&
       !RoleConstant.TENANT_ADMIN.equals(role.get().getCode()) // Chủ doanh nghiệp thì mặc định vào được tất cả các branch nên branches = null
     ) throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản của bạn không được phân công vào chi nhánh này !");
+    if (
+      !RoleConstant.TENANT_ADMIN.equals(role.get().getCode()) &&
+      !UserBranchStatus.ACTIVE.equals(userBranch.get().getStatus())
+    ) throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản của bạn đã bị thu hồi quyền nhân viên ở chi nhánh này");
 
-    String accessToken = this.jwtProvider.generateAccessToken(currentUserId, userInfo.getEmail(), roleInfo.getCode(), tenantUUID, request.getActiveBranchId());
-    String refreshToken = this.jwtProvider.generateRefreshToken(currentUserId);
+    UUID currentSessionId = TenantContext.getCurrentSessionId();
+
+    String accessToken = this.jwtProvider.generateAccessToken(currentUserId, userInfo.getEmail(), roleInfo.getCode(), tenantUUID, request.getActiveBranchId(), currentSessionId);
+    String refreshToken = this.jwtProvider.generateRefreshToken(currentUserId, currentSessionId, tenantUUID, request.getActiveBranchId());
 
     List<String> listPermission = this.permissionRepository.findAllPermissionCodeByRoleId(roleInfo.getId());
 
     List<BranchSummaryDTO> listBranchSummaryDTO = this.getBranchSummaryDTOListFromUserIdAndTenantId(currentUserId, tenantUUID, roleInfo.getCode());
-    return AuthResponseDTO.builder()
+    return AuthServiceResult.builder()
         .accessToken(accessToken)
         .refreshToken(refreshToken)
         .availableTenants(null) // Đã chọn tenant rồi thì không cần trả list tenant nữa. Lần sau thì call api list tenant
@@ -263,44 +282,227 @@ public class AuthServiceImpl implements AuthService{
   }
 
   @Override
-  public AuthResponseDTO refreshToken(RefreshTokenRequestDTO request) {
-    if (!this.jwtProvider.validateToken(request.getRefreshToken())) throw new AppException(ErrorCode.BAD_REQUEST, "Refesh Token không hợp lệ !");
-    Claims claims = this.jwtProvider.parseClaims(request.getRefreshToken());
+  public AuthServiceResult refreshToken(String inputRefreshToken) {
+    if (!StringUtils.hasText(inputRefreshToken)) {
+      throw new AppException(ErrorCode.UNAUTHORIZED, "Không tìm thấy Refresh Token, vui lòng đăng nhập lại !");
+    }
+    if (!this.jwtProvider.validateToken(inputRefreshToken)) throw new AppException(ErrorCode.BAD_REQUEST, "Refesh Token không hợp lệ !");
+
+    Claims claims = this.jwtProvider.parseClaims(inputRefreshToken);
+
+    String tokenType = claims.get(TokenType.CLAIM_TOKEN_TYPE, String.class);
+    if (!TokenType.TOKEN_TYPE_REFRESH.equals(tokenType)) throw new AppException(ErrorCode.UNAUTHORIZED);
+
     UUID userUUID = UUID.fromString(claims.getSubject());
+    String tenantId = claims.get(ClaimKey.TENANT_ID, String.class);
+    String activeBranchId = claims.get(ClaimKey.ACTIVE_BRANCH_ID, String.class);
+  
     Optional<User> user = this.userRepository.findById(userUUID);
     if (user.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin User !");
-    if(!user.get().getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
+    if (!user.get().getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
+    if (user.get().getCurrentSessionId() == null) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản này đã đăng xuất, vui lòng đăng nhập lại !");
+
+    String currentSessionId = claims.get(ClaimKey.CURRENT_SESSION_ID, String.class);
+    if (!StringUtils.hasText(currentSessionId) || !UUID.fromString(currentSessionId).equals(user.get().getCurrentSessionId())) throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản của bạn đang được đăng nhập ở nơi khác. Vui lòng đăng nhập lại !");
+
     User userInfo = user.get();
-    String refreshToken = this.jwtProvider.generateRefreshToken(userUUID);
-    String accessToken = this.jwtProvider.generateAccessToken(
-      userUUID, 
-      userInfo.getEmail(), 
-      Boolean.TRUE.equals(userInfo.getIsSuperAdmin()) ? RoleConstant.SUPER_ADMIN : null, 
-      null, 
-      null
-    );
-    List<TenantSummaryDTO> tenantSummaryDTOList = Boolean.TRUE.equals(userInfo.getIsSuperAdmin()) ? null : this.getTenantSummaryDTOListFromUserId(userInfo);
-    String roleOfUser = Boolean.TRUE.equals(userInfo.getIsSuperAdmin()) ? RoleConstant.SUPER_ADMIN : null;
-    return AuthResponseDTO.builder()
-        .accessToken(accessToken)
-        .refreshToken(refreshToken)
-        .availableTenants(tenantSummaryDTOList) // Đã chọn tenant rồi thì không cần trả list tenant nữa. Lần sau thì call api list tenant
-        .expiresIn(this.jwtProvider.getAccessTokenExpirationInSeconds())
-        .user(
-          UserInfoResponseDTO.builder()
-            .activeBranchId(null)
-            .assignedBranches(null)
-            .email(userInfo.getEmail())
-            .fullname(userInfo.getFullname())
-            .id(userInfo.getId())
-            .permissions(null)
-            .phone(userInfo.getPhone())
-            .roleCode(roleOfUser)
-            .tenantId(null)
-            .tenantName(null)
-            .build()
-        )
-        .build();
+
+    if (Boolean.TRUE.equals(userInfo.getIsSuperAdmin())) {
+      String refreshToken = this.jwtProvider.generateRefreshToken(
+        userUUID, 
+        userInfo.getCurrentSessionId(), 
+        null, 
+        null
+      );
+      String accessToken = this.jwtProvider.generateAccessToken(
+        userUUID, 
+        userInfo.getEmail(), 
+        RoleConstant.SUPER_ADMIN,
+        null, 
+        null,
+        userInfo.getCurrentSessionId()
+      );
+  
+      return AuthServiceResult.builder()
+          .accessToken(accessToken)
+          .refreshToken(refreshToken)
+          .availableTenants(null)
+          .expiresIn(this.jwtProvider.getAccessTokenExpirationInSeconds())
+          .user(
+            UserInfoResponseDTO.builder()
+              .activeBranchId(null)
+              .assignedBranches(null)
+              .email(userInfo.getEmail())
+              .fullname(userInfo.getFullname())
+              .id(userInfo.getId())
+              .permissions(null)
+              .phone(userInfo.getPhone())
+              .roleCode(RoleConstant.SUPER_ADMIN)
+              .tenantId(null)
+              .tenantName(null)
+              .build()
+          )
+          .build();
+    } else if (!StringUtils.hasText(tenantId) && !StringUtils.hasText(activeBranchId)) { // Đang ở màn chọn tenant sau khi login
+      String refreshToken = this.jwtProvider.generateRefreshToken(
+        userUUID, 
+        userInfo.getCurrentSessionId(), 
+        null, 
+        null
+      );
+      String accessToken = this.jwtProvider.generateAccessToken(
+        userUUID, 
+        userInfo.getEmail(), 
+        null,
+        null, 
+        null,
+        userInfo.getCurrentSessionId()
+      );
+      List<TenantSummaryDTO> tenantSummaryDTOList = this.getTenantSummaryDTOListFromUserId(userInfo);
+  
+      return AuthServiceResult.builder()
+          .accessToken(accessToken)
+          .refreshToken(refreshToken)
+          .availableTenants(tenantSummaryDTOList)
+          .expiresIn(this.jwtProvider.getAccessTokenExpirationInSeconds())
+          .user(
+            UserInfoResponseDTO.builder()
+              .activeBranchId(null)
+              .assignedBranches(null)
+              .email(userInfo.getEmail())
+              .fullname(userInfo.getFullname())
+              .id(userInfo.getId())
+              .permissions(null)
+              .phone(userInfo.getPhone())
+              .roleCode(null)
+              .tenantId(null)
+              .tenantName(null)
+              .build()
+          )
+          .build();
+    } else if (StringUtils.hasText(tenantId) && !StringUtils.hasText(activeBranchId)) { // Đang ở màn chọn branch sau khi chọn tenant
+      UUID tenantUUID = StringUtils.hasText(tenantId) ? UUID.fromString(tenantId) : null;
+  
+      Optional<Tenant> tenant = this.tenantRepository.findById(tenantUUID);
+      if (tenant.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin Nhà xe !");
+      Tenant tenantInfo = tenant.get();
+  
+      if (!tenantInfo.isActive()) throw new AppException(ErrorCode.FORBIDDEN, "Nhà xe của bạn đang chọn đã bị khóa");
+  
+      Optional<Role> role = this.roleRepository.findRoleByUserIdAndTenantId(userUUID, tenantUUID);
+      if (role.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Người dùng chưa được phân quyền ở nhà xe này");
+      Role roleInfo = role.get();
+      List<String> listPermission = this.permissionRepository.findAllPermissionCodeByRoleId(roleInfo.getId());
+  
+      String refreshToken = this.jwtProvider.generateRefreshToken(
+        userUUID, 
+        userInfo.getCurrentSessionId(), 
+        tenantUUID, 
+        null
+      );
+      String accessToken = this.jwtProvider.generateAccessToken(
+        userUUID, 
+        userInfo.getEmail(), 
+        roleInfo.getCode(),
+        tenantUUID, 
+        null,
+        userInfo.getCurrentSessionId()
+      );
+      List<BranchSummaryDTO> listBranchSummaryDTO = this.getBranchSummaryDTOListFromUserIdAndTenantId(userUUID, tenantUUID, roleInfo.getCode());
+  
+      return AuthServiceResult.builder()
+          .accessToken(accessToken)
+          .refreshToken(refreshToken)
+          .availableTenants(null)
+          .expiresIn(this.jwtProvider.getAccessTokenExpirationInSeconds())
+          .user(
+            UserInfoResponseDTO.builder()
+              .activeBranchId(null)
+              .assignedBranches(listBranchSummaryDTO)
+              .email(userInfo.getEmail())
+              .fullname(userInfo.getFullname())
+              .id(userInfo.getId())
+              .permissions(listPermission)
+              .phone(userInfo.getPhone())
+              .roleCode(roleInfo.getCode())
+              .tenantId(tenantUUID)
+              .tenantName(tenantInfo.getName())
+              .build()
+          )
+          .build();
+    } else if (StringUtils.hasText(tenantId) && StringUtils.hasText(activeBranchId)) { // Đã chọn cả tenant và branch và đang ở trong giao diện chính
+      UUID tenantUUID = StringUtils.hasText(tenantId) ? UUID.fromString(tenantId) : null;
+      UUID activeBranchUUID = StringUtils.hasText(activeBranchId) ? UUID.fromString(activeBranchId) : null;
+  
+      Optional<Tenant> tenant = this.tenantRepository.findById(tenantUUID);
+      if (tenant.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin Nhà xe !");
+      Tenant tenantInfo = tenant.get();
+  
+      if (!tenantInfo.isActive()) throw new AppException(ErrorCode.FORBIDDEN, "Nhà xe của bạn đang chọn đã bị khóa");
+  
+      Optional<Role> role = this.roleRepository.findRoleByUserIdAndTenantId(userUUID, tenantUUID);
+      if (role.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Người dùng chưa được phân quyền ở nhà xe này");
+      Role roleInfo = role.get();
+      List<String> listPermission = this.permissionRepository.findAllPermissionCodeByRoleId(roleInfo.getId());
+
+      Optional<Branch> branch = this.branchRepository.findByIdAndTenantId(activeBranchUUID, tenantUUID);
+      if (
+        branch.isEmpty() ||
+        !branch.get().isActive()
+      ) {
+        throw new AppException(ErrorCode.FORBIDDEN, "Chi nhánh của bạn không còn tồn tại hoặc đã bị ngưng hoạt động");
+      }
+
+      Optional<UserBranch> userBranch = this.userBranchRepository.findByTenantIdAndUserIdAndBranchId(tenantUUID, userUUID, activeBranchUUID);
+      if (
+        userBranch.isEmpty() &&
+        !RoleConstant.TENANT_ADMIN.equals(role.get().getCode()) // Chủ doanh nghiệp thì mặc định vào được tất cả các branch nên branches = null
+      ) throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản của bạn không được phân công vào chi nhánh này !");
+      if (
+        !RoleConstant.TENANT_ADMIN.equals(role.get().getCode()) &&
+        !UserBranchStatus.ACTIVE.equals(userBranch.get().getStatus())
+      ) throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản của bạn đã bị thu hồi quyền nhân viên ở chi nhánh này");
+  
+      String refreshToken = this.jwtProvider.generateRefreshToken(
+        userUUID, 
+        userInfo.getCurrentSessionId(), 
+        tenantUUID, 
+        activeBranchUUID
+      );
+      String accessToken = this.jwtProvider.generateAccessToken(
+        userUUID, 
+        userInfo.getEmail(), 
+        Boolean.TRUE.equals(userInfo.getIsSuperAdmin()) ? RoleConstant.SUPER_ADMIN : roleInfo.getCode(),
+        tenantUUID, 
+        activeBranchUUID,
+        userInfo.getCurrentSessionId()
+      );
+      List<BranchSummaryDTO> listBranchSummaryDTO = this.getBranchSummaryDTOListFromUserIdAndTenantId(userUUID, tenantUUID, roleInfo.getCode());
+  
+      return AuthServiceResult.builder()
+          .accessToken(accessToken)
+          .refreshToken(refreshToken)
+          .availableTenants(null)
+          .expiresIn(this.jwtProvider.getAccessTokenExpirationInSeconds())
+          .user(
+            UserInfoResponseDTO.builder()
+              .activeBranchId(activeBranchUUID)
+              .assignedBranches(listBranchSummaryDTO)
+              .email(userInfo.getEmail())
+              .fullname(userInfo.getFullname())
+              .id(userInfo.getId())
+              .permissions(listPermission)
+              .phone(userInfo.getPhone())
+              .roleCode(roleInfo.getCode())
+              .tenantId(tenantUUID)
+              .tenantName(tenantInfo.getName())
+              .build()
+          )
+          .build();
+    }
+    else {
+      throw new AppException(ErrorCode.BAD_REQUEST, "Refresh token không hợp lệ. Vui lòng kiểm tra lại !");
+    }
   }
 
   @Override
@@ -337,7 +539,7 @@ public class AuthServiceImpl implements AuthService{
   private List<BranchSummaryDTO> getBranchSummaryDTOListFromUserIdAndTenantId (UUID userUUID, UUID tenantUUID, String roleCode) {
     List<Branch> listBranch = new ArrayList<>();
     if (RoleConstant.TENANT_ADMIN.equals(roleCode)) {
-      listBranch = this.branchRepository.findByTenantId(tenantUUID);
+      listBranch = this.branchRepository.findByTenantIdAndIsActiveTrue(tenantUUID);
     } else {
       listBranch = this.branchRepository.findAllAssignedBranchesByUserIdTenantId(userUUID, tenantUUID);
     }
@@ -351,5 +553,20 @@ public class AuthServiceImpl implements AuthService{
         .address(item.getAddress())
         .build()
       ).toList();
+  }
+
+  @Override
+  public void logout() {
+    UUID userId = TenantContext.getUserId();
+    Optional<User> user = this.userRepository.findById(userId);
+    if (user.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin User !");
+    if(!user.get().getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
+
+    User userInfo = user.get();
+    userInfo.setCurrentSessionId(null);
+    this.userRepository.save(userInfo);
+
+    TenantContext.clear();
+    SecurityContextHolder.clearContext();
   }
 }

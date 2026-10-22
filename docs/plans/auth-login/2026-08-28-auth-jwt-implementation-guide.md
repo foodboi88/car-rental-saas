@@ -75,26 +75,28 @@
 
 ---
 
-### 3. File `RefreshTokenRequestDTO.java`
-- **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/auth/dto/request/RefreshTokenRequestDTO.java`
-- **💡 Vai trò thực tế:** Là **"Phiếu xin gia hạn vé"**. Access Token chỉ có hạn 15 phút (để bảo mật). Khi Access Token hết hạn, Frontend sẽ dùng Refresh Token gửi phiếu này lên để xin cấp lại Access Token mới mà không bắt người dùng phải gõ lại mật khẩu.
-- **Annotations cho Class:** `@Data`, `@NoArgsConstructor`, `@AllArgsConstructor`, `@Builder`
-- **Các thuộc tính:**
-  - `refreshToken` (`String`): Chuỗi token dài hạn. Gắn `@NotBlank(message = "Refresh token không được để trống")`.
+### 3. Cơ chế Refresh Token & HttpOnly Cookie (`refreshToken`)
+- **💡 Vai trò thực tế:** Là **"Phiếu xin gia hạn vé"**. Access Token chỉ có hạn 15 phút (để bảo mật). Khi Access Token hết hạn, Frontend sẽ xin cấp lại Access Token mới mà không bắt người dùng phải gõ lại mật khẩu.
+- **🛡️ Chuẩn Bảo mật Cao cấp (HttpOnly Cookie):**
+  - Để ngăn chặn hoàn toàn nguy cơ đánh cắp token qua tấn công XSS (Cross-Site Scripting), chuỗi `refreshToken` **KHÔNG trả về trong Response Body JSON**, mà được Backend gắn trực tiếp vào Header **`Set-Cookie`**:
+    - `HttpOnly = true` (Javascript của trình duyệt không đọc được).
+    - `Secure = true` (Chỉ truyền qua kết nối an toàn).
+    - `SameSite = Strict` (Chống hoàn toàn tấn công CSRF).
+    - `Path = /api/v1/auth` (Chỉ tự động đính kèm khi gọi các API thuộc phân hệ Auth như `/refresh-token`, `/logout`).
+  - **Lưu ý Frontend:** Khi gọi các API `/login`, `/select-tenant`, `/switch-branch`, `/refresh-token`, `/logout`, Frontend bắt buộc phải bật cấu hình **`withCredentials: true`** (trong Angular `HttpClient` hoặc Axios) để trình duyệt tự động lưu và gửi cookie này.
 
 ---
 
 ### 4. File `AuthResponseDTO.java`
 - **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/auth/dto/response/AuthResponseDTO.java`
-- **💡 Vai trò thực tế:** Là **"Bì thư kết quả phản hồi"** sau khi người dùng đăng nhập hoặc chọn nhà xe thành công. Nó chứa vé vào cổng (`accessToken`, `refreshToken`), thông tin người dùng và danh sách các nhà xe mà người này có quyền truy cập.
+- **💡 Vai trò thực tế:** Là **"Bì thư kết quả phản hồi"** sau khi người dùng đăng nhập hoặc chọn nhà xe / chi nhánh thành công. Nó chứa vé vào cổng (`accessToken`), thông tin người dùng và danh sách các nhà xe mà người này có quyền truy cập.
 - **Annotations cho Class:** `@Data`, `@NoArgsConstructor`, `@AllArgsConstructor`, `@Builder`
 - **Các thuộc tính:**
-  - `accessToken` (`String`): Chuỗi JWT mang quyền truy cập (chỉ có khi đã chọn xong Tenant).
-  - `refreshToken` (`String`): Chuỗi JWT làm mới phiên dài hạn (7 ngày).
+  - `accessToken` (`String`): Chuỗi JWT mang quyền truy cập.
   - `tokenType` (`String`): Gán mặc định là `"Bearer"`.
   - `expiresIn` (`long`): Thời gian sống của Access Token tính bằng giây (ví dụ: `900` giây = 15 phút).
-  - `user` (`UserInfoResponseDTO`): Hồ sơ chi tiết của người dùng.
-  - `availableTenants` (`List<TenantSummaryDTO>`): Danh sách các nhà xe mà tài khoản này tham gia (để hiển thị Tenant Picker nếu thuộc $\ge 2$ nhà xe).
+  - `user` (`UserInfoResponseDTO`): Hồ sơ chi tiết của người dùng (`roleCode`, `tenantId`, `activeBranchId`, `permissions`...).
+  - `availableTenants` (`List<TenantSummaryDTO>`): Danh sách các nhà xe mà tài khoản này tham gia (trả về khi thuộc $\ge 2$ nhà xe và chưa chọn tenant).
 
 ---
 
@@ -218,6 +220,19 @@
 - **Annotation:** `@Repository`
 - **Method:** `Optional<Role> findByIdAndTenantId(UUID id, UUID tenantId)`
 
+#### e. `UserBranchRepository.java`
+- **Khai báo:** `public interface UserBranchRepository extends JpaRepository<UserBranch, UserBranchId>`
+- **Annotation:** `@Repository`
+- **Method:** `Optional<UserBranch> findByTenantIdAndUserIdAndBranchId(UUID tenantId, UUID userId, UUID branchId)`
+  - **💡 Vai trò thực tế:** Kiểm tra quyền làm việc của nhân sự tại một chi nhánh cụ thể trong phạm vi cách ly dữ liệu Multi-tenant, trả về trạng thái công tác (`status`: ACTIVE, SUSPENDED, RESIGNED).
+
+#### f. `BranchRepository.java` (Các truy vấn phục vụ Auth)
+- **Khai báo:** `public interface BranchRepository extends JpaRepository<Branch, UUID>`
+- **Annotation:** `@Repository`
+- **Methods:**
+  - `Optional<Branch> findByIdAndTenantId(UUID branchId, UUID tenantId)`: Kiểm tra chi nhánh có tồn tại và thuộc quyền sở hữu của Nhà xe (chống IDOR).
+  - `List<Branch> findAllAssignedBranchesByUserIdTenantId(UUID userId, UUID tenantId)`: Lấy các chi nhánh đang hoạt động (`branches.is_active = true`) mà nhân viên đang công tác hợp lệ (`user_branches.status = 1`).
+
 ---
 
 ## 🛡️ GIAI ĐOẠN 3: HẠ TẦNG BẢO MẬT (SECURITY / PRINCIPAL / JWT)
@@ -256,8 +271,8 @@
 - **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/security/jwt/JwtProvider.java`
 - **💡 Vai trò thực tế:** Là **"Máy in & Máy soi vé chống giả"**. Nó dùng thuật toán mã hóa (HMAC-SHA256) và khóa bí mật (`jwt.secret`) để sinh ra chuỗi ký tự JWT cấp cho Client, đồng thời giải mã và kiểm tra hạn sử dụng của vé khi Client gửi request lên.
 - **Các method cần viết:**
-  - `generateAccessToken(UUID userId, String email, String role, UUID tenantId, UUID activeBranchId)`: Tạo Access Token (15 phút) mang theo các thông tin định danh cốt lõi.
-  - `generateRefreshToken(UUID userId)`: Tạo Refresh Token (7 ngày) chỉ mang theo `userId`.
+  - `generateAccessToken(UUID userId, String email, String roleCode, UUID tenantId, UUID activeBranchId, UUID currentSessionId)`: Tạo Access Token (15 phút) mang theo các thông tin định danh cốt lõi và mã phiên làm việc (`current_session_id`).
+  - `generateRefreshToken(UUID userId, UUID currentSessionId, UUID tenantId, UUID activeBranchId)`: Tạo Refresh Token (7 ngày) mang theo `user_id`, `current_session_id`, `tenant_id` và `active_branch_id` để bảo tồn ngữ cảnh làm việc khi Silent Refresh.
   - `parseClaims(String token)`: Giải mã token để lấy thông tin bên trong (Payload).
   - `validateToken(String token)`: Trả về `true` nếu vé hợp lệ, trả về `false` nếu vé bị chỉnh sửa hoặc hết hạn.
   - `getUserIdFromToken(String token)`: Trích xuất `userId` từ token.
@@ -421,26 +436,51 @@
 
 #### 🔹 Quy trình xử lý hàm `login(LoginRequestDTO request)`:
 1. **Kiểm tra Email & Mật khẩu:** Tìm `User` theo email $\rightarrow$ So khớp mật khẩu bằng `passwordEncoder.matches()` $\rightarrow$ Nếu sai ném lỗi `UNAUTHORIZED`.
-2. **Kiểm tra Khóa tài khoản:** Nếu `user.getIsActive() == false` $\rightarrow$ Ném lỗi `FORBIDDEN` ("Tài khoản đã bị khóa").
-3. **Tra cứu danh sách Nhà xe:** Gọi `userTenantRepository.findByUserId(user.getId())`.
+2. **Kiểm tra Khóa tài khoản:** Nếu `user.getIsActive() == false` $\rightarrow$ Ném lỗi `UNAUTHORIZED` ("Tài khoản đã bị khóa").
+3. **Cập nhật Session duy nhất:** Sinh `currentSessionId = UUID.randomUUID()`, lưu vào `users` để kiểm soát đăng nhập 1 nơi (Single Session).
 4. **Phân nhánh xử lý:**
-   - **Trường hợp 1 (User chỉ thuộc đúng 1 Nhà xe):** Tự động chọn nhà xe đó, nạp quyền hạn, sinh cặp `accessToken` + `refreshToken` và trả về `AuthResponseDTO` để vào thẳng Dashboard.
-   - **Trường hợp 2 (User thuộc $\ge 2$ Nhà xe):** Cấp `refreshToken` tạm thời, trả về danh sách `availableTenants` để Frontend hiển thị màn hình chọn Nhà xe (Tenant Picker).
+   - **Super Admin:** Cấp Access Token + Refresh Token (`role = SUPER_ADMIN`, `tenant = null`, `branch = null`). Trả về `availableTenants = null`.
+   - **User thuộc đúng 1 Nhà xe:** Tự động chọn nhà xe đó, cấp Access Token (`tenant_id`, `roleCode`, `active_branch_id = null`) và Refresh Token (`tenant_id`). Trả về `assignedBranches` để Frontend vào thẳng màn chọn chi nhánh.
+   - **User thuộc $\ge 2$ Nhà xe:** Cấp Pre-Tenant Token (`role = null`, `tenant = null`, `branch = null`), trả về danh sách `availableTenants` để Frontend hiển thị Tenant Picker.
 
-#### 🔹 Quy trình xử lý hàm `selectTenant(UUID userId, SelectTenantRequestDTO request)`:
-1. Xác minh user thực sự có quyền tại `request.getTenantId()`.
-2. Sinh `accessToken` chính thức mang đầy đủ claims: `userId`, `email`, `roleCode`, `tenantId`, `activeBranchId`.
-3. Lấy danh sách chi nhánh được phân công từ `user_branches`.
-4. Đóng gói `UserInfoResponseDTO` và trả về `AuthResponseDTO`.
+#### 🔹 Quy trình xử lý hàm `selectTenant(UUID currentUserId, SelectTenantRequestDTO request)`:
+1. Xác minh user thực sự có quyền tại `request.getTenantId()`, tenant đang hoạt động.
+2. Tra cứu vai trò của user tại tenant đó từ `user_tenants` $\rightarrow$ `roles`.
+3. Sinh cặp Access Token & Refresh Token mới gắn `tenantId`.
+4. Lấy danh sách chi nhánh được phân công từ `user_branches` (nếu là `TENANT_ADMIN` thì lấy toàn bộ chi nhánh của tenant).
+5. Lấy danh sách quyền nguyên tử `permissions` từ `permissionRepository`.
+6. Trả về `AuthServiceResult` với `availableTenants = null`, `activeBranchId = null`, `assignedBranches`, `permissions`.
 
-#### 🔹 Quy trình xử lý hàm `refreshToken(RefreshTokenRequestDTO request)`:
-1. Soi kiểm tra chữ ký và hạn của `refreshToken`.
-2. Lấy `userId` từ token $\rightarrow$ Kiểm tra tài khoản trong DB.
-3. Cấp phát `accessToken` mới và trả về.
+#### 🔹 Quy trình xử lý hàm `switchBranch(UUID currentUserId, SwitchBranchRequestDTO request)`:
+1. Lấy `tenantUUID` an toàn từ `TenantContext.getTenantId()`.
+2. Xác minh thông tin Nhà xe (phải tồn tại và đang `isActive`).
+3. Kiểm tra chi nhánh (`request.getActiveBranchId()`):
+   - Phải tồn tại trong hệ thống.
+   - Phải thuộc quyền sở hữu của Nhà xe hiện tại (`branchInfo.getTenantId().equals(tenantUUID)` - chống IDOR).
+   - Chi nhánh phải đang mở cửa hoạt động (`branchInfo.isActive() = true`).
+4. Kiểm tra phân quyền nhân sự chi nhánh (`findByTenantIdAndUserIdAndBranchId`):
+   - **Chủ nhà xe (`TENANT_ADMIN`):** Tự động bypass kiểm tra (có quyền làm việc tại mọi chi nhánh của nhà xe mà không cần bản ghi trong `user_branches`).
+   - **Nhân viên vận hành (`STAFF`) & Kinh doanh (`SALE`):** Bắt buộc phải có bản ghi phân công trong `user_branches` VÀ trạng thái công tác phải là `UserBranchStatus.ACTIVE (1)`. Cả STAFF và SALE đều phải chọn chi nhánh làm việc để token có `active_branch_id` xác định ngữ cảnh xử lý (quản lý xe, giao nhận, tạo đơn booking, doanh số chi nhánh). Nếu không thuộc chi nhánh hoặc bị đình chỉ / thu hồi quyền (`status != ACTIVE`), từ chối với mã lỗi `403 Forbidden`.
+5. Sinh cặp Access Token (`activeBranchId`, `tenantUUID`, `currentSessionId`) và Refresh Token (`tenantUUID`, `activeBranchUUID`, `currentSessionId`).
+6. Trả về `AuthServiceResult` kèm danh sách chi nhánh và permissions, mở khóa toàn bộ chức năng tác nghiệp chi nhánh.
 
-#### 🔹 Quy trình xử lý hàm `getMe()`:
-1. Lấy `Authentication` từ `SecurityContextHolder`.
-2. Ép kiểu sang `UserPrincipal` $\rightarrow$ Map sang `UserInfoResponseDTO` trả về thông tin người dùng đang đăng nhập.
+#### 🔹 Quy trình xử lý hàm `refreshToken(String inputRefreshToken)`:
+1. Kiểm tra tính hợp lệ của Refresh Token (đọc từ HttpOnly Cookie `@CookieValue`), kiểm tra chữ ký, hạn dùng và `token_type = REFRESH`.
+2. Kiểm tra `currentSessionId` trong token có khớp với DB không (chống dùng lại token cũ sau khi đăng xuất hoặc bị đá phiên).
+3. Bóc tách `tenantId` và `activeBranchId` từ claims của `inputRefreshToken`.
+4. **Phân nhánh xử lý bảo tồn ngữ cảnh (Silent Refresh - Zero-Interruption UX):**
+   - **Nhánh Super Admin:** Cấp lại token Super Admin (`role = SUPER_ADMIN`).
+   - **Nhánh Pre-Tenant (chưa chọn nhà xe):** Cấp lại token tạm thời + danh sách `availableTenants`.
+   - **Nhánh Đã chọn Nhà xe (chưa chọn chi nhánh):** Xác thực lại tenant và vai trò trong DB, cấp token mang `tenantUUID`, `roleCode`, danh sách `assignedBranches` và `permissions` mới nhất.
+   - **Nhánh Đang làm việc tại Chi nhánh (Tenant & Branch đã chọn):**
+     - **Kiểm tra Nhà xe:** Nếu Nhà xe bị khóa (`tenant.isActive = false`) ➔ Ném `403 Forbidden` ("Nhà xe của bạn đang chọn đã bị khóa"). Frontend sẽ bắt lỗi này, hiển thị Toast thông báo và **bắn người dùng về màn Chọn Nhà xe (`/select-tenant`)**.
+     - **Kiểm tra Chi nhánh:** Xác thực qua `branchRepository.findByIdAndTenantId(activeBranchUUID, tenantUUID)`. Nếu chi nhánh bị đóng cửa (`isActive = false`) hoặc nhân viên bị thu hồi quyền (`user_branches.status != ACTIVE`, trừ `TENANT_ADMIN`) ➔ Ném `403 Forbidden` ("Chi nhánh của bạn không còn tồn tại hoặc đã bị ngưng hoạt động"). Frontend sẽ bắt lỗi này, hiển thị Toast cảnh báo, xóa `activeBranchId` và **bắn người dùng về màn Chọn Chi nhánh (`/select-branch`)** để chọn lại.
+     - **Hợp lệ:** Cấp cặp Access Token & Refresh Token mang đầy đủ `tenantUUID`, `activeBranchUUID`, `roleCode` và `permissions` mới nhất. Form đang nhập của người dùng được submit tiếp tục mà không bị gián đoạn hay mất dữ liệu.
+
+#### 🔹 Quy trình xử lý hàm `logout()`:
+1. Lấy `userId` từ `TenantContext`, gán `currentSessionId = null` trong DB.
+2. Xóa ngữ cảnh `TenantContext.clear()` và `SecurityContextHolder.clearContext()`.
+3. Controller ghi đè Cookie `refreshToken` với `maxAge = 0` để trình duyệt xóa cookie vĩnh viễn.
 
 ---
 
@@ -448,13 +488,87 @@
 
 ### File `AuthController.java`
 - **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/auth/controller/AuthController.java`
-- **💡 Vai trò thực tế:** Là **"Quầy lễ tân đón tiếp khách"**. Nhận các HTTP Request gửi đến từ Internet, kiểm tra dữ liệu đầu vào (`@Valid`) và chuyển cho `AuthService` xử lý, sau đó bọc kết quả vào `ApiResponse` trả về cho Client.
-- **Các API Endpoints:**
-  - `POST /api/v1/auth/login`: Tiếp nhận đăng nhập.
-  - `POST /api/v1/auth/select-tenant`: Tiếp nhận lựa chọn nhà xe làm việc.
-  - `POST /api/v1/auth/switch-branch`: Tiếp nhận lựa chọn hoặc chuyển đổi chi nhánh làm việc.
-  - `POST /api/v1/auth/refresh-token`: Tiếp nhận yêu cầu làm mới token.
-  - `GET /api/v1/auth/me`: Trả về thông tin của chính người dùng đang đăng nhập.
+- **Các API Endpoints & Khế ước:**
+
+| Endpoint | Method | Header / Cookie | Body | Mô tả chức năng |
+| :--- | :---: | :--- | :--- | :--- |
+| `/api/v1/auth/login` | `POST` | Public | `LoginRequestDTO` (`email`, `password`) | Xác thực tài khoản. Trả `accessToken` trong body, set HttpOnly Cookie `refreshToken`. |
+| `/api/v1/auth/select-tenant` | `POST` | `Bearer <Token>` | `SelectTenantRequestDTO` (`tenantId`) | Chọn nhà xe làm việc $\rightarrow$ Cấp token mang `tenant_id` và danh sách chi nhánh. |
+| `/api/v1/auth/switch-branch` | `POST` | `Bearer <Token>` | `SwitchBranchRequestDTO` (`activeBranchId`) | Chọn/Đổi chi nhánh làm việc $\rightarrow$ Cấp token đầy đủ mang `active_branch_id`. |
+| `/api/v1/auth/refresh-token` | `POST` | Cookie: `refreshToken` | *Trống* | Làm mới token tự động. Bảo tồn ngữ cảnh Nhà xe & Chi nhánh. |
+| `/api/v1/auth/logout` | `POST` | `Bearer <Token>` | *Trống* | Đăng xuất hệ thống, vô hiệu hóa session, ra lệnh xóa cookie. |
+
+---
+
+## 💻 HỢP ĐỒNG GIAO TIẾP VỚI FRONTEND (ANGULAR / WEB CLIENT INTEGRATION)
+
+Để Frontend phối hợp nhịp nhàng với Backend mà không gây lỗi phân quyền hay mất form:
+
+### 1. Bật `withCredentials = true` bắt buộc
+Tất cả các request từ Frontend gửi đến Backend (đặc biệt là Auth module) bắt buộc phải cấu hình:
+```typescript
+// Trong Angular HttpClient hoặc Axios:
+{ withCredentials: true }
+```
+*Lý do:* Trình duyệt chỉ gửi và nhận HttpOnly Cookie (`refreshToken`) qua lại với Backend khi cờ `withCredentials` được bật.
+
+### 2. Luồng Điều hướng Giao diện sau Đăng nhập (Routing Flow)
+Sau khi gọi `POST /api/v1/auth/login`:
+```typescript
+if (res.data.user.roleCode === 'SUPER_ADMIN') {
+    // 1. Chuyển hướng vào SaaS Admin Portal
+    router.navigate(['/admin/dashboard']);
+} else if (!res.data.user.tenantId && res.data.availableTenants?.length > 1) {
+    // 2. Chuyển hướng vào màn hình chọn Nhà xe (Tenant Picker)
+    router.navigate(['/select-tenant']);
+} else if (res.data.user.tenantId && !res.data.user.activeBranchId) {
+    // 3. Nếu đã chọn Tenant nhưng chưa chọn Branch -> Chuyển hướng vào màn hình chọn Chi nhánh (Branch Picker)
+    // Áp dụng cho cả STAFF và SALE (đều phải chọn branch để token có active_branch_id)
+    router.navigate(['/select-branch']);
+} else if (res.data.user.tenantId && res.data.user.activeBranchId) {
+    // 4. Vào thẳng Dashboard nghiệp vụ chi nhánh
+    router.navigate(['/dashboard']);
+}
+```
+
+### 3. Cơ chế Silent Refresh trong HTTP Interceptor (Angular Interceptor)
+Khi Access Token (15 phút) hết hạn:
+1. Bất kỳ API nghiệp vụ nào trả về mã `401 Unauthorized`.
+2. Interceptor giữ (queue) request đó lại, không đẩy user về trang login.
+3. Tự động gọi `POST /api/v1/auth/refresh-token` (với `withCredentials: true`).
+4. Lấy `accessToken` mới từ response body cập nhật vào biến lưu trữ bộ nhớ (RAM / NgRx / Signal / BehaviorSubject).
+5. Cập nhật header `Authorization: Bearer <new_accessToken>` cho request bị 401 lúc nãy và gửi lại (retry). User tiếp tục làm việc bình thường.
+6. Nếu API `/refresh-token` trả về lỗi (401/403), Interceptor xử lý theo kịch bản Fallback Navigation ở Mục 4 dưới đây.
+
+### 4. Xử Lý Điều Hướng Fallback Khi Nhà Xe / Chi Nhánh Bị Khóa (Fallback Navigation)
+Khi người dùng đang thao tác, nếu Nhà xe hoặc Chi nhánh bị Chủ xe / Super Admin khóa hoặc nhân viên bị thu hồi quyền, request refresh token sẽ trả về mã `403 Forbidden`. Frontend cần phân tích `error.message` (hoặc error payload) để điều hướng phù hợp thay vì đăng xuất toàn bộ:
+
+```typescript
+// Trong Interceptor xử lý lỗi từ /api/v1/auth/refresh-token:
+if (error.status === 403) {
+    const errorMsg = error.error?.error?.message || '';
+
+    if (errorMsg.includes('Chi nhánh')) {
+        // 1. Chi nhánh bị ngưng hoạt động hoặc nhân viên bị thu hồi quyền tại chi nhánh
+        toastService.error('Chi nhánh làm việc hiện tại đã tạm ngưng hoạt động hoặc quyền làm việc của bạn đã thay đổi.');
+        authStore.clearActiveBranch(); // Xóa activeBranchId trong state
+        router.navigate(['/select-branch']); // Bắn về màn hình chọn chi nhánh
+    } else if (errorMsg.includes('Nhà xe')) {
+        // 2. Nhà xe bị tạm ngưng hoạt động / khóa
+        toastService.error('Nhà xe hiện đang tạm ngưng hoạt động hoặc bị khóa.');
+        authStore.clearTenantAndBranch(); // Xóa tenantId và activeBranchId
+        if (authStore.availableTenants?.length > 1) {
+            router.navigate(['/select-tenant']); // Bắn về màn chọn nhà xe khác
+        } else {
+            router.navigate(['/login']); // Chỉ có 1 nhà xe thì logout về login
+        }
+    } else {
+        // Các trường hợp bị cấm khác: Đăng xuất về login
+        authStore.logout();
+        router.navigate(['/login']);
+    }
+}
+```
 
 ---
 

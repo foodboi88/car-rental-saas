@@ -10,6 +10,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.carrental.car_rental_backend.common.dto.ApiResponse;
 
@@ -69,6 +70,17 @@ public class GlobalExceptionHandler {
     log.warn("HttpMessageNotReadableException: {}", httpEx.getMessage());
     ErrorCode errorCode = ErrorCode.MALFORMED_JSON;
     ApiResponse<Void> response = ApiResponse.error(errorCode.getCode(), errorCode.getMessage());
+    return ResponseEntity.status(errorCode.getHttpStatus()).body(response);
+  }
+
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  public ResponseEntity<ApiResponse<Void>> handleMethodArgumentTypeMismatchException(MethodArgumentTypeMismatchException methodEx) {
+    log.warn("MethodArgumentTypeMismatchException: {}", methodEx.getMessage());
+    ErrorCode errorCode = ErrorCode.BAD_REQUEST;
+    ApiResponse<Void> response = ApiResponse.error(
+      errorCode.getCode(), 
+      String.format("Bạn đang truyền sai kiểu dữ liệu của parameter '%s', kiểu dữ liệu mong muốn '%s'", methodEx.getName(), methodEx.getRequiredType())
+    );
     return ResponseEntity.status(errorCode.getHttpStatus()).body(response);
   }
 }

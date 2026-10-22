@@ -113,6 +113,7 @@ erDiagram
         boolean is_active "Trang thai kich hoat"
         boolean is_super_admin "Co Super Admin SaaS"
         timestamptz last_login_at "Dang nhap gan nhat"
+        uuid current_session_id "Ma phien dang nhap hien tai (Single Session)"
         timestamptz created_at "Thoi diem tao"
         timestamptz updated_at "Thoi diem cap nhat"
     }
@@ -338,6 +339,7 @@ CREATE TABLE users (
     is_active BOOLEAN DEFAULT TRUE,                              -- Trạng thái kích hoạt tài khoản
     is_super_admin BOOLEAN DEFAULT FALSE,                        -- Cờ đánh dấu Super Admin toàn hệ thống SaaS (Bypasses RLS)
     last_login_at TIMESTAMP WITH TIME ZONE,                      -- Thời điểm đăng nhập thành công gần nhất
+    current_session_id UUID,                                     -- Mã phiên đăng nhập hiện tại (Single Session - Chống đăng nhập đồng thời)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tạo tài khoản
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật thông tin gần nhất
 );

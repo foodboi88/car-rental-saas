@@ -235,7 +235,7 @@ sequenceDiagram
     Note over Client, DB: 1. LUỒNG ĐĂNG NHẬP (POST /api/v1/auth/login)
     Client ->> Ctrl: POST /login { email, password }
     Ctrl ->> Svc: login(requestDto)
-    Svc ->> DB: Query User by email & verify password (BCrypt)
+    Svc ->> DB: Query User by email, verify password (BCrypt) & update currentSessionId
     alt Là Super Admin
         Svc -->> Ctrl: Cấp JWT { role: "SUPER_ADMIN", tenant_id: null }
     else User thuộc đúng 1 Tenant
@@ -245,7 +245,7 @@ sequenceDiagram
         Svc ->> DB: Lấy danh sách Tenant đang active
         Svc -->> Ctrl: Cấp Pre-tenant JWT { role: null, tenant_id: null } + availableTenants
     end
-    Ctrl -->> Client: 200 OK + ApiResponse<AuthResponseDTO>
+    Ctrl -->> Client: 200 OK + Body: accessToken + Set-Cookie: refreshToken (HttpOnly, SameSite=Strict)
 
     Note over Client, DB: 2. LUỒNG CHỌN NHÀ XE (POST /api/v1/auth/select-tenant)
     Client ->> Filter: POST /select-tenant + Header: Bearer <Pre-tenant Token>
@@ -255,24 +255,37 @@ sequenceDiagram
     Ctrl ->> Svc: selectTenant(userPrincipal.id, tenantId)
     Svc ->> DB: Kiểm tra User có được gán vào tenantId không (Chống IDOR)
     Svc ->> DB: Lấy vai trò, permissions và danh sách chi nhánh
-    Svc -->> Ctrl: Cấp JWT nâng cấp { role: roleCode, tenant_id: tenantId }
-    Ctrl -->> Client: 200 OK + assignedBranches & permissions
+    Svc -->> Ctrl: Cấp JWT nâng cấp { role: roleCode, tenant_id: tenantId } + RefreshToken mới
+    Ctrl -->> Client: 200 OK + accessToken, assignedBranches, permissions + Set-Cookie: refreshToken
 
     Note over Client, DB: 3. LUỒNG CHỌN CHI NHÁNH (POST /api/v1/auth/switch-branch)
     Client ->> Filter: POST /switch-branch + Header: Bearer <Token có tenant_id>
     Filter ->> Ctx: TenantContext.setTenantId(tenantUUID)
     Filter ->> Ctrl: Forward request
     Ctrl ->> Svc: switchBranch(userId, activeBranchId)
-    Svc ->> DB: Kiểm tra branch thuộc tenant & đang active
+    Svc ->> DB: Kiểm tra branch thuộc tenant & đang active (findByIdAndTenantId)
     alt Role là TENANT_ADMIN
         Note over Svc: Bypass kiểm tra user_branches (Chủ xe vào mọi chi nhánh)
-    else Role là Nhân viên (STAFF)
-        Svc ->> DB: Kiểm tra user_branches(userId, activeBranchId)
+    else Role là Nhân viên vận hành (STAFF)
+        Svc ->> DB: Kiểm tra user_branches(tenantId, userId, activeBranchId) với status = 1 (ACTIVE)
     end
-    Svc -->> Ctrl: Cấp JWT hoàn chỉnh { role, tenant_id, active_branch_id }
-    Ctrl -->> Client: 200 OK (Mở khóa toàn bộ chức năng nghiệp vụ chi nhánh)
+    Svc -->> Ctrl: Cấp JWT hoàn chỉnh { role, tenant_id, active_branch_id } + RefreshToken mới
+    Ctrl -->> Client: 200 OK (Mở khóa toàn bộ chức năng chi nhánh) + Set-Cookie: refreshToken
 
-    Note over Client, DB: 4. DỌN DẸP NGỮ CẢNH (FILTER FINALLY)
+    Note over Client, DB: 4. LUỒNG LÀM MỚI PHIÊN TỰ ĐỘNG (SILENT REFRESH - POST /api/v1/auth/refresh-token)
+    Note over Client: Khi AccessToken (15p) hết hạn trong lúc đang thao tác form
+    Client ->> Filter: POST /refresh-token + Cookie: refreshToken (withCredentials: true)
+    Filter ->> Ctrl: Bỏ qua kiểm tra AccessToken (Endpoint permitAll)
+    Ctrl ->> Svc: refreshToken(cookieRefreshToken)
+    Svc ->> DB: Validate user, currentSessionId, tenant & bóc tách context (tenantId, activeBranchId)
+    opt Token có activeBranchId
+        Svc ->> DB: Xác thực lại branch (findByIdAndTenantId, active) & user_branches (status = ACTIVE)
+    end
+    Svc -->> Ctrl: Cấp cặp AccessToken & RefreshToken mới bảo tồn nguyên vẹn context
+    Ctrl -->> Client: 200 OK + accessToken mới + Set-Cookie: refreshToken mới
+    Note over Client: HTTP Interceptor lấy token mới retry submit form ngay lập tức!
+
+    Note over Client, DB: 5. DỌN DẸP NGỮ CẢNH (FILTER FINALLY)
     Filter ->> Ctx: TenantContext.clear() (Chống rò rỉ dữ liệu giữa các luồng Tomcat)
 ```
 
