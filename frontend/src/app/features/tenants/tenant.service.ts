@@ -5,7 +5,7 @@ import { Observable, map } from 'rxjs';
 import { ApiSuccess } from '../../core/models/auth.models';
 import {
   AdminInput,
-  AdminLookupResult,
+  AdminEmailCheckResult,
   AdminResult,
   CreateTenantRequest,
   CreateTenantResult,
@@ -64,10 +64,10 @@ export class TenantService {
    * Hỏi trước email đã có tài khoản chưa. Có `tenantId` thì backend kiểm tra thêm quan hệ với nhà xe đó.
    * Dùng POST để email nằm trong body, không lọt vào log truy cập như khi nằm trên đường dẫn.
    */
-  lookupAdminByEmail(email: string, tenantId?: string): Observable<AdminLookupResult> {
+  checkAdminEmail(email: string, tenantId?: string): Observable<AdminEmailCheckResult> {
     const body = { email: email.trim(), ...(tenantId ? { tenantId } : {}) };
     return this.http
-      .post<ApiSuccess<AdminLookupResult>>(`${TENANTS_API}/admin-lookup`, body)
+      .post<ApiSuccess<AdminEmailCheckResult>>(`${TENANTS_API}/admin-email-check`, body)
       .pipe(map((response) => response.data));
   }
 

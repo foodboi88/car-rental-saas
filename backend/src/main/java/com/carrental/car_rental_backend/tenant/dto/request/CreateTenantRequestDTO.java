@@ -20,6 +20,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CreateTenantRequestDTO {
+  public static final int MAX_ADMINS_PER_REQUEST = 10;
+
   @NotBlank(message = "Vui lòng nhập tên nhà xe")
   @Size(max = 255, message = "Tên nhà xe tối đa 255 ký tự")
   private String name;
@@ -44,10 +46,10 @@ public class CreateTenantRequestDTO {
   @Size(max = 20, message = "Số điện thoại tối đa 20 ký tự")
   private String contactPhone;
 
-  // Chuỗi JSON, Service sẽ kiểm tra hợp lệ
   private String settings;
 
   @NotEmpty(message = "Cần ít nhất một chủ nhà xe")
+  @Size(max = MAX_ADMINS_PER_REQUEST, message = "Tối đa {max} chủ nhà xe mỗi lần tạo")
   @Valid // Bắt buộc có, nếu thiếu thì Spring không kiểm tra từng phần tử bên trong
   private List<AdminAssignmentRequestDTO> admins;
 }

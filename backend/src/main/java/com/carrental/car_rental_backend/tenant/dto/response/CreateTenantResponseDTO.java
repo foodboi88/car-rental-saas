@@ -13,14 +13,5 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class CreateTenantResponseDTO {
   private TenantResponseDTO tenant;
-  private List<AdminResult> admins;
-
-  @Data
-  @Builder
-  @NoArgsConstructor
-  @AllArgsConstructor
-  public static class AdminResult {
-    private String email;
-    private boolean accountCreated; // true: tạo tài khoản mới, false: chỉ liên kết tài khoản có sẵn
-  }
+  private List<AdminAssignmentResponseDTO> admins;
 }

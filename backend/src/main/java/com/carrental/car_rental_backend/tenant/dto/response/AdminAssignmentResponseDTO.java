@@ -9,10 +9,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AdminLookupResponseDTO {
+public class AdminAssignmentResponseDTO {
   private String email;
-  private boolean accountExists;
-  private String fullName;
-  private boolean canBeAdmin;
-  private String reason;
+  private boolean accountCreated;
 }

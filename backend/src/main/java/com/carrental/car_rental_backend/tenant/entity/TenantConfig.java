@@ -25,6 +25,10 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 public class TenantConfig {
+  private static final int DEFAULT_HOLD_TIMEOUT_MINUTES = 30;
+  private static final BigDecimal DEFAULT_LATE_HOURLY_PRICE = new BigDecimal("100000");
+  private static final BigDecimal DEFAULT_COMMISSION_RATE = new BigDecimal("5.00");
+
   @Id
   @Column(name = "tenant_id", nullable = false, updatable = false)
   private UUID tenantId;
@@ -45,4 +49,13 @@ public class TenantConfig {
   @UpdateTimestamp
   @Column(name = "updated_at", nullable = false)
   private Instant updatedAt;
+
+  public static TenantConfig withDefaults(UUID tenantId) {
+    return TenantConfig.builder()
+      .tenantId(tenantId)
+      .holdTimeoutMinutes(DEFAULT_HOLD_TIMEOUT_MINUTES)
+      .lateHourlyPrice(DEFAULT_LATE_HOURLY_PRICE)
+      .defaultCommissionRate(DEFAULT_COMMISSION_RATE)
+      .build();
+  }
 }

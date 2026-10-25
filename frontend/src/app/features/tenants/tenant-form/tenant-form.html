@@ -103,16 +103,16 @@
                   <input [id]="'admin-email-' + i" class="input" type="email" inputmode="email" formControlName="email"
                     autocomplete="off" autocapitalize="none"
                     (input)="onAdminEmailInput(admin)" (blur)="checkAdmin(admin)"
-                    [attr.aria-invalid]="error('admins[' + i + '].email', $any(admin).controls.email) || duplicateOf(admin) || lookupOf(admin).status() === 'blocked' ? 'true' : null" />
+                    [attr.aria-invalid]="error('admins[' + i + '].email', $any(admin).controls.email) || duplicateOf(admin) || emailCheckOf(admin).status() === 'blocked' ? 'true' : null" />
                   @if (error('admins[' + i + '].email', $any(admin).controls.email); as message) {
                     <span class="field-error">{{ message }}</span>
                   } @else if (duplicateOf(admin); as position) {
                     <span class="field-error" role="alert">Email này đã nhập ở chủ nhà xe số {{ position }}</span>
                   } @else {
-                    <app-admin-lookup-note [lookup]="lookupOf(admin)" />
+                    <app-admin-email-check-note [emailCheck]="emailCheckOf(admin)" />
                   }
                 </div>
-                @if (lookupOf(admin).needsAccountDetails()) {
+                @if (emailCheckOf(admin).needsAccountDetails()) {
                   <div class="field">
                     <label [for]="'admin-name-' + i">Họ tên</label>
                     <input [id]="'admin-name-' + i" class="input" formControlName="fullName" autocomplete="off"
@@ -137,7 +137,15 @@
         </div>
 
         <div>
-          <button type="button" class="btn btn-ghost btn-sm" (click)="addAdmin()"><app-icon name="plus" />Thêm chủ nhà xe</button>
+          <button type="button" class="btn btn-ghost btn-sm" (click)="addAdmin()" [disabled]="!canAddAdmin()">
+            <app-icon name="plus" />Thêm chủ nhà xe
+          </button>
+          @if (!canAddAdmin()) {
+            <span class="hint">Tối đa {{ maxAdmins }} chủ nhà xe mỗi lần tạo.</span>
+          }
+          @if (adminsError(); as message) {
+            <span class="field-error" role="alert">{{ message }}</span>
+          }
         </div>
       </section>
     }

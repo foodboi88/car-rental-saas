@@ -6,31 +6,31 @@ import { TenantService } from './tenant.service';
 import { trimmedEmail } from './tenant-validators';
 
 /**
- * - `idle`: chưa tra cứu (chưa nhập email, hoặc vừa sửa email).
+ * - `idle`: chưa kiểm tra (chưa nhập email, hoặc vừa sửa email).
  * - `checking`: đang hỏi backend.
  * - `new`: email chưa có tài khoản, cần họ tên và mật khẩu để tạo mới.
  * - `existing`: email đã có tài khoản dùng được, chỉ cần gán, không cần họ tên và mật khẩu.
  * - `blocked`: không gán được (tài khoản bị khóa, là Super Admin, đã là chủ hoặc nhân viên của nhà xe, nhà xe bị khóa).
- * - `failed`: không tra cứu được (lỗi mạng...), đành hiện đủ ô và để backend quyết khi gửi.
+ * - `failed`: không kiểm tra được (lỗi mạng...), đành hiện đủ ô và để backend quyết khi gửi.
  */
-export type LookupStatus = 'idle' | 'checking' | 'new' | 'existing' | 'blocked' | 'failed';
+export type EmailCheckStatus = 'idle' | 'checking' | 'new' | 'existing' | 'blocked' | 'failed';
 
-// `failed` cố ý không nằm trong đây: lỗi tra cứu có thể chỉ thoáng qua, nên lần rời ô email sau sẽ thử lại
-const SETTLED: readonly LookupStatus[] = ['new', 'existing', 'blocked'];
+// `failed` cố ý không nằm trong đây: lỗi kiểm tra có thể chỉ thoáng qua, nên lần rời ô email sau sẽ thử lại
+const SETTLED: readonly EmailCheckStatus[] = ['new', 'existing', 'blocked'];
 const MAX_NAME = 255;
 
 /**
- * Trạng thái tra cứu email của MỘT chủ nhà xe, để biết có cần hiện ô họ tên và mật khẩu hay không.
+ * Trạng thái kiểm tra email của MỘT chủ nhà xe, để biết có cần hiện ô họ tên và mật khẩu hay không.
  * Mỗi dòng nhập chủ nhà xe giữ một đối tượng riêng.
  */
-export class AdminLookup {
-  readonly status = signal<LookupStatus>('idle');
+export class AdminEmailCheck {
+  readonly status = signal<EmailCheckStatus>('idle');
   readonly fullName = signal<string | null>(null);
   readonly reason = signal<string | null>(null);
-  /** Chỉ hiện họ tên, mật khẩu khi cần tạo tài khoản mới (hoặc khi không tra cứu được). */
+  /** Chỉ hiện họ tên, mật khẩu khi cần tạo tài khoản mới (hoặc khi không kiểm tra được). */
   readonly needsAccountDetails = computed(() => this.status() === 'new' || this.status() === 'failed');
 
-  /** Mỗi lần tra cứu hoặc đặt lại tăng một số, kết quả về muộn của lần cũ sẽ bị bỏ qua. */
+  /** Mỗi lần kiểm tra hoặc đặt lại tăng một số, kết quả về muộn của lần cũ sẽ bị bỏ qua. */
   private ticket = 0;
 
   constructor(
@@ -46,12 +46,12 @@ export class AdminLookup {
     this.reason.set(null);
   }
 
-  /** Tra cứu lại nếu chưa có kết quả cho email hiện tại, ngược lại dùng kết quả đã có. */
-  ensureChecked(email: string): Observable<LookupStatus> {
+  /** Kiểm tra lại nếu chưa có kết quả cho email hiện tại, ngược lại dùng kết quả đã có. */
+  ensureChecked(email: string): Observable<EmailCheckStatus> {
     return SETTLED.includes(this.status()) ? of(this.status()) : this.check(email);
   }
 
-  check(email: string): Observable<LookupStatus> {
+  check(email: string): Observable<EmailCheckStatus> {
     const value = email.trim();
     if (!value || trimmedEmail({ value } as AbstractControl<string>)) {
       this.reset();
@@ -60,7 +60,7 @@ export class AdminLookup {
 
     const ticket = ++this.ticket;
     this.status.set('checking');
-    return this.tenants.lookupAdminByEmail(value, this.tenantId).pipe(
+    return this.tenants.checkAdminEmail(value, this.tenantId).pipe(
       tap((result) => {
         if (ticket !== this.ticket) return;
         this.fullName.set(result.fullName);
@@ -82,7 +82,7 @@ export class AdminLookup {
  */
 export function applyAccountRequirements(
   controls: { fullName: AbstractControl<string>; password: AbstractControl<string> },
-  status: LookupStatus,
+  status: EmailCheckStatus,
 ): void {
   const needsDetails = status === 'new';
   controls.fullName.setValidators(needsDetails ? [Validators.required, Validators.maxLength(MAX_NAME)] : [Validators.maxLength(MAX_NAME)]);

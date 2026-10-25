@@ -13,21 +13,23 @@ import { Observable, forkJoin, tap } from 'rxjs';
 import { toApiError } from '../../../core/auth/api-error';
 import { CreateTenantResult, PLAN_TIERS, PlanTier, Tenant } from '../../../core/models/tenant.models';
 import { Icon } from '../../../shared/icon/icon';
-import { AdminLookup, applyAccountRequirements } from '../admin-lookup';
-import { AdminLookupNote } from '../admin-lookup-note/admin-lookup-note';
+import { AdminEmailCheck, applyAccountRequirements } from '../admin-email-check';
+import { AdminEmailCheckNote } from '../admin-email-check-note/admin-email-check-note';
 import { TenantService } from '../tenant.service';
 import { domainValidator, normalizeEmail, trimmedEmail } from '../tenant-validators';
 
 const MAX_TEXT = 255;
 const MAX_URL = 500;
 const MAX_PHONE = 20;
+/** Khớp `CreateTenantRequestDTO.MAX_ADMINS_PER_REQUEST` ở backend. Đổi một bên thì đổi cả bên kia. */
+export const MAX_ADMINS = 10;
 
 const DOMAIN_TAKEN_CODE = 'TENANT_DOMAIN_ALREADY_EXISTS';
 
 /** Tạo nhà xe (kèm chủ) hoặc sửa nhà xe có sẵn, tùy đường dẫn có `:tenantId` hay không. */
 @Component({
   selector: 'app-tenant-form',
-  imports: [ReactiveFormsModule, RouterLink, Icon, AdminLookupNote],
+  imports: [ReactiveFormsModule, RouterLink, Icon, AdminEmailCheckNote],
   templateUrl: './tenant-form.html',
   styleUrl: './tenant-form.css',
 })
@@ -41,8 +43,8 @@ export class TenantForm {
   readonly title = this.isEdit ? 'Sửa nhà xe' : 'Thêm nhà xe';
   readonly planTiers = PLAN_TIERS;
 
-  /** Mỗi dòng chủ nhà xe giữ một đối tượng tra cứu email riêng, khóa theo FormGroup của dòng đó. */
-  private readonly lookups = new Map<AbstractControl, AdminLookup>();
+  /** Mỗi dòng chủ nhà xe giữ một đối tượng kiểm tra email riêng, khóa theo FormGroup của dòng đó. */
+  private readonly emailChecks = new Map<AbstractControl, AdminEmailCheck>();
 
   readonly form = this.formBuilder.group({
     name: ['', [Validators.required, Validators.maxLength(MAX_TEXT)]],
@@ -62,6 +64,11 @@ export class TenantForm {
   private readonly adminCount = signal(1);
   /** Chỉ cho xóa chủ khi còn hơn một người: backend yêu cầu ít nhất một chủ. */
   readonly canRemoveAdmin = computed(() => this.adminCount() > 1);
+  /** Backend chỉ nhận tối đa MAX_ADMINS chủ mỗi lần tạo. */
+  readonly canAddAdmin = computed(() => this.adminCount() < MAX_ADMINS);
+  /** Lỗi của cả danh sách chủ (ví dụ vượt số lượng) do backend trả về, không gắn với ô nào. */
+  readonly adminsError = computed(() => this.serverErrors()['admins'] ?? null);
+  readonly maxAdmins = MAX_ADMINS;
 
   constructor() {
     if (!this.isEdit) return;
@@ -86,6 +93,7 @@ export class TenantForm {
   }
 
   addAdmin(): void {
+    if (!this.canAddAdmin()) return;
     this.admins.push(this.newAdmin());
     this.adminCount.set(this.admins.length);
   }
@@ -115,20 +123,20 @@ export class TenantForm {
     return first >= 0 && first < own ? first + 1 : null;
   }
 
-  lookupOf(group: AbstractControl): AdminLookup {
-    return this.lookups.get(group)!;
+  emailCheckOf(group: AbstractControl): AdminEmailCheck {
+    return this.emailChecks.get(group)!;
   }
 
-  /** Sửa email thì kết quả tra cứu cũ hết giá trị: ẩn họ tên, mật khẩu cho tới khi tra cứu lại. */
+  /** Sửa email thì kết quả kiểm tra cũ hết giá trị: ẩn họ tên, mật khẩu cho tới khi kiểm tra lại. */
   onAdminEmailInput(group: AbstractControl): void {
-    this.lookupOf(group).reset();
+    this.emailCheckOf(group).reset();
     this.applyRequirements(group);
   }
 
   /** Rời ô email thì hỏi backend email đã có tài khoản chưa, để biết có cần hiện họ tên và mật khẩu. */
   checkAdmin(group: AbstractControl): void {
     // ensureChecked: đã có kết quả cho email này (sửa email thì kết quả đã bị bỏ) thì không hỏi lại, tránh gọi thừa và nhấp nháy
-    this.lookupOf(group)
+    this.emailCheckOf(group)
       .ensureChecked(group.value.email)
       .subscribe(() => this.applyRequirements(group));
   }
@@ -152,7 +160,7 @@ export class TenantForm {
     // Trước khi gửi phải biết mỗi chủ có cần họ tên, mật khẩu hay không (người dùng có thể bấm gửi ngay khi vừa nhập email)
     this.submitting.set(true);
     const checks = this.admins.controls.map((group) =>
-      this.lookupOf(group)
+      this.emailCheckOf(group)
         .ensureChecked(group.value.email)
         .pipe(tap(() => this.applyRequirements(group))),
     );
@@ -193,7 +201,7 @@ export class TenantForm {
       // Độ mạnh mật khẩu do backend kiểm tra, câu báo lỗi hiện dưới ô theo `serverErrors`.
       password: [''],
     });
-    this.lookups.set(group, new AdminLookup(this.tenants));
+    this.emailChecks.set(group, new AdminEmailCheck(this.tenants));
     return group;
   }
 
@@ -201,7 +209,7 @@ export class TenantForm {
     const controls = (group as FormGroup).controls;
     applyAccountRequirements(
       { fullName: controls['fullName'] as AbstractControl<string>, password: controls['password'] as AbstractControl<string> },
-      this.lookupOf(group).status(),
+      this.emailCheckOf(group).status(),
     );
   }
 

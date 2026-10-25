@@ -198,7 +198,7 @@ p {
   color: var(--blue-text);
 }
 
-.lookup-ok {
+.email-check-ok {
   color: var(--ok);
   font-size: 0.875rem;
 }

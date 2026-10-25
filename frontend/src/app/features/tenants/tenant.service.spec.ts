@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 
-import { adminLookup, apiOk, tenant, tenantAdmin, tenantPage } from '../../core/testing/tenant-fixtures';
+import { adminEmailCheck, apiOk, tenant, tenantAdmin, tenantPage } from '../../core/testing/tenant-fixtures';
 import { TENANTS_API, TenantService } from './tenant.service';
 
 describe('TenantService', () => {
@@ -93,21 +93,21 @@ describe('TenantService', () => {
   });
 
   it('should_post_the_email_in_the_body_when_looking_up_an_admin', () => {
-    service.lookupAdminByEmail('  Chu1@binhan.vn ', 'tenant-1').subscribe();
+    service.checkAdminEmail('  Chu1@binhan.vn ', 'tenant-1').subscribe();
 
-    const request = http.expectOne(`${TENANTS_API}/admin-lookup`);
+    const request = http.expectOne(`${TENANTS_API}/admin-email-check`);
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ email: 'Chu1@binhan.vn', tenantId: 'tenant-1' });
     expect(request.request.url).not.toContain('@');
-    request.flush(apiOk(adminLookup()));
+    request.flush(apiOk(adminEmailCheck()));
   });
 
   it('should_leave_out_the_tenant_id_when_looking_up_an_admin_for_a_new_tenant', () => {
-    service.lookupAdminByEmail('chu1@binhan.vn').subscribe();
+    service.checkAdminEmail('chu1@binhan.vn').subscribe();
 
-    const request = http.expectOne(`${TENANTS_API}/admin-lookup`);
+    const request = http.expectOne(`${TENANTS_API}/admin-email-check`);
     expect(request.request.body).toEqual({ email: 'chu1@binhan.vn' });
-    request.flush(apiOk(adminLookup()));
+    request.flush(apiOk(adminEmailCheck()));
   });
 
   it('should_post_a_new_tenant_admin', () => {

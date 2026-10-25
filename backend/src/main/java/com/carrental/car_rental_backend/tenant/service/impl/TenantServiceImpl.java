@@ -1,7 +1,5 @@
 package com.carrental.car_rental_backend.tenant.service.impl;
 
-import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -13,26 +11,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.carrental.car_rental_backend.account.entity.Role;
-import com.carrental.car_rental_backend.account.entity.User;
-import com.carrental.car_rental_backend.account.entity.UserTenant;
 import com.carrental.car_rental_backend.common.constant.RoleConstant;
 import com.carrental.car_rental_backend.common.enums.plan_tier.PlanTierTenant;
 import com.carrental.car_rental_backend.common.exception.AppException;
 import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.tenant.constant.DefaultRole;
-import com.carrental.car_rental_backend.tenant.dto.request.AdminAssignmentRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.CreateTenantRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.UpdateTenantRequestDTO;
-import com.carrental.car_rental_backend.tenant.dto.response.AdminLookupResponseDTO;
+import com.carrental.car_rental_backend.tenant.dto.response.AdminAssignmentResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.CreateTenantResponseDTO;
-import com.carrental.car_rental_backend.tenant.dto.response.TenantAdminResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantResponseDTO;
 import com.carrental.car_rental_backend.tenant.entity.Tenant;
 import com.carrental.car_rental_backend.tenant.entity.TenantConfig;
-import com.carrental.car_rental_backend.tenant.repository.TenantAdminQueryRepository;
 import com.carrental.car_rental_backend.tenant.repository.TenantConfigRepository;
 import com.carrental.car_rental_backend.tenant.repository.TenantRepository;
 import com.carrental.car_rental_backend.tenant.repository.TenantRoleRepository;
+import com.carrental.car_rental_backend.tenant.service.TenantAdminService;
+import com.carrental.car_rental_backend.tenant.service.TenantAdminService.ValidatedAdmin;
 import com.carrental.car_rental_backend.tenant.service.TenantService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,57 +40,26 @@ import lombok.extern.slf4j.Slf4j;
 @Transactional
 @RequiredArgsConstructor
 public class TenantServiceImpl implements TenantService {
-  // Giá trị cấu hình mặc định của nhà xe mới, khớp giá trị mặc định của bảng tenant_configs
-  private static final int DEFAULT_HOLD_TIMEOUT_MINUTES = 30;
-  private static final BigDecimal DEFAULT_LATE_HOURLY_PRICE = new BigDecimal("100000");
-  private static final BigDecimal DEFAULT_COMMISSION_RATE = new BigDecimal("5.00");
   private static final String EMPTY_JSON = "{}";
 
   private final TenantRepository tenantRepository;
   private final TenantConfigRepository tenantConfigRepository;
   private final TenantRoleRepository tenantRoleRepository;
-  private final TenantAdminQueryRepository tenantAdminQueryRepository;
-  private final TenantAdminAssigner adminAssigner;
+  private final TenantAdminService tenantAdminService;
   private final ObjectMapper objectMapper;
 
   @Override
   public CreateTenantResponseDTO createTenant(CreateTenantRequestDTO request, UUID actorId) {
-    String domain = request.getDomain().trim().toLowerCase(Locale.ROOT);
-    if (this.tenantRepository.existsByDomain(domain)) {
-      throw new AppException(ErrorCode.TENANT_DOMAIN_ALREADY_EXISTS);
-    }
+    // Bước kiểm tra: domain, settings và toàn bộ chủ nhà xe
+    this.checkDomainNotTaken(request.getDomain());
     String settings = this.normalizeSettings(request.getSettings());
-    // PreparedAdmin: Chủ nhà xe đã được kiểm tra
-    List<TenantAdminAssigner.PreparedAdmin> admins = this.adminAssigner.prepareAll(request.getAdmins());
-    Tenant tenant = this.tenantRepository.save(
-      Tenant.builder()
-        .name(request.getName().trim())
-        .domain(domain)
-        .planTier(request.getPlanTier() != null ? request.getPlanTier() : PlanTierTenant.FREE)
-        .logoUrl(request.getLogoUrl())
-        .contactEmail(request.getContactEmail())
-        .contactPhone(request.getContactPhone())
-        .settings(settings)
-        .isActive(true)
-        .build()
-    );
+    List<ValidatedAdmin> admins = this.tenantAdminService.validateAdminRequests(request.getAdmins(), null, null);
 
-    this.tenantConfigRepository.save(
-      TenantConfig.builder()
-        .tenantId(tenant.getId())
-        .holdTimeoutMinutes(DEFAULT_HOLD_TIMEOUT_MINUTES)
-        .lateHourlyPrice(DEFAULT_LATE_HOURLY_PRICE)
-        .defaultCommissionRate(DEFAULT_COMMISSION_RATE)
-        .build()
-    );
-
-    this.createDefaultRoles(tenant.getId());
-    Role adminRole = this.findAdminRoleOrThrow(tenant.getId());
-
-    List<CreateTenantResponseDTO.AdminResult> adminResults = new ArrayList<>();
-    for (TenantAdminAssigner.PreparedAdmin admin : admins) {
-      adminResults.add(this.adminAssigner.assign(tenant.getId(), adminRole.getId(), admin));
-    }
+    // Bước ghi: nhà xe -> cấu hình mặc định -> 3 vai trò -> chủ nhà xe
+    Tenant tenant = this.saveTenant(request, settings);
+    this.tenantConfigRepository.save(TenantConfig.withDefaults(tenant.getId()));
+    UUID adminRoleId = this.createDefaultRoles(tenant.getId());
+    List<AdminAssignmentResponseDTO> adminResults = this.tenantAdminService.addAdminsToTenant(tenant.getId(), adminRoleId, admins);
 
     log.info("Người dùng {} tạo nhà xe {} (id = {}) với {} chủ nhà xe", actorId, tenant.getName(), tenant.getId(), adminResults.size());
     return CreateTenantResponseDTO.builder()
@@ -125,7 +89,8 @@ public class TenantServiceImpl implements TenantService {
   public TenantResponseDTO updateTenant(UUID tenantId, UpdateTenantRequestDTO request, UUID actorId) {
     Tenant tenant = this.findTenantOrThrow(tenantId);
 
-    String domain = request.getDomain().trim().toLowerCase(Locale.ROOT);
+    // Domain đã đúng dạng chữ thường nhờ @Pattern ở DTO, nên không cần chuẩn hóa
+    String domain = request.getDomain();
     if (!domain.equals(tenant.getDomain())) {
       if (this.tenantRepository.existsByDomainAndIdNot(domain, tenantId)) {
         throw new AppException(ErrorCode.TENANT_DOMAIN_ALREADY_EXISTS);
@@ -133,7 +98,7 @@ public class TenantServiceImpl implements TenantService {
       tenant.setDomain(domain);
     }
     // name, domain, planTier là bắt buộc nên luôn ghi đè.
-    // Các trường tùy chọn: không gửi (null) thì GIỮ giá trị cũ, gửi chuỗi rỗng thì xóa.
+    // Các trường tùy chọn: không gửi (null) thì GIỮ giá trị cũ, gửi chuỗi rỗng thì xóa (R8).
     // Không đụng tới tenant_configs (do chủ nhà xe tự sửa)
     tenant.setName(request.getName().trim());
     tenant.setPlanTier(request.getPlanTier());
@@ -157,14 +122,12 @@ public class TenantServiceImpl implements TenantService {
   }
 
   @Override
-  public TenantResponseDTO changeStatus(UUID tenantId, boolean isActive, UUID actorId) {
+  public TenantResponseDTO updateTenantStatus(UUID tenantId, boolean isActive, UUID actorId) {
     Tenant tenant = this.findTenantOrThrow(tenantId);
-    // Đã đúng trạng thái yêu cầu thì không làm gì, gọi lại nhiều lần vẫn thành công
     if (tenant.isActive() == isActive) {
       return this.toTenantResponse(tenant);
     }
     tenant.setActive(isActive);
-    // saveAndFlush: lưu rồi ghi xuống DB ngay, để updatedAt trả về là giờ mới
     Tenant saved = this.tenantRepository.saveAndFlush(tenant);
     log.info("Người dùng {} {} nhà xe {} (id = {})", actorId, isActive ? "mở khóa" : "khóa", saved.getName(), saved.getId());
     return this.toTenantResponse(saved);
@@ -172,46 +135,31 @@ public class TenantServiceImpl implements TenantService {
 
   @Override
   public void deleteTenant(UUID tenantId, UUID actorId) {
-    // Xóa mềm: chỉ đặt is_active = false.
-    this.changeStatus(tenantId, false, actorId);
+    this.updateTenantStatus(tenantId, false, actorId);
   }
 
-  @Override
-  public CreateTenantResponseDTO.AdminResult addTenantAdmin(UUID tenantId, AdminAssignmentRequestDTO request, UUID actorId) {
-    Tenant tenant = this.findTenantOrThrow(tenantId);
-    if (!tenant.isActive()) {
-      throw new AppException(ErrorCode.BAD_REQUEST, TenantAdminAssigner.TENANT_LOCKED_MESSAGE);
+  private void checkDomainNotTaken(String domain) {
+    if (this.tenantRepository.existsByDomain(domain)) {
+      throw new AppException(ErrorCode.TENANT_DOMAIN_ALREADY_EXISTS);
     }
-    Role adminRole = this.findAdminRoleOrThrow(tenantId);
-
-    TenantAdminAssigner.PreparedAdmin admin = this.adminAssigner.prepareAll(List.of(request)).get(0);
-    CreateTenantResponseDTO.AdminResult result = this.adminAssigner.assign(tenantId, adminRole.getId(), admin);
-    log.info("Người dùng {} thêm chủ nhà xe cho nhà xe {} (id = {}), tài khoản mới: {}", actorId, tenant.getName(), tenantId, result.isAccountCreated());
-    return result;
   }
 
-  @Override
-  @Transactional(readOnly = true)
-  public List<TenantAdminResponseDTO> listTenantAdmins(UUID tenantId) {
-    this.findTenantOrThrow(tenantId);
-    List<Object[]> rows = this.tenantAdminQueryRepository.findMembersByTenantIdAndRoleCode(tenantId, RoleConstant.TENANT_ADMIN);
-    List<TenantAdminResponseDTO> result = new ArrayList<>();
-    for (Object[] row : rows) {
-      result.add(this.toTenantAdminResponse(row));
-    }
-    return result;
+  private Tenant saveTenant(CreateTenantRequestDTO request, String settings) {
+    return this.tenantRepository.save(
+      Tenant.builder()
+        .name(request.getName().trim())
+        .domain(request.getDomain())
+        .planTier(request.getPlanTier() != null ? request.getPlanTier() : PlanTierTenant.FREE)
+        .logoUrl(request.getLogoUrl())
+        .contactEmail(request.getContactEmail())
+        .contactPhone(request.getContactPhone())
+        .settings(settings)
+        .isActive(true)
+        .build()
+    );
   }
 
-  @Override
-  @Transactional(readOnly = true)
-  public AdminLookupResponseDTO lookupAdminByEmail(String email, UUID tenantId) {
-    Tenant tenant = tenantId == null ? null : this.findTenantOrThrow(tenantId);
-    UUID adminRoleId = tenant == null ? null : this.findAdminRoleOrThrow(tenantId).getId();
-    return this.adminAssigner.lookupByEmail(email, tenant, adminRoleId);
-  }
-
-  // Tạo 3 nhóm quyền mặc định cho nhà xe mới, kèm quyền của từng nhóm
-  private void createDefaultRoles(UUID tenantId) {
+  private UUID createDefaultRoles(UUID tenantId) {
     for (DefaultRole role : DefaultRole.values()) {
       this.tenantRoleRepository.insertSystemRole(tenantId, role.getName(), role.getCode(), role.getDescription());
       if (role.grantsAllPermissions()) {
@@ -220,9 +168,9 @@ public class TenantServiceImpl implements TenantService {
         this.tenantRoleRepository.grantPermissions(tenantId, role.getCode(), role.getPermissionCodes()); // STAFF + SALE
       }
     }
+    return this.findAdminRoleOrThrow(tenantId).getId();
   }
 
-  // Chuỗi rỗng hoặc toàn dấu cách nghĩa là xóa giá trị (lưu null)
   private String blankToNull(String value) {
     return value.isBlank() ? null : value.trim();
   }
@@ -253,19 +201,6 @@ public class TenantServiceImpl implements TenantService {
       throw new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy nhà xe !");
     }
     return tenant.get();
-  }
-
-  // Mỗi dòng truy vấn là mảng [User, UserTenant]
-  private TenantAdminResponseDTO toTenantAdminResponse(Object[] row) {
-    User user = (User) row[0];
-    UserTenant membership = (UserTenant) row[1];
-    return TenantAdminResponseDTO.builder()
-      .userId(user.getId())
-      .email(user.getEmail())
-      .fullName(user.getFullname())
-      .isActive(user.getIsActive())
-      .joinedAt(membership.getJoinedAt())
-      .build();
   }
 
   private TenantResponseDTO toTenantResponse(Tenant tenant) {

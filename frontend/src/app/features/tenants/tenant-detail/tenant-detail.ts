@@ -7,8 +7,8 @@ import { Observable } from 'rxjs';
 import { toApiError } from '../../../core/auth/api-error';
 import { Tenant, TenantAdmin } from '../../../core/models/tenant.models';
 import { Icon } from '../../../shared/icon/icon';
-import { AdminLookup, applyAccountRequirements } from '../admin-lookup';
-import { AdminLookupNote } from '../admin-lookup-note/admin-lookup-note';
+import { AdminEmailCheck, applyAccountRequirements } from '../admin-email-check';
+import { AdminEmailCheckNote } from '../admin-email-check-note/admin-email-check-note';
 import { TenantService } from '../tenant.service';
 import { trimmedEmail } from '../tenant-validators';
 
@@ -17,7 +17,7 @@ type PendingAction = 'lock' | 'unlock' | 'remove';
 
 @Component({
   selector: 'app-tenant-detail',
-  imports: [DatePipe, ReactiveFormsModule, RouterLink, Icon, AdminLookupNote],
+  imports: [DatePipe, ReactiveFormsModule, RouterLink, Icon, AdminEmailCheckNote],
   templateUrl: './tenant-detail.html',
   styleUrl: './tenant-detail.css',
 })
@@ -27,8 +27,8 @@ export class TenantDetail {
 
   readonly tenantId = inject(ActivatedRoute).snapshot.paramMap.get('tenantId')!;
 
-  /** Tra cứu email chủ mới, kèm mã nhà xe để biết trước nếu người đó đã là chủ hoặc nhân viên của nhà xe này. */
-  readonly lookup = new AdminLookup(this.tenants, this.tenantId);
+  /** Kiểm tra email chủ mới, kèm mã nhà xe để biết trước nếu người đó đã là chủ hoặc nhân viên của nhà xe này. */
+  readonly emailCheck = new AdminEmailCheck(this.tenants, this.tenantId);
 
   readonly tenant = signal<Tenant | null>(null);
   readonly admins = signal<TenantAdmin[] | null>(null);
@@ -101,16 +101,16 @@ export class TenantDetail {
     return this.adminServerErrors()[name] ?? null;
   }
 
-  /** Sửa email thì kết quả tra cứu cũ hết giá trị: ẩn họ tên, mật khẩu cho tới khi tra cứu lại. */
+  /** Sửa email thì kết quả kiểm tra cũ hết giá trị: ẩn họ tên, mật khẩu cho tới khi kiểm tra lại. */
   onEmailInput(): void {
-    this.lookup.reset();
+    this.emailCheck.reset();
     this.applyRequirements();
   }
 
   /** Rời ô email thì hỏi backend email đã có tài khoản chưa, để biết có cần hiện họ tên và mật khẩu. */
   checkEmail(): void {
     // ensureChecked: đã có kết quả cho email này thì không hỏi lại, tránh gọi thừa và nhấp nháy
-    this.lookup.ensureChecked(this.adminForm.controls.email.value).subscribe(() => this.applyRequirements());
+    this.emailCheck.ensureChecked(this.adminForm.controls.email.value).subscribe(() => this.applyRequirements());
   }
 
   addAdmin(): void {
@@ -121,9 +121,9 @@ export class TenantDetail {
       return;
     }
 
-    // Người dùng có thể bấm gửi ngay khi vừa nhập email, nên tra cứu nếu chưa có kết quả
+    // Người dùng có thể bấm gửi ngay khi vừa nhập email, nên kiểm tra nếu chưa có kết quả
     this.addingAdmin.set(true);
-    this.lookup.ensureChecked(this.adminForm.controls.email.value).subscribe((status) => {
+    this.emailCheck.ensureChecked(this.adminForm.controls.email.value).subscribe((status) => {
       this.applyRequirements();
       if (status === 'blocked' || this.adminForm.invalid) {
         this.adminForm.markAllAsTouched();
@@ -135,7 +135,7 @@ export class TenantDetail {
   }
 
   private applyRequirements(): void {
-    applyAccountRequirements(this.adminForm.controls, this.lookup.status());
+    applyAccountRequirements(this.adminForm.controls, this.emailCheck.status());
   }
 
   private sendAdmin(): void {
@@ -151,7 +151,7 @@ export class TenantDetail {
         next: (result) => {
           this.addingAdmin.set(false);
           this.adminForm.reset();
-          this.lookup.reset();
+          this.emailCheck.reset();
           this.applyRequirements();
           this.showAdminForm.set(false);
           const message = result.accountCreated

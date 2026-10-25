@@ -6,8 +6,8 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 
 import { failure } from '../../../core/testing/auth-fixtures';
 import { Tenant, TenantAdmin } from '../../../core/models/tenant.models';
-import { adminLookup, apiOk, tenant, tenantAdmin } from '../../../core/testing/tenant-fixtures';
-import { AdminLookupResult } from '../../../core/models/tenant.models';
+import { adminEmailCheck, apiOk, tenant, tenantAdmin } from '../../../core/testing/tenant-fixtures';
+import { AdminEmailCheckResult } from '../../../core/models/tenant.models';
 import { TENANTS_API } from '../tenant.service';
 import { TenantDetail } from './tenant-detail';
 
@@ -41,11 +41,11 @@ describe('TenantDetail', () => {
   const text = () => root.textContent ?? '';
   const submitAdminForm = () => root.querySelector('.admin-form')!.dispatchEvent(new Event('submit'));
 
-  /** Trả lời yêu cầu tra cứu email đang chờ, kiểm tra luôn là có kèm mã nhà xe. Mặc định: email chưa có tài khoản. */
-  function answerLookup(result: Partial<AdminLookupResult> = {}): void {
-    const request = http.expectOne((r) => r.url === `${TENANTS_API}/admin-lookup`);
+  /** Trả lời yêu cầu kiểm tra email đang chờ, kiểm tra luôn là có kèm mã nhà xe. Mặc định: email chưa có tài khoản. */
+  function answerEmailCheck(result: Partial<AdminEmailCheckResult> = {}): void {
+    const request = http.expectOne((r) => r.url === `${TENANTS_API}/admin-email-check`);
     expect(request.request.body.tenantId).toBe('tenant-1');
-    request.flush(apiOk(adminLookup({ email: request.request.body.email, ...result })));
+    request.flush(apiOk(adminEmailCheck({ email: request.request.body.email, ...result })));
   }
 
   it('should_show_the_tenant_and_its_admins', async () => {
@@ -144,7 +144,7 @@ describe('TenantDetail', () => {
 
     fixture.componentInstance.adminForm.patchValue({ email: ' chu2@binhan.vn ', fullName: 'Trần Thị Hai', password: 'Matkhau456' });
     submitAdminForm();
-    answerLookup();
+    answerEmailCheck();
     const post = http.expectOne(`${TENANT_URL}/admins`);
     expect(post.request.body).toEqual({ email: 'chu2@binhan.vn', fullName: 'Trần Thị Hai', password: 'Matkhau456' });
     post.flush(apiOk({ email: 'chu2@binhan.vn', accountCreated: true }));
@@ -163,7 +163,7 @@ describe('TenantDetail', () => {
 
     fixture.componentInstance.adminForm.patchValue({ email: 'minh.admin@rentcarhanoi.vn', fullName: 'Gõ thừa', password: 'GoThua123' });
     submitAdminForm();
-    answerLookup({ accountExists: true, fullName: 'Nguyễn Văn Minh' });
+    answerEmailCheck({ accountExists: true, fullName: 'Nguyễn Văn Minh' });
 
     expect(http.expectOne(`${TENANT_URL}/admins`).request.body).toEqual({ email: 'minh.admin@rentcarhanoi.vn' });
   });
@@ -187,7 +187,7 @@ describe('TenantDetail', () => {
 
     fixture.componentInstance.adminForm.patchValue({ email: 'chu3@binhan.vn', fullName: 'Ba', password: 'abcdefgh' });
     submitAdminForm();
-    answerLookup();
+    answerEmailCheck();
     http.expectOne(`${TENANT_URL}/admins`).flush(
       failure('VALIDATION_ERROR', 'Dữ liệu đầu vào không hợp lệ', { password: 'Mật khẩu ít nhất 8 ký tự, gồm chữ và số' }),
       { status: 400, statusText: 'Bad Request' },
@@ -205,7 +205,7 @@ describe('TenantDetail', () => {
 
     fixture.componentInstance.adminForm.patchValue({ email: 'chu1@binhan.vn' });
     submitAdminForm();
-    answerLookup({ accountExists: true, fullName: 'Nguyễn Văn Bình' });
+    answerEmailCheck({ accountExists: true, fullName: 'Nguyễn Văn Bình' });
     http
       .expectOne(`${TENANT_URL}/admins`)
       .flush(failure('TENANT_ADMIN_ALREADY_ASSIGNED', 'Người này đã là chủ nhà xe của nhà xe này: chu1@binhan.vn'), {
@@ -226,7 +226,7 @@ describe('TenantDetail', () => {
 
     fixture.componentInstance.adminForm.patchValue({ email: 'minh.admin@rentcarhanoi.vn' });
     email.dispatchEvent(new Event('blur'));
-    answerLookup({ accountExists: true, fullName: 'Nguyễn Văn Minh' });
+    answerEmailCheck({ accountExists: true, fullName: 'Nguyễn Văn Minh' });
     await fixture.whenStable();
     expect(root.querySelector('#add-name')).toBeNull();
     expect(text()).toContain('Đã có tài khoản Nguyễn Văn Minh');
@@ -234,7 +234,7 @@ describe('TenantDetail', () => {
     fixture.componentInstance.adminForm.patchValue({ email: 'moi@binhan.vn' });
     email.dispatchEvent(new Event('input'));
     email.dispatchEvent(new Event('blur'));
-    answerLookup();
+    answerEmailCheck();
     await fixture.whenStable();
     expect(root.querySelector('#add-name')).not.toBeNull();
     expect(root.querySelector('#add-password')).not.toBeNull();
@@ -247,7 +247,7 @@ describe('TenantDetail', () => {
 
     fixture.componentInstance.adminForm.patchValue({ email: 'chu1@binhan.vn' });
     submitAdminForm();
-    answerLookup({
+    answerEmailCheck({
       accountExists: true,
       canBeAdmin: false,
       reason: 'Người này đã là chủ nhà xe của nhà xe này: chu1@binhan.vn',
@@ -266,7 +266,7 @@ describe('TenantDetail', () => {
 
     fixture.componentInstance.adminForm.patchValue({ email: 'moi@binhan.vn' });
     submitAdminForm();
-    answerLookup();
+    answerEmailCheck();
     await fixture.whenStable();
 
     http.expectNone(`${TENANT_URL}/admins`);

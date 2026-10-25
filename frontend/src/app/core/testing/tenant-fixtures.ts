@@ -1,4 +1,4 @@
-import { AdminLookupResult, Tenant, TenantAdmin, TenantPage } from '../models/tenant.models';
+import { AdminEmailCheckResult, Tenant, TenantAdmin, TenantPage } from '../models/tenant.models';
 
 export function tenant(overrides: Partial<Tenant> = {}): Tenant {
   return {
@@ -41,6 +41,6 @@ export function apiOk<T>(data: T, message = 'ok') {
 }
 
 /** Mặc định: email chưa có tài khoản, gán được (sẽ tạo tài khoản mới). */
-export function adminLookup(overrides: Partial<AdminLookupResult> = {}): AdminLookupResult {
+export function adminEmailCheck(overrides: Partial<AdminEmailCheckResult> = {}): AdminEmailCheckResult {
   return { email: 'chu1@binhan.vn', accountExists: false, fullName: null, canBeAdmin: true, reason: null, ...overrides };
 }

@@ -13,8 +13,8 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AdminLookupRequestDTO {
-  @NotBlank(message = "Vui lòng nhập email cần tra cứu")
+public class AdminEmailCheckRequestDTO {
+  @NotBlank(message = "Vui lòng nhập email cần kiểm tra")
   @Size(max = 255, message = "Email tối đa 255 ký tự")
   private String email;
   private UUID tenantId;

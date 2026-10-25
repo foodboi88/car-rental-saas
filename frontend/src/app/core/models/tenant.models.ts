@@ -71,8 +71,8 @@ export interface UpdateTenantRequest {
   settings?: string;
 }
 
-/** Kết quả tra cứu một email trước khi gán làm chủ nhà xe. */
-export interface AdminLookupResult {
+/** Kết quả kiểm tra một email trước khi gán làm chủ nhà xe. */
+export interface AdminEmailCheckResult {
   email: string;
   accountExists: boolean;
   fullName: string | null;

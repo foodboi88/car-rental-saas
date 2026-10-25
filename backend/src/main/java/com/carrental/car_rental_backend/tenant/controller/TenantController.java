@@ -25,14 +25,16 @@ import org.springframework.web.bind.annotation.RestController;
 import com.carrental.car_rental_backend.common.dto.ApiResponse;
 import com.carrental.car_rental_backend.security.principal.UserPrincipal;
 import com.carrental.car_rental_backend.tenant.dto.request.AdminAssignmentRequestDTO;
-import com.carrental.car_rental_backend.tenant.dto.request.AdminLookupRequestDTO;
+import com.carrental.car_rental_backend.tenant.dto.request.AdminEmailCheckRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.CreateTenantRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.UpdateTenantRequestDTO;
 import com.carrental.car_rental_backend.tenant.dto.request.UpdateTenantStatusRequestDTO;
-import com.carrental.car_rental_backend.tenant.dto.response.AdminLookupResponseDTO;
+import com.carrental.car_rental_backend.tenant.dto.response.AdminAssignmentResponseDTO;
+import com.carrental.car_rental_backend.tenant.dto.response.AdminEmailCheckResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.CreateTenantResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantAdminResponseDTO;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantResponseDTO;
+import com.carrental.car_rental_backend.tenant.service.TenantAdminService;
 import com.carrental.car_rental_backend.tenant.service.TenantService;
 
 import jakarta.validation.Valid;
@@ -41,11 +43,12 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v1/tenants")
 @PreAuthorize("hasRole('SUPER_ADMIN')") // Ở cấp lớp: mọi endpoint bên dưới chỉ Super Admin được gọi
-@RequiredArgsConstructor // Sinh ra constructor nhận các field final của class (Ở đây là: TenantService)
+@RequiredArgsConstructor // Sinh ra constructor nhận các field final của class (TenantService, TenantAdminService)
 public class TenantController {
   private static final int MAX_PAGE_SIZE = 100;
 
   private final TenantService tenantService;
+  private final TenantAdminService tenantAdminService;
 
   @PostMapping
   public ResponseEntity<ApiResponse<CreateTenantResponseDTO>> createTenant(
@@ -81,12 +84,12 @@ public class TenantController {
     );
   }
 
-  @PostMapping("/admin-lookup")
-  public ResponseEntity<ApiResponse<AdminLookupResponseDTO>> lookupAdminByEmail(@Valid @RequestBody AdminLookupRequestDTO request) {
-    AdminLookupResponseDTO response = this.tenantService.lookupAdminByEmail(request.getEmail(), request.getTenantId());
+  @PostMapping("/admin-email-check")
+  public ResponseEntity<ApiResponse<AdminEmailCheckResponseDTO>> checkAdminEmail(@Valid @RequestBody AdminEmailCheckRequestDTO request) {
+    AdminEmailCheckResponseDTO response = this.tenantAdminService.checkAdminEmail(request.getEmail(), request.getTenantId());
 
     return ResponseEntity.ok(
-      ApiResponse.success(response, "Tra cứu email thành công !")
+      ApiResponse.success(response, "Kiểm tra email thành công !")
     );
   }
 
@@ -113,12 +116,12 @@ public class TenantController {
   }
 
   @PatchMapping("/{tenantId}/status")
-  public ResponseEntity<ApiResponse<TenantResponseDTO>> changeStatus(
+  public ResponseEntity<ApiResponse<TenantResponseDTO>> updateTenantStatus(
     @AuthenticationPrincipal UserPrincipal userPrincipal,
     @PathVariable UUID tenantId,
     @Valid @RequestBody UpdateTenantStatusRequestDTO request
   ) {
-    TenantResponseDTO response = this.tenantService.changeStatus(tenantId, request.getIsActive(), userPrincipal.getId());
+    TenantResponseDTO response = this.tenantService.updateTenantStatus(tenantId, request.getIsActive(), userPrincipal.getId());
 
     return ResponseEntity.ok(
       ApiResponse.success(response, Boolean.TRUE.equals(request.getIsActive()) ? "Mở khóa nhà xe thành công !" : "Khóa nhà xe thành công !")
@@ -139,7 +142,7 @@ public class TenantController {
 
   @GetMapping("/{tenantId}/admins")
   public ResponseEntity<ApiResponse<List<TenantAdminResponseDTO>>> listTenantAdmins(@PathVariable UUID tenantId) {
-    List<TenantAdminResponseDTO> response = this.tenantService.listTenantAdmins(tenantId);
+    List<TenantAdminResponseDTO> response = this.tenantAdminService.listTenantAdmins(tenantId);
 
     return ResponseEntity.ok(
       ApiResponse.success(response, "Lấy danh sách chủ nhà xe thành công !")
@@ -147,12 +150,12 @@ public class TenantController {
   }
 
   @PostMapping("/{tenantId}/admins")
-  public ResponseEntity<ApiResponse<CreateTenantResponseDTO.AdminResult>> addTenantAdmin(
+  public ResponseEntity<ApiResponse<AdminAssignmentResponseDTO>> addTenantAdmin(
     @AuthenticationPrincipal UserPrincipal userPrincipal,
     @PathVariable UUID tenantId,
     @Valid @RequestBody AdminAssignmentRequestDTO request
   ) {
-    CreateTenantResponseDTO.AdminResult response = this.tenantService.addTenantAdmin(tenantId, request, userPrincipal.getId());
+    AdminAssignmentResponseDTO response = this.tenantAdminService.addTenantAdmin(tenantId, request, userPrincipal.getId());
 
     return ResponseEntity.status(HttpStatus.CREATED).body(
       ApiResponse.success(response, "Thêm chủ nhà xe thành công !")

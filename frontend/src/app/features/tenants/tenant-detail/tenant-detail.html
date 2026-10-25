@@ -100,14 +100,14 @@
             <label for="add-email">Email</label>
             <input id="add-email" class="input" type="email" inputmode="email" formControlName="email"
               autocomplete="off" autocapitalize="none" (input)="onEmailInput()" (blur)="checkEmail()"
-              [attr.aria-invalid]="adminFieldError('email') || lookup.status() === 'blocked' ? 'true' : null" />
+              [attr.aria-invalid]="adminFieldError('email') || emailCheck.status() === 'blocked' ? 'true' : null" />
             @if (adminFieldError('email'); as message) {
               <span class="field-error">{{ message }}</span>
             } @else {
-              <app-admin-lookup-note [lookup]="lookup" />
+              <app-admin-email-check-note [emailCheck]="emailCheck" />
             }
           </div>
-          @if (lookup.needsAccountDetails()) {
+          @if (emailCheck.needsAccountDetails()) {
             <div class="field">
               <label for="add-name">Họ tên</label>
               <input id="add-name" class="input" formControlName="fullName" autocomplete="off"

@@ -4,8 +4,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 
 import { failure } from '../../../core/testing/auth-fixtures';
-import { adminLookup, apiOk, tenant } from '../../../core/testing/tenant-fixtures';
-import { AdminLookupResult } from '../../../core/models/tenant.models';
+import { adminEmailCheck, apiOk, tenant } from '../../../core/testing/tenant-fixtures';
+import { AdminEmailCheckResult } from '../../../core/models/tenant.models';
 import { TENANTS_API } from '../tenant.service';
 import { TenantForm } from './tenant-form';
 
@@ -36,12 +36,12 @@ describe('TenantForm', () => {
   const component = () => fixture.componentInstance;
   const errors = () => Array.from(root.querySelectorAll('.field-error')).map((e) => e.textContent?.trim());
   const submit = () => root.querySelector('form')!.dispatchEvent(new Event('submit'));
-  const LOOKUP_URL = `${TENANTS_API}/admin-lookup`;
+  const EMAIL_CHECK_URL = `${TENANTS_API}/admin-email-check`;
 
-  /** Trả lời yêu cầu tra cứu email đang chờ. Mặc định: email chưa có tài khoản. */
-  function answerLookup(result: Partial<AdminLookupResult> = {}) {
-    const request = http.expectOne((r) => r.url === LOOKUP_URL);
-    request.flush(apiOk(adminLookup({ email: request.request.body.email, ...result })));
+  /** Trả lời yêu cầu kiểm tra email đang chờ. Mặc định: email chưa có tài khoản. */
+  function answerEmailCheck(result: Partial<AdminEmailCheckResult> = {}) {
+    const request = http.expectOne((r) => r.url === EMAIL_CHECK_URL);
+    request.flush(apiOk(adminEmailCheck({ email: request.request.body.email, ...result })));
     return request;
   }
 
@@ -78,7 +78,7 @@ describe('TenantForm', () => {
       fillValidCreateForm();
       component().admins.at(0).patchValue({ password: 'abcdefgh' });
       submit();
-      answerLookup();
+      answerEmailCheck();
 
       http.expectOne(TENANTS_API).flush(
         failure('VALIDATION_ERROR', 'Dữ liệu đầu vào không hợp lệ', {
@@ -94,7 +94,7 @@ describe('TenantForm', () => {
     it('should_send_trimmed_lowercase_domain_and_leave_out_blank_optional_fields', () => {
       fillValidCreateForm();
       submit();
-      answerLookup();
+      answerEmailCheck();
 
       const request = http.expectOne(TENANTS_API);
       expect(request.request.body).toEqual({
@@ -109,7 +109,7 @@ describe('TenantForm', () => {
     it('should_send_only_the_email_for_an_admin_who_already_has_an_account_even_if_a_name_and_password_were_typed', () => {
       fillValidCreateForm();
       submit();
-      answerLookup({ accountExists: true, fullName: 'Có Sẵn' });
+      answerEmailCheck({ accountExists: true, fullName: 'Có Sẵn' });
 
       const request = http.expectOne(TENANTS_API);
       expect(request.request.body.admins).toEqual([{ email: 'chu1@binhan.vn' }]);
@@ -119,7 +119,7 @@ describe('TenantForm', () => {
     it('should_go_to_the_new_tenant_with_a_notice_about_the_admin_accounts', () => {
       fillValidCreateForm();
       submit();
-      answerLookup();
+      answerEmailCheck();
 
       http.expectOne(TENANTS_API).flush(
         apiOk({
@@ -141,7 +141,7 @@ describe('TenantForm', () => {
     it('should_show_the_domain_conflict_next_to_the_domain_field', async () => {
       fillValidCreateForm();
       submit();
-      answerLookup();
+      answerEmailCheck();
 
       http
         .expectOne(TENANTS_API)
@@ -156,7 +156,7 @@ describe('TenantForm', () => {
     it('should_show_backend_validation_errors_by_field_including_admin_list_paths', async () => {
       fillValidCreateForm();
       submit();
-      answerLookup();
+      answerEmailCheck();
 
       http
         .expectOne(TENANTS_API)
@@ -172,7 +172,7 @@ describe('TenantForm', () => {
     it('should_show_a_general_message_for_business_errors_without_a_field', async () => {
       fillValidCreateForm();
       submit();
-      answerLookup();
+      answerEmailCheck();
 
       http
         .expectOne(TENANTS_API)
@@ -202,7 +202,7 @@ describe('TenantForm', () => {
       expect(root.querySelector('#admin-password-0')).toBeNull();
 
       root.querySelector<HTMLInputElement>('#admin-email-0')!.dispatchEvent(new Event('blur'));
-      answerLookup();
+      answerEmailCheck();
       await fixture.whenStable();
 
       expect(root.querySelector('#admin-name-0')).not.toBeNull();
@@ -213,7 +213,7 @@ describe('TenantForm', () => {
     it('should_keep_name_and_password_hidden_and_name_the_account_when_the_email_already_exists', async () => {
       component().admins.at(0).patchValue({ email: 'minh.admin@rentcarhanoi.vn' });
       root.querySelector<HTMLInputElement>('#admin-email-0')!.dispatchEvent(new Event('blur'));
-      answerLookup({ accountExists: true, fullName: 'Nguyễn Văn Minh' });
+      answerEmailCheck({ accountExists: true, fullName: 'Nguyễn Văn Minh' });
       await fixture.whenStable();
 
       expect(root.querySelector('#admin-name-0')).toBeNull();
@@ -241,20 +241,20 @@ describe('TenantForm', () => {
       await fixture.whenStable();
 
       http.expectNone(TENANTS_API);
-      http.expectNone((r) => r.url === LOOKUP_URL);
+      http.expectNone((r) => r.url === EMAIL_CHECK_URL);
     });
 
     it('should_not_ask_the_backend_again_when_leaving_an_email_that_was_already_checked', async () => {
       component().admins.at(0).patchValue({ email: 'chu1@binhan.vn' });
       const input = root.querySelector<HTMLInputElement>('#admin-email-0')!;
       input.dispatchEvent(new Event('blur'));
-      answerLookup();
+      answerEmailCheck();
       await fixture.whenStable();
 
       input.dispatchEvent(new Event('blur'));
       await fixture.whenStable();
 
-      http.expectNone((r) => r.url === LOOKUP_URL);
+      http.expectNone((r) => r.url === EMAIL_CHECK_URL);
       expect(root.querySelector('#admin-name-0')).not.toBeNull();
     });
 
@@ -262,7 +262,7 @@ describe('TenantForm', () => {
       component().admins.at(0).patchValue({ email: 'chu1@binhan.vn' });
       const input = root.querySelector<HTMLInputElement>('#admin-email-0')!;
       input.dispatchEvent(new Event('blur'));
-      answerLookup();
+      answerEmailCheck();
       await fixture.whenStable();
       expect(root.querySelector('#admin-name-0')).not.toBeNull();
 
@@ -270,13 +270,13 @@ describe('TenantForm', () => {
       await fixture.whenStable();
 
       expect(root.querySelector('#admin-name-0')).toBeNull();
-      expect(component().lookupOf(component().admins.at(0)).status()).toBe('idle');
+      expect(component().emailCheckOf(component().admins.at(0)).status()).toBe('idle');
     });
 
     it('should_show_the_reason_and_not_submit_when_the_account_cannot_be_an_owner', async () => {
       fillValidCreateForm();
       submit();
-      answerLookup({ accountExists: true, canBeAdmin: false, reason: 'Tài khoản chu1@binhan.vn đang bị khóa !' });
+      answerEmailCheck({ accountExists: true, canBeAdmin: false, reason: 'Tài khoản chu1@binhan.vn đang bị khóa !' });
       await fixture.whenStable();
 
       http.expectNone(TENANTS_API);
@@ -288,7 +288,7 @@ describe('TenantForm', () => {
       component().form.patchValue({ name: 'Bình An Car', domain: 'binhan-car' });
       component().admins.at(0).patchValue({ email: 'chu1@binhan.vn' });
       submit();
-      answerLookup();
+      answerEmailCheck();
       await fixture.whenStable();
 
       http.expectNone(TENANTS_API);
@@ -296,11 +296,11 @@ describe('TenantForm', () => {
       expect(root.querySelector('#admin-name-0')).not.toBeNull();
     });
 
-    it('should_show_all_fields_and_let_the_backend_decide_when_the_lookup_fails', async () => {
+    it('should_show_all_fields_and_let_the_backend_decide_when_the_check_fails', async () => {
       fillValidCreateForm();
       submit();
       http
-        .expectOne((r) => r.url === LOOKUP_URL)
+        .expectOne((r) => r.url === EMAIL_CHECK_URL)
         .flush(failure('ERR_500', 'Lỗi hệ thống'), { status: 500, statusText: 'Server Error' });
       await fixture.whenStable();
 
