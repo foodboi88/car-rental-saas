@@ -5,6 +5,8 @@
 > **Mục đích tài liệu:** định hướng cách xây dựng module. Đọc từ trên xuống: hiểu bài toán, nắm các quyết định, rồi đi theo từng giai đoạn. Cách trình bày giống [kế hoạch module auth](../auth-login/2026-08-28-auth-jwt-implementation-guide.md).
 > **Nguồn thiết kế:** prototype (màn "Thêm nhà xe", "Chi tiết nhà xe"), `onboarding.md` mục 2.1 và 9.2, `Database-Schema.md`, và dữ liệu thật trong DB.
 
+> **Nguồn chuẩn:** hợp đồng API và quy tắc nghiệp vụ theo [Thiết kế chi tiết](2026-10-19-tenant-detail-design.md); khi các tài liệu khác nhau thì theo file đó.
+
 ## 🔗 TÀI LIỆU LIÊN QUAN
 
 | Tài liệu | Dùng khi |
@@ -24,7 +26,7 @@
 | Tạo nhà xe kèm cấu hình mặc định, 3 vai trò mặc định và **một hoặc nhiều chủ nhà xe** | Sửa cấu hình vận hành (`tenant_configs`): do chủ nhà xe tự sửa, thuộc module khác |
 | Xem danh sách (tìm, lọc, phân trang) và xem một nhà xe | Gỡ hoặc đổi vai trò chủ nhà xe, khóa riêng một người trong một nhà xe |
 | Sửa thông tin nhà xe | Tạo, sửa, khóa nhân viên của nhà xe (module account) |
-| Khóa, mở khóa, xóa mềm nhà xe | Mã nhà xe `tenants.code` cho mã đơn `BK_...` (cần migration V7) |
+| Khóa, mở khóa, xóa mềm nhà xe | Mã nhà xe `tenants.code` cho mã đơn `BK_...` (cần migration mới từ V8; V7 đã dùng cho phiên đăng nhập) |
 | Thêm và xem chủ nhà xe | Hạn mức theo gói dịch vụ, nhật ký thao tác dạng bảng, Row-Level Security |
 
 **Đăng nhập, chọn nhà xe, chọn chi nhánh không thuộc module này**, do module auth làm.
@@ -48,7 +50,7 @@ Super Admin ── POST /api/v1/tenants ──► Controller ──► Service  
    ┌───────────────┬───────────────────────┬─────────────┴────────────────────┐
    ▼               ▼                       ▼                                  ▼
 tenants        tenant_configs        roles (3) +                   gán từng chủ nhà xe:
-(1 dòng)       (1 dòng)              role_permissions (22)         users (tạo mới hoặc dùng lại)
+(1 dòng)       (1 dòng)              role_permissions (theo seed)         users (tạo mới hoặc dùng lại)
                                                                    + user_tenants (TENANT_ADMIN)
 ```
 
@@ -111,10 +113,12 @@ Mỗi giai đoạn dựa trên giai đoạn trước. **Làm từ trong ra:** en
 **Chú ý:**
 - DTO chỉ kiểm tra **định dạng** (không hỏi DB). Giới hạn `@Size` khớp độ rộng cột DB. Chi tiết từng trường xem [đặc tả](2026-10-19-tenant-api-spec.md).
 - `fullName` và `password` **không** đánh `@NotBlank`: chỉ bắt buộc khi email chưa có tài khoản, Service kiểm tra điều kiện này.
-- Mật khẩu tối đa 72 ký tự vì BCrypt chỉ dùng 72 byte đầu.
-- **Thiếu `@Valid` trên danh sách `admins`** thì Spring không kiểm tra từng phần tử.
+- DTO hiện kiểm tra mật khẩu 8–72 ký tự, có chữ và số; Service dùng `PasswordEncoder` để băm.
+- **Thiếu `@Valid` trên danh sách `admins`** thì Spring không kiểm tra từng phần tử. Thêm `@NotNull` cho kiểu phần tử để chặn `admins: [null]` với lỗi `admins[0]`.
 - `@NotBlank` chỉ cho `String`; enum, `Boolean`, `UUID` dùng `@NotNull`.
 - **Không trả mật khẩu**, kể cả bản băm, trong bất kỳ phản hồi nào.
+
+**Tài khoản có sẵn:** chỉ cần `email`; `fullName`/`password` không dùng để đổi tài khoản, nhưng nếu gửi thì vẫn qua validation DTO (mật khẩu rỗng hoặc yếu vẫn trả 400 `VALIDATION_ERROR`). Chi tiết ở [Thiết kế chi tiết, API 1](2026-10-19-tenant-detail-design.md).
 
 **Xong khi:** `mvn clean compile` qua.
 
@@ -124,7 +128,7 @@ Mỗi giai đoạn dựa trên giai đoạn trước. **Làm từ trong ra:** en
 - `TenantConfigRepository` (mới).
 - `DefaultRole` (enum, mới): định nghĩa 3 default role, mỗi default role mang `code`, `name`, `description`, danh sách mã quyền.
 - `TenantRoleRepository` (mới, **không sửa** `RoleRepository` của module account): `insertSystemRole`, `grantAllPermissions`, `grantPermissions` (SQL thuần dạng `INSERT ... SELECT`) và `findByTenantIdAndCode`.
-- `TenantAdminQueryRepository` (mới): truy vấn nối `users`, `user_tenants`, `roles` để xem chủ nhà xe.
+- `TenantUserTenantRepository` (mới): truy vấn nối `users`, `user_tenants`, `roles` để xem chủ nhà xe.
 
 **`DefaultRole`: 3 default role** (phải khớp migration V5):
 
@@ -134,7 +138,7 @@ Mỗi giai đoạn dựa trên giai đoạn trước. **Làm từ trong ra:** en
 | `STAFF` | 7: `booking:read, create, confirm_deposit, handover, return, cancel` và `vehicle:read` | `grantPermissions` |
 | `SALE` | 4: `booking:read, create, cancel` và `vehicle:read` | `grantPermissions` |
 
-Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_permissions`**.
+Mỗi nhà xe mới sinh **3 dòng `roles`**. Với seed hiện tại có **11 + 7 + 4 = 22 dòng `role_permissions`**; chủ luôn nhận toàn bộ danh mục quyền tại lúc tạo. Kiểm thử đối chiếu tập mã quyền, không chỉ đếm 22.
 
 **Điểm khó:**
 - **Mọi câu SQL thuần phải có `r.tenant_id = :tenantId`.** Thiếu thì `r.code = 'STAFF'` khớp STAFF của mọi nhà xe và gán quyền nhầm sang nhà xe khác.
@@ -143,12 +147,12 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 - `IN (:permissionCodes)` với **danh sách rỗng gây lỗi SQL**, nên `TENANT_ADMIN` phải đi theo `grantAllPermissions`.
 - `keywordPattern` luôn là một chuỗi (`"%"` khi không tìm), **không bao giờ `null`**, vì PostgreSQL báo lỗi hàm `lower` khi gặp `null`.
 - **Không dùng `RoleRepository.findByCode`** (nhiều nhà xe cùng `code`, nổ `IncorrectResultSize`). Dùng `findByTenantIdAndCode`.
-- Các entity module account chỉ lưu id, không có `@ManyToOne`, nên truy vấn nối dùng `JOIN ... ON` giữa các entity không liên kết; trả `Object[]` để `joinedAt` giữ kiểu `Instant`.
+- Các entity module account chỉ lưu id, không có `@ManyToOne`, nên truy vấn nối dùng `JOIN ... ON` giữa các entity không liên kết; dùng constructor expression trả thẳng `TenantAdminResponseDTO`, giữ `joinedAt` kiểu `Instant`.
 
 **Xong khi:** ứng dụng khởi động (Spring phân tích được truy vấn `search`).
 
 ### Giai đoạn 4: Service
-`TenantService` (interface) và `TenantServiceImpl`. Cả lớp chạy trong **một giao dịch** (`@Transactional`), hàm chỉ đọc đánh dấu `readOnly`. Lỗi nghiệp vụ ném `AppException(ErrorCode, ...)`. Thêm vào `ErrorCode`: `TENANT_DOMAIN_ALREADY_EXISTS` và `TENANT_ADMIN_ALREADY_ASSIGNED` (đều 409).
+`TenantService` + `TenantServiceImpl` xử lý API 1–6; `TenantAdminService` + `TenantAdminServiceImpl` xử lý API 7–9 và kiểm tra/ghi chủ dùng chung cho API 1. Cả lớp chạy trong **một giao dịch** (`@Transactional`), hàm chỉ đọc đánh dấu `readOnly`. Lỗi nghiệp vụ ném `AppException(ErrorCode, ...)`. Thêm vào `ErrorCode`: `TENANT_DOMAIN_ALREADY_EXISTS` và `TENANT_ADMIN_ALREADY_ASSIGNED` (đều 409).
 
 **Phân vai kiểm tra:** DTO kiểm định dạng; Service kiểm luật cần DB hoặc luật riêng; DB là chốt chặn cuối (unique, khóa ngoại).
 
@@ -158,23 +162,23 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 | `getTenantById` | Không thấy thì 404 |
 | `listTenants` | Từ khóa trống thành `"%"`, có thì chữ thường và bọc `%`; gọi `search`; map sang DTO |
 | `updateTenant` | Xem quy tắc bên dưới. Không đụng `tenant_configs` |
-| `changeStatus` | Đã đúng trạng thái thì trả luôn, không ghi (idempotent) |
-| `deleteTenant` | Gọi `changeStatus(false)`, **không gọi `repository.delete`** |
+| `updateTenantStatus` | Đã đúng trạng thái thì trả luôn, không ghi (idempotent) |
+| `deleteTenant` | Gọi `updateTenantStatus(false)`, **không gọi `repository.delete`** |
 | `addTenantAdmin` | Nhà xe phải tồn tại (404) và đang hoạt động (400); lấy vai trò `TENANT_ADMIN` của nhà xe đó; kiểm tra và gán chủ |
 | `listTenantAdmins` | Nhà xe phải tồn tại; trả các thành viên có vai trò `TENANT_ADMIN`, xếp theo ngày tham gia |
 
 **`createTenant`: kiểm tra hết rồi mới ghi.**
-1. *Kiểm tra, chưa ghi gì:* domain (làm gọn, đã có người dùng thì 409); `settings` phải là JSON hợp lệ; **cả danh sách chủ** (ít nhất 1 người, email không trùng nhau, từng người qua `TenantAdminAssigner.prepareAll`).
-2. *Ghi, theo thứ tự:* lưu `Tenant` (`.isActive(true)`, gói mặc định `FREE`) → lưu `TenantConfig` (30, 100000, 5.00 truyền tường minh) → sinh 3 vai trò và 22 quyền → lấy lại vai trò `TENANT_ADMIN` → gán từng chủ.
+1. *Kiểm tra, chưa ghi gì:* domain (làm gọn, đã có người dùng thì 409); `settings` phải là JSON hợp lệ; **cả danh sách chủ** (ít nhất 1 người, email không trùng nhau, từng người qua `TenantAdminService.validateAdminRequests`).
+2. *Ghi, theo thứ tự:* lưu `Tenant` (`.isActive(true)`, gói mặc định `FREE`) → lưu `TenantConfig` (30, 100000, 5.00 truyền tường minh) → sinh 3 vai trò và tập quyền mặc định (22 liên kết với seed hiện tại) → lấy lại vai trò `TENANT_ADMIN` → gán từng chủ.
 3. Ghi log (người gọi, nhà xe, số chủ, **không log mật khẩu**) và trả `CreateTenantResponseDTO`.
 
-**Gán chủ nhà xe** (`TenantAdminAssigner.prepareAll` để kiểm tra, `assign` để ghi, dùng chung cho tạo nhà xe và thêm chủ):
+**Gán chủ nhà xe** (`TenantAdminService.validateAdminRequests` để kiểm tra, `addAdminsToTenant` để ghi, dùng chung cho tạo nhà xe và thêm chủ):
 
 | Tình huống | Kết quả |
 | :--- | :--- |
 | Email mới, đủ họ tên và mật khẩu | Tạo tài khoản (BCrypt, `isActive(true)`, `isSuperAdmin(false)`) rồi liên kết |
 | Email mới, thiếu họ tên hoặc mật khẩu | 400 |
-| Email có sẵn, đang hoạt động, chưa thuộc nhà xe | **Chỉ liên kết**, bỏ qua họ tên và mật khẩu gửi lên |
+| Email có sẵn, đang hoạt động, chưa thuộc nhà xe | **Chỉ liên kết**, không cập nhật họ tên/mật khẩu; trường gửi lên vẫn phải qua validation DTO |
 | Email có sẵn nhưng bị khóa, hoặc là Super Admin | 400 |
 | Đã là chủ nhà xe này | 409 |
 | Đang là nhân viên của nhà xe này | 400 (chưa hỗ trợ nâng quyền) |
@@ -203,7 +207,7 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 | `/api/v1/tenants/{id}` (xóa mềm) | `DELETE` | 200 |
 | `/api/v1/tenants/{id}/admins` | `GET` | 200 |
 | `/api/v1/tenants/{id}/admins` | `POST` | 201 |
-| `/api/v1/tenants/admin-lookup` (tra cứu email chủ nhà xe, body: `email`, `tenantId` tùy chọn) | `POST` | 200 |
+| `/api/v1/tenants/admin-email-check` (tra cứu email chủ nhà xe, body: `email`, `tenantId` tùy chọn) | `POST` | 200 |
 
 **Chú ý:**
 - **Phân trang tự dựng, không nhận `sort` từ client:** `page` âm thành 0, `size` kẹp từ 1 đến 100, luôn sắp theo `createdAt` giảm dần (tham số `sort` đi thẳng vào câu truy vấn, sai tên trường gây lỗi). Trả `PagedModel`, không trả `Page`.
@@ -219,11 +223,13 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 - **Test đơn vị** cho `TenantServiceImpl` (Mockito, repository giả, không cần DB): mỗi kịch bản một test, tên mô tả, bố cục Arrange, Act, Assert, không vòng lặp hay `if` trong test.
 - **Test tích hợp** (Testcontainers): chạy ứng dụng thật trên PostgreSQL thật do container dựng, gọi API qua HTTP rồi đếm dòng trong DB. Cần Docker; không đụng DB dev.
 
+**Xung đột ghi đồng thời:** lỗi UNIQUE ở bước ghi hiện trả 500 `ERR_500`, giao dịch vẫn rollback; ánh xạ 409 chờ người phụ trách module chung. Chi tiết ở [Thiết kế chi tiết, mục 4](2026-10-19-tenant-detail-design.md).
+
 **Kịch bản cần phủ:**
 
 | Nhóm | Kịch bản |
 | :--- | :--- |
-| Tạo nhà xe | Thành công (đủ 1 nhà xe, 1 cấu hình, 3 vai trò, 22 quyền, đúng số chủ); trùng domain; danh sách chủ rỗng, email trùng, tài khoản khóa hoặc Super Admin, thiếu họ tên hoặc mật khẩu, `settings` sai JSON; **một chủ sai thì không ghi gì** |
+| Tạo nhà xe | Thành công (đủ 1 nhà xe, 1 cấu hình, 3 vai trò, đúng tập quyền và số chủ); trùng domain; danh sách chủ rỗng, email trùng, tài khoản khóa hoặc Super Admin, thiếu họ tên hoặc mật khẩu, `settings` sai JSON; **một chủ sai thì không ghi gì** |
 | Chủ nhà xe | Email mới tạo tài khoản; email có sẵn chỉ liên kết và **không đổi mật khẩu, họ tên**; chủ mới đăng nhập được với đủ quyền; thêm trùng, thêm khi nhà xe khóa, thêm người đang là nhân viên |
 | Sửa | Giữ cũ khi không gửi, xóa khi gửi chuỗi rỗng, ghi đè khi có giá trị; domain trùng nhà xe khác; `created_at` giữ, `updated_at` đổi |
 | Khóa, xóa | Khóa thì đăng nhập bị từ chối; mở khóa dùng lại được; xóa hai lần vẫn thành công và dữ liệu liên quan còn |
@@ -238,18 +244,20 @@ Mỗi nhà xe mới sinh **3 dòng `roles`** và **11 + 7 + 4 = 22 dòng `role_p
 ## 5. PHỤ THUỘC NGƯỜI KHÁC
 
 1. **Tài khoản Super Admin:** DB chưa có. Hỏi người làm auth xem seed ở migration nào. Lâu dài cần cách tạo chính thức (migration hoặc lệnh khởi tạo, mật khẩu từ biến môi trường).
-2. **Khóa nhà xe có hiệu lực ngay (đã xử lý ở nhánh `dynamic-rbac`):** `CustomUserDetailsServiceImpl` kiểm tra nhà xe còn hoạt động ở mỗi request nên người của nhà xe bị khóa nhận 403 dù còn access token (đọc từ code, chưa chạy thử). Riêng `switch-branch` chưa kiểm chứng. Khóa **tài khoản** (`users.is_active`) cũng có hiệu lực ngay.
-3. **`GlobalExceptionHandler` có thể trả 500 cho tham số sai kiểu** (UUID sai dạng, boolean sai kiểu), lẽ ra 400. Cần xác nhận và báo người làm module chung.
+2. **Khóa nhà xe có hiệu lực ngay (đã xử lý ở nhánh `dynamic-rbac`):** `CustomUserDetailsServiceImpl` kiểm tra nhà xe còn hoạt động ở mỗi request nên người của nhà xe bị khóa nhận 403 dù còn access token (có test hồi quy token cũ bị từ chối qua `select-tenant`). Không suy rộng kết quả này thành đã kiểm thử mọi API nghiệp vụ. Khóa **tài khoản** (`users.is_active`) cũng có hiệu lực ngay.
+3. **Tham số sai kiểu đã trả 400 `ERR_400`** qua `MethodArgumentTypeMismatchException` (UUID ở đường dẫn, boolean/integer ở query). UUID sai trong JSON trả 400 `MALFORMED_JSON`.
 4. **Dùng chung entity và repository của module account** (`User`, `UserTenant`, `UserRepository`, `UserTenantRepository`): chỉ **dùng**, không sửa; báo họ nếu đổi tên trường hay hàm.
 5. **Phần lõi "tìm hoặc tạo tài khoản rồi liên kết"** dùng chung với API tạo nhân viên: khi module account làm, hai bên thống nhất rút ra một lớp chung.
-6. **Cần có ràng buộc DB chặn đặt trùng giờ cùng một xe** (ràng buộc loại trừ trên `vehicle_id` và khoảng `pickup_time` đến `return_time`) trước khi làm module booking; cần migration V7 thống nhất với nhóm.
-7. **Hai request tạo cùng một domain cùng lúc:** cả hai cùng qua bước kiểm tra, ràng buộc unique của DB chặn một bên. Cân nhắc bắt lỗi trùng ràng buộc và trả 409 thay vì 500 (khả năng thấp vì chỉ Super Admin tạo nhà xe).
+6. **Cần có ràng buộc DB chặn đặt trùng giờ cùng một xe** (ràng buộc loại trừ trên `vehicle_id` và khoảng `pickup_time` đến `return_time`) trước khi làm module booking; cần migration mới từ V8 (V7 đã dùng cho phiên đăng nhập) thống nhất với nhóm.
+7. **Xung đột đồng thời:** lỗi UNIQUE ở bước ghi hiện trả 500, dù DB vẫn chặn dữ liệu trùng và rollback giao dịch. Việc ánh xạ 409 thuộc người phụ trách module chung; xem ghi chú ở Giai đoạn 6.
 
-## 6. VIỆC CẦN XÁC NHẬN VỚI NHÓM
+## 6. QUYẾT ĐỊNH HIỆN TẠI VÀ VIỆC CẦN XÁC NHẬN
 
-1. **Module nào sinh 3 vai trò mặc định?** Kế hoạch này để module tenant sinh (cùng giao dịch), module account chỉ gán. `Database-Schema.md` mục 2.4 còn gợi ý vai trò dùng chung, trong khi entity `Role` khai báo `tenantId` không null, nên cần xác nhận để không lệch.
+1. **Đã chốt:** module tenant sinh ba vai trò riêng theo tenant trong cùng giao dịch; module account chỉ gán vai trò đã có. Schema vẫn cho phép role hệ thống có `tenant_id=NULL`, nhưng luồng tạo tenant hiện không dùng các role đó.
 2. **Mật khẩu chủ nhà xe:** Super Admin đặt mật khẩu tạm (như prototype) hay gửi email mời? `users` không có cột "bắt đổi mật khẩu lần đầu".
-3. **Super Admin có được làm chủ nhà xe không?** Nhánh Super Admin ở `login` chạy trước nên tài khoản đó không vào được nhà xe. Khuyên từ chối.
+3. **Đã chốt:** từ chối gán Super Admin làm chủ nhà xe theo R5 của DD.
 4. **`BRANCH_MANAGER`** còn dùng không? Docs nhắc nhưng DB và `onboarding.md` không có.
 5. **Gỡ hoặc đổi vai trò chủ nhà xe:** xóa dòng `user_tenants` làm đơn cũ mất `created_by`, `handover_by`, `returned_by` (`ON DELETE SET NULL`) và xóa phân công chi nhánh (`ON DELETE CASCADE`). Cần chốt cách xử lý, cân nhắc thêm cột `user_tenants.status`. Luôn phải còn ít nhất một chủ.
-6. **Chi nhánh của SALE:** `onboarding.md` mục 9.2 ghi SALE không gán chi nhánh, nhưng mục 2.1 và dữ liệu thật cho thấy phải gán. Cần cho API tạo nhân viên.
+6. **Ngoài phạm vi:** module account tự gán toàn bộ chi nhánh đang hoạt động cho SALE; form không yêu cầu chọn. SALE vẫn chọn chi nhánh tác nghiệp khi đăng nhập theo onboarding mục 2.1 và 9.2.
+
+Các ca hồi quy bổ sung (null/biên, định dạng, đồng thời, rollback sau ghi, token tenant khóa, tập quyền) được liệt kê ở [DD](2026-10-19-tenant-detail-design.md#kiểm-thử-bổ-sung-khi-hoàn-thiện-module) và mục 11 của plan.

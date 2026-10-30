@@ -2,10 +2,12 @@
 
 > **Phạm vi:** 9 API quản lý nhà xe (tenant) dưới `/api/v1/tenants`, chỉ dành cho **Super Admin**.
 > **Cách dùng:** tra cứu đầu vào, đầu ra, lỗi của từng API. Muốn hiểu **bối cảnh, quyết định thiết kế và cách xây dựng** thì xem [kế hoạch module](2026-10-06-tenant-crud-implementation-guide.md).
-> **Nguồn:** đọc từ code (`TenantController`, các DTO, `TenantServiceImpl`, `ErrorCode`). Tên biến, cấu trúc phản hồi và mã lỗi đã được **đối chiếu với phản hồi thật** khi chạy ứng dụng trên PostgreSQL thật. Mục nào chỉ suy ra từ code được ghi rõ "chưa kiểm chứng".
-> **Tra nhanh:** [Luồng chủ nhà xe](#15-luồng-xử-lý-một-chủ-nhà-xe-dùng-chung-cho-api-1-và-api-8) · [Chi tiết từng API](#2-chi-tiết-từng-api) · Phụ lục: [A. Cấu trúc phản hồi](#a-cấu-trúc-phản-hồi-chung) · [B. Mã lỗi](#b-mã-lỗi-dùng-chung) · [C. Kiểu dữ liệu](#c-kiểu-dữ-liệu-dùng-chung) · [D. Đối tượng Tenant](#d-đối-tượng-tenant-xuất-hiện-ở-nhiều-phản-hồi)
+> **Nguồn:** đối chiếu DD và code (`TenantController`, các DTO, `TenantServiceImpl`, `TenantAdminServiceImpl`, `ErrorCode`). Tên biến, cấu trúc phản hồi và mã lỗi đã được **đối chiếu với phản hồi thật** khi chạy ứng dụng trên PostgreSQL thật. Mục nào chỉ suy ra từ code được ghi rõ "chưa kiểm chứng".
+> **Tra nhanh:** [Luồng chủ nhà xe](#15-kiểm-tra-và-ghi-chủ-nhà-xe-dùng-chung-cho-api-1-và-api-8) · [Chi tiết từng API](#2-chi-tiết-từng-api) · Phụ lục: [A. Cấu trúc phản hồi](#a-cấu-trúc-phản-hồi-chung) · [B. Mã lỗi](#b-mã-lỗi-dùng-chung) · [C. Kiểu dữ liệu](#c-kiểu-dữ-liệu-dùng-chung) · [D. Đối tượng Tenant](#d-đối-tượng-tenant-xuất-hiện-ở-nhiều-phản-hồi)
 
 ---
+
+> **Nguồn chuẩn:** hợp đồng API và quy tắc nghiệp vụ theo [Thiết kế chi tiết](2026-10-19-tenant-detail-design.md); khi các tài liệu khác nhau thì theo file đó.
 
 ## 1. TỔNG QUAN
 
@@ -21,12 +23,14 @@
 | 6 | Xóa (xóa mềm) | `DELETE` | `/api/v1/tenants/{tenantId}` | 200 |
 | 7 | Xem các chủ nhà xe | `GET` | `/api/v1/tenants/{tenantId}/admins` | 200 |
 | 8 | Thêm chủ nhà xe | `POST` | `/api/v1/tenants/{tenantId}/admins` | 201 |
-| 9 | Tra cứu email chủ nhà xe | `POST` | `/api/v1/tenants/admin-lookup` | 200 |
+| 9 | Tra cứu email chủ nhà xe | `POST` | `/api/v1/tenants/admin-email-check` | 200 |
 
 ### 1.2 Xác thực và phân quyền
 - Mọi API cần header `Authorization: Bearer <accessToken>`.
 - Token phải của tài khoản **Super Admin** (`ROLE_SUPER_ADMIN`). Chủ nhà xe, nhân viên, Sale gọi sẽ bị **403**.
 - Body gửi lên dạng `Content-Type: application/json`.
+
+**Tài khoản có sẵn:** chỉ cần `email`; `fullName`/`password` không dùng để đổi tài khoản, nhưng nếu gửi thì vẫn qua validation DTO (mật khẩu rỗng hoặc yếu vẫn trả 400 `VALIDATION_ERROR`). Chi tiết ở [Thiết kế chi tiết, API 1](2026-10-19-tenant-detail-design.md).
 
 ### 1.3 Mỗi API đọc và ghi bảng nào
 
@@ -84,59 +88,50 @@ sequenceDiagram
 
 > **Chú ý thứ tự:** kiểm tra định dạng body (bước 5) chạy **trước** kiểm tra quyền (bước 8), nên người không có quyền gửi body sai nhận 400 chứ chưa phải 403.
 
-### 1.5 Luồng xử lý một chủ nhà xe (dùng chung cho API 1 và API 8)
-
-Việc gán chủ nhà xe dài và nhiều nhánh (luật nằm ở lớp `TenantAdminAssigner`, được `TenantServiceImpl` gọi), dùng chung cho **tạo nhà xe** (API 1) và **thêm chủ** (API 8), nên được vẽ riêng một lần ở đây. Sơ đồ của hai API chỉ ghi "xem sơ đồ mục 1.5".
-
-Hai bước **tách rời nhau**, vẽ cho **một** chủ:
-- **Bước kiểm tra** (`TenantAdminAssigner.prepareAll`): chưa ghi gì vào DB. Khi tạo nhà xe, bước này chạy cho **tất cả** chủ trước khi ghi bất cứ thứ gì.
-- **Bước ghi** (`TenantAdminAssigner.assign`): tạo tài khoản nếu email mới, rồi liên kết vào nhà xe với vai trò `TENANT_ADMIN`.
+### 1.5 Kiểm tra và ghi chủ nhà xe (dùng chung cho API 1 và API 8)
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant G as createTenant hoặc addTenantAdmin
-  participant S as Service
+  participant G as TenantService / addTenantAdmin
+  participant A as TenantAdminService
   participant R as Repository
-  Note over G,R: BƯỚC KIỂM TRA - prepareAll, chưa ghi gì
-  G->>S: prepareAll(email, fullName, password)
-  S->>S: chuẩn hóa email, bỏ khoảng trắng và đổi chữ thường
-  alt email rỗng
-    S-->>G: lỗi 400 ERR_400
-  else email trùng trong danh sách, chỉ xảy ra khi tạo nhà xe
-    S-->>G: lỗi 400 ERR_400
-  end
-  S->>R: UserRepository.findByEmail(email)
-  alt email đã có tài khoản
-    alt tài khoản bị khóa
-      S-->>G: lỗi 400 ERR_400
-    else tài khoản là Super Admin
-      S-->>G: lỗi 400 ERR_400
-    else tài khoản hợp lệ
-      Note over S: bỏ qua họ tên và mật khẩu gửi lên
+  Note over G,R: BƯỚC KIỂM TRA - validateAdminRequests(requests, tenant, adminRoleId), không ghi gì
+  loop mỗi chủ
+    A->>A: chuẩn hóa email (trim, chữ thường)
+    alt email lặp trong danh sách
+      A-->>G: 400 ERR_400
     end
-  else email mới
-    alt thiếu họ tên hoặc mật khẩu
-      S-->>G: lỗi 400 ERR_400
+    A->>R: UserRepository.findByEmail(email)
+    A->>A: findRejection(tenant, user, adminRoleId)
+    opt có nhà xe và email có tài khoản
+      A->>R: UserTenantRepository.findByUserIdAndTenantId
+    end
+    alt có lý do từ chối (bảng 3.1)
+    A-->>G: 400 / 409 theo AdminRejection (DD mục 3.1)
+    else email mới thiếu họ tên hoặc mật khẩu
+      A-->>G: 400 ERR_400
     end
   end
-  S-->>G: PreparedAdmin gồm email, họ tên, mật khẩu và tài khoản có sẵn nếu có
-  Note over G,R: BƯỚC GHI - assign
-  G->>S: assign(tenantId, adminRoleId, PreparedAdmin)
-  alt email mới
-    S->>R: UserRepository.save(User mới, mật khẩu BCrypt)
-    Note over S,R: tài khoản mới đang hoạt động, không phải Super Admin
-  else email có sẵn
-    S->>R: UserTenantRepository.findByUserIdAndTenantId(userId, tenantId)
-    alt đã là chủ nhà xe này
-      S-->>G: lỗi 409 TENANT_ADMIN_ALREADY_ASSIGNED
-    else đang là nhân viên của nhà xe
-      S-->>G: lỗi 400 ERR_400
+  A-->>G: danh sách ValidatedAdmin
+  Note over G,R: BƯỚC GHI - addAdminsToTenant(tenantId, adminRoleId, admins)
+  loop mỗi ValidatedAdmin
+    opt email mới
+      A->>R: UserRepository.save(User, mật khẩu BCrypt, đang hoạt động)
     end
+    A->>R: UserTenantRepository.save(vai trò TENANT_ADMIN, joinedAt)
   end
-  S->>R: UserTenantRepository.save(UserTenant, vai trò TENANT_ADMIN, joinedAt)
-  S-->>G: AdminResult gồm email và accountCreated
+  A-->>G: danh sách AdminAssignmentResponseDTO
 ```
+
+**Lỗi của luồng này** (ngoài bảng 3.1 của DD):
+
+| HTTP | `error.code` | Thông báo |
+| :-: | :--- | :--- |
+| 400 | `ERR_400` | Email chủ nhà xe bị trùng trong danh sách: {email} |
+| 400 | `ERR_400` | Vui lòng nhập họ tên cho tài khoản mới: {email} |
+| 400 | `ERR_400` | Vui lòng nhập mật khẩu cho tài khoản mới: {email} |
+
 ---
 
 ## 2. CHI TIẾT TỪNG API
@@ -153,41 +148,32 @@ sequenceDiagram
 sequenceDiagram
   autonumber
   participant C as Client
-  participant K as Controller
-  participant S as Service
+  participant K as TenantController
+  participant T as TenantService
+  participant A as TenantAdminService
   participant R as Repository
-  C->>K: POST /api/v1/tenants kèm body
-  Note over C,K: đã qua kiểm tra token, định dạng body và quyền Super Admin
-  K->>S: createTenant(request, actorId)
-  Note over S,R: GIAI ĐOẠN 1 - kiểm tra, chưa ghi gì vào DB
-  S->>R: TenantRepository.existsByDomain(domain)
-  alt domain đã có người dùng
-    S-->>C: 409 TENANT_DOMAIN_ALREADY_EXISTS
+  C->>K: POST /api/v1/tenants
+  K->>T: createTenant(request, actorId)
+  T->>R: TenantRepository.existsByDomain(domain)
+  alt domain đã dùng
+    T-->>C: 409 TENANT_DOMAIN_ALREADY_EXISTS
   end
-  S->>S: settings phải là JSON hợp lệ
-  S->>S: danh sách chủ không rỗng
-  loop mỗi chủ nhà xe
-    S->>S: prepareAll, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
+  T->>T: settings là JSON hợp lệ
+  T->>A: validateAdminRequests(admins, null, null) - mục 1.5
+  T->>R: TenantRepository.save(Tenant đang hoạt động)
+  T->>R: TenantConfigRepository.save(TenantConfig.withDefaults)
+  loop TENANT_ADMIN, STAFF, SALE
+    T->>R: TenantRoleRepository.insertSystemRole, cấp quyền
   end
-  alt settings sai, danh sách rỗng hoặc có chủ không hợp lệ
-    S-->>C: 400 ERR_400, chưa ghi gì
-  end
-  Note over S,R: GIAI ĐOẠN 2 - ghi, tất cả trong một giao dịch
-  S->>R: TenantRepository.save(Tenant đang hoạt động, gói FREE nếu không chọn)
-  S->>R: TenantConfigRepository.save(30 phút, 100000, 5.00)
-  loop 3 vai trò TENANT_ADMIN, STAFF, SALE
-    S->>R: TenantRoleRepository: insertSystemRole rồi cấp quyền
-    Note over S,R: TENANT_ADMIN cấp tất cả quyền, STAFF và SALE cấp theo danh sách
-  end
-  S->>R: TenantRoleRepository.findByTenantIdAndCode(tenantId, TENANT_ADMIN)
-  loop mỗi chủ nhà xe
-    S->>S: assign, XEM SƠ ĐỒ MỤC 1.5, bước ghi
-  end
-  S-->>K: CreateTenantResponseDTO
-  K-->>C: 201 Created, tenant và admins, không có mật khẩu
+  T->>R: TenantRoleRepository.findByTenantIdAndCode(tenantId, TENANT_ADMIN)
+  T->>A: addAdminsToTenant(tenantId, adminRoleId, admins) - mục 1.5
+  T-->>K: CreateTenantResponseDTO
+  K-->>C: 201 "Tạo nhà xe thành công !"
 ```
 
 ### Đầu vào (body)
+
+`admins` có 1–10 object, không có phần tử null.
 
 | Tên biến | Kiểu | Bắt buộc | Ràng buộc | Mô tả |
 | :--- | :--- | :-: | :--- | :--- |
@@ -205,8 +191,8 @@ sequenceDiagram
 | Tên biến | Kiểu | Bắt buộc | Ràng buộc | Mô tả |
 | :--- | :--- | :-: | :--- | :--- |
 | `email` | string | Có | Không rỗng, đúng dạng email, tối đa 255 ký tự | Email chủ nhà xe. Dùng để tìm tài khoản có sẵn |
-| `fullName` | string | **Có điều kiện** | Tối đa 255 ký tự | Bắt buộc **khi email chưa có tài khoản**. Bị bỏ qua nếu email đã có tài khoản |
-| `password` | string | **Có điều kiện** | 8 đến 72 ký tự, có ít nhất 1 chữ và 1 số | Bắt buộc **khi email chưa có tài khoản**. Bị bỏ qua nếu email đã có tài khoản |
+| `fullName` | string | **Có điều kiện** | Tối đa 255 ký tự | Bắt buộc **khi email chưa có tài khoản**. Không cập nhật tài khoản có sẵn; nếu gửi vẫn phải đúng định dạng |
+| `password` | string | **Có điều kiện** | 8 đến 72 ký tự, có ít nhất 1 chữ và 1 số | Bắt buộc **khi email chưa có tài khoản**. Không cập nhật tài khoản có sẵn; nếu gửi vẫn phải đúng định dạng |
 
 **Ví dụ yêu cầu** (một chủ mới, một chủ đã có tài khoản):
 ```json
@@ -253,7 +239,7 @@ sequenceDiagram
 | HTTP | `error.code` | Khi nào | Thông báo |
 | :-: | :--- | :--- | :--- |
 | 400 | `VALIDATION_ERROR` | Dữ liệu không hợp lệ (tên rỗng, domain sai mẫu, email sai dạng, mật khẩu yếu, thiếu `admins`...) | Chi tiết theo từng trường trong `data` |
-| 400 | `ERR_400` | `admins` rỗng | "Cần ít nhất một chủ nhà xe !" |
+| 400 | `VALIDATION_ERROR` | `admins` thiếu, rỗng, quá 10 phần tử hoặc chứa null | Lỗi field `admins` hoặc `admins[0]` |
 | 400 | `ERR_400` | Email trùng trong danh sách | "Email chủ nhà xe bị trùng trong danh sách: {email}" |
 | 400 | `ERR_400` | Tài khoản có sẵn đang bị khóa | "Tài khoản đang bị khóa !" |
 | 400 | `ERR_400` | Tài khoản có sẵn là Super Admin | "Tài khoản Super Admin không thể làm chủ nhà xe" |
@@ -264,7 +250,7 @@ sequenceDiagram
 | 401, 403 | | Xem Phụ lục B | |
 
 ### Dữ liệu ghi
-`tenants` (1 dòng), `tenant_configs` (1 dòng: giữ chỗ 30 phút, phí trả trễ 100000 đồng mỗi giờ, hoa hồng 5.00%), `roles` (3 dòng), `role_permissions` (22 dòng), `users` (mỗi email mới 1 dòng), `user_tenants` (mỗi chủ 1 dòng, vai trò `TENANT_ADMIN`).
+`tenants` (1 dòng), `tenant_configs` (1 dòng: giữ chỗ 30 phút, phí trả trễ 100000 đồng mỗi giờ, hoa hồng 5.00%), `roles` (3 dòng), `role_permissions` (22 dòng với seed hiện tại; chủ nhận toàn bộ danh mục quyền), `users` (mỗi email mới 1 dòng), `user_tenants` (mỗi chủ 1 dòng, vai trò `TENANT_ADMIN`).
 
 ---
 
@@ -317,7 +303,7 @@ Ví dụ: `GET /api/v1/tenants?keyword=binh&isActive=true&page=0&size=10`
 `message`: "Lấy danh sách nhà xe thành công !"
 
 ### Lỗi
-401, 403 (xem Phụ lục B). Tham số sai kiểu (ví dụ `isActive=abc`) hiện trả **500** thay vì 400 (lỗi đã biết, xem mục 3).
+401, 403 (xem Phụ lục B). Tham số query sai kiểu (ví dụ `isActive=abc`, `page=abc`) trả **400 `ERR_400`**.
 
 ---
 
@@ -357,7 +343,7 @@ sequenceDiagram
 | HTTP | `error.code` | Khi nào |
 | :-: | :--- | :--- |
 | 404 | `ERR_404` | Không có nhà xe với mã này |
-| 500 | `ERR_500` | `tenantId` không phải UUID (lỗi đã biết, nên là 400) |
+| 400 | `ERR_400` | `tenantId` ở đường dẫn không phải UUID |
 
 ---
 
@@ -449,7 +435,7 @@ sequenceDiagram
   participant S as Service
   participant R as Repository
   C->>K: PATCH /api/v1/tenants/tenantId/status kèm isActive
-  K->>S: changeStatus(tenantId, isActive, actorId)
+  K->>S: updateTenantStatus(tenantId, isActive, actorId)
   S->>R: TenantRepository.findById(tenantId)
   alt không có nhà xe
     S-->>C: 404 ERR_404
@@ -476,7 +462,7 @@ Ví dụ: `{ "isActive": false }`
 ### Đầu ra: `200 OK`
 `data` là đối tượng **Tenant** với `isActive` mới. `message`: "Khóa nhà xe thành công !" hoặc "Mở khóa nhà xe thành công !".
 
-**Gọi lại cùng giá trị vẫn thành công** (không đổi gì, không đổi `updatedAt`). Nhà xe bị khóa: người của nhà xe không đăng nhập hoặc chọn nhà xe được; không thêm được chủ mới.
+**Gọi lại cùng giá trị vẫn thành công** (không đổi gì, không đổi `updatedAt`). Nhà xe bị khóa: người của nhà xe không đăng nhập hoặc chọn nhà xe được; không thêm được chủ mới. Request mới mang access token của tenant bị khóa nhận 403 `AUTH_FORBIDDEN`, kể cả token còn hạn; không hủy ngược request đã qua filter trước khi khóa.
 
 ### Lỗi
 | HTTP | `error.code` | Khi nào |
@@ -501,7 +487,7 @@ sequenceDiagram
   C->>K: DELETE /api/v1/tenants/tenantId
   K->>S: deleteTenant(tenantId, actorId)
   Note over S: xóa mềm, không xóa dòng nào
-  S->>S: changeStatus(tenantId, false, actorId), xem sơ đồ API 5
+  S->>S: updateTenantStatus(tenantId, false, actorId), xem sơ đồ API 5
   alt không có nhà xe
     S-->>C: 404 ERR_404
   end
@@ -545,7 +531,7 @@ sequenceDiagram
     S-->>C: 404 ERR_404
   end
   S->>R: findMembersByTenantIdAndRoleCode(tenantId, TENANT_ADMIN)
-  Note over R: TenantAdminQueryRepository, nối users, user_tenants, roles
+  Note over R: TenantUserTenantRepository, nối users, user_tenants, roles
   R-->>S: các dòng gồm User và UserTenant, xếp theo ngày tham gia
   S->>S: đổi thành TenantAdminResponseDTO, không có mật khẩu
   S-->>K: danh sách chủ nhà xe
@@ -598,29 +584,16 @@ Không có mật khẩu. `message`: "Lấy danh sách chủ nhà xe thành công
 sequenceDiagram
   autonumber
   participant C as Client
-  participant K as Controller
-  participant S as Service
+  participant K as TenantController
+  participant A as TenantAdminService
   participant R as Repository
-  C->>K: POST /api/v1/tenants/tenantId/admins kèm body
-  K->>S: addTenantAdmin(tenantId, request, actorId)
-  S->>R: TenantRepository.findById(tenantId)
-  alt không có nhà xe
-    S-->>C: 404 ERR_404
-  else nhà xe đang bị khóa
-    S-->>C: 400 ERR_400
-  end
-  S->>R: TenantRoleRepository.findByTenantIdAndCode(tenantId, TENANT_ADMIN)
-  alt nhà xe chưa có vai trò chủ
-    S-->>C: 500 ERR_500
-  end
-  S->>S: prepareAll cho một chủ, XEM SƠ ĐỒ MỤC 1.5, bước kiểm tra
-  S->>S: assign cho một chủ, XEM SƠ ĐỒ MỤC 1.5, bước ghi
-  alt vi phạm quy tắc ở sơ đồ 1.5
-    S-->>C: 400 ERR_400 hoặc 409 TENANT_ADMIN_ALREADY_ASSIGNED
-  else hợp lệ
-    S-->>K: AdminResult gồm email và accountCreated
-    K-->>C: 201 Created
-  end
+  C->>K: POST /api/v1/tenants/tenantId/admins
+  K->>A: addTenantAdmin(tenantId, request, actorId)
+  A->>R: TenantRepository.findById → 404 nếu không có
+  A->>R: TenantRoleRepository.findByTenantIdAndCode(tenantId, TENANT_ADMIN) → 500 nếu không có
+  A->>A: validateAdminRequests(một request, tenant, adminRoleId) - mục 1.5
+  A->>A: addAdminsToTenant(tenantId, adminRoleId, admins) - mục 1.5
+  K-->>C: 201 "Thêm chủ nhà xe thành công !"
 ```
 
 ### Đầu vào
@@ -662,7 +635,7 @@ Ví dụ: `{ "email": "chu2@binhan.vn", "fullName": "Trần Thị Hai", "passwor
 
 ---
 
-## API 9. Tra cứu email chủ nhà xe: `POST /api/v1/tenants/admin-lookup`
+## API 9. Tra cứu email chủ nhà xe: `POST /api/v1/tenants/admin-email-check`
 
 **Mô tả:** hỏi trước một email đã có tài khoản chưa, để giao diện biết có cần hiện ô họ tên và mật khẩu hay không, và báo sớm các trường hợp chắc chắn bị từ chối. **Chỉ đọc, không ghi gì.** Gọi trước khi gửi API 1 hoặc API 8; hai API đó vẫn tự kiểm tra lại khi nhận yêu cầu.
 
@@ -674,39 +647,19 @@ Ví dụ: `{ "email": "chu2@binhan.vn", "fullName": "Trần Thị Hai", "passwor
 sequenceDiagram
   autonumber
   participant C as Client
-  participant K as Controller
-  participant S as Service
+  participant K as TenantController
+  participant A as TenantAdminService
   participant R as Repository
-  C->>K: POST /api/v1/tenants/admin-lookup kèm body email, tenantId (tùy chọn)
-  K->>S: lookupAdminByEmail(email, tenantId)
+  C->>K: POST /api/v1/tenants/admin-email-check kèm email, tenantId tùy chọn
+  K->>A: checkAdminEmail(email, tenantId)
   opt có tenantId
-    S->>R: TenantRepository.findById(tenantId)
-    alt không có nhà xe
-      S-->>C: 404 ERR_404
-    end
-    S->>R: TenantRoleRepository.findByTenantIdAndCode(tenantId, TENANT_ADMIN)
-    alt nhà xe chưa có nhóm quyền chủ
-      S-->>C: 500 ERR_500
-    end
+    A->>R: TenantRepository.findById → 404 nếu không có
+    A->>R: TenantRoleRepository.findByTenantIdAndCode → 500 nếu không có
   end
-  S->>S: chuẩn hóa email, bỏ khoảng trắng và đổi chữ thường
-  alt email rỗng
-    S-->>C: 400 ERR_400
-  end
-  S->>R: UserRepository.findByEmail(email)
-  Note over S: kiểm tra theo đúng thứ tự của API 8, lỗi đầu tiên gặp là lý do duy nhất được báo
-  opt có tenantId và nhà xe đang bị khóa
-    Note over S: không gán được, dù email mới hay có sẵn
-  end
-  opt email đã có tài khoản
-    S->>S: tài khoản bị khóa hoặc là Super Admin thì không gán được
-    opt có tenantId
-      S->>R: UserTenantRepository.findByUserIdAndTenantId
-      Note over S: đã là chủ hoặc đang là nhân viên của nhà xe này thì không gán được
-    end
-  end
-  S-->>K: AdminLookupResponseDTO
-  K-->>C: 200 OK
+  A->>R: UserRepository.findByEmail(email đã chuẩn hóa)
+  A->>A: findRejection(tenant, user, adminRoleId) - cùng hàm với API 1, 8
+  A-->>K: AdminEmailCheckResponseDTO (reason = lý do nếu có)
+  K-->>C: 200 "Kiểm tra email thành công !"
 ```
 
 ### Đầu vào (body)
@@ -725,7 +678,7 @@ Ví dụ: `{ "email": "minh.admin@rentcarhanoi.vn", "tenantId": "3f2c1b7e-..." }
 | `data.email` | string | Email đã chuẩn hóa |
 | `data.accountExists` | boolean | Email đã có tài khoản trong hệ thống |
 | `data.fullName` | string hoặc null | Họ tên của tài khoản có sẵn, `null` nếu email chưa có tài khoản |
-| `data.canBeAdmin` | boolean | Gán được làm chủ nhà xe không. Email chưa có tài khoản thì `true` (sẽ tạo tài khoản mới) |
+| `data.canBeAdmin` | boolean | `true` khi không gặp lý do từ chối ở DD mục 3.1. Email mới kèm tenant bị khóa vẫn là `false`; kết quả chỉ phản ánh thời điểm kiểm tra |
 | `data.reason` | string hoặc null | Lý do không gán được, **cùng câu** với lỗi 400 hoặc 409 khi gửi API 1 hoặc API 8 (các câu này không kèm email, vì giao diện đã hiện email ở ô nhập). `null` nếu gán được |
 
 `message`: "Tra cứu email thành công !"
@@ -739,7 +692,7 @@ Ví dụ: `{ "email": "minh.admin@rentcarhanoi.vn", "tenantId": "3f2c1b7e-..." }
 | bất kỳ | `false` | Hiện `reason`, không cho gửi |
 
 ```json
-{ "success": true, "data": { "email": "minh.admin@rentcarhanoi.vn", "accountExists": true, "fullName": "Nguyễn Văn Minh", "canBeAdmin": true, "reason": null }, "message": "Tra cứu email thành công !" }
+{ "success": true, "data": { "email": "minh.admin@rentcarhanoi.vn", "accountExists": true, "fullName": "Nguyễn Văn Minh", "canBeAdmin": true, "reason": null }, "message": "Kiểm tra email thành công !" }
 ```
 
 ### Lỗi
@@ -757,7 +710,9 @@ Lưu ý: kết quả chỉ để gợi ý cho giao diện. Giữa lúc tra cứu
 
 ## 3. GIỚI HẠN ĐÃ BIẾT
 
-Các giới hạn hiện biết (tham số sai kiểu trả 500 thay vì 400, trùng domain đồng thời, các API chưa có) được ghi ở mục [Phụ thuộc người khác](2026-10-06-tenant-crud-implementation-guide.md#5-phụ-thuộc-người-khác) của kế hoạch.
+UUID/query sai kiểu đã trả 400. Xung đột UNIQUE tại bước ghi hiện trả 500, chờ phối hợp người phụ trách module chung (Phụ lục B). Các hạng mục còn mở khác xem mục 6 của DD.
+
+Phụ thuộc xử lý lỗi UNIQUE được ghi ở Phụ lục B. Cấu hình vận hành, quota, gỡ/đổi chủ và audit dạng bảng nằm ngoài 9 API hiện tại.
 
 ---
 
@@ -796,6 +751,8 @@ Ví dụ lỗi:
 
 ### B. Mã lỗi dùng chung
 
+**Xung đột ghi đồng thời:** lỗi UNIQUE ở bước ghi hiện trả 500 `ERR_500`, giao dịch vẫn rollback; ánh xạ 409 chờ người phụ trách module chung. Chi tiết ở [Thiết kế chi tiết, mục 4](2026-10-19-tenant-detail-design.md).
+
 | HTTP | `error.code` | Khi nào | Ghi chú |
 | :-: | :--- | :--- | :--- |
 | 401 | `AUTH_UNAUTHORIZED` | Không có token, token sai hoặc hết hạn | Thông báo: "Bạn cần đăng nhập để thực hiện tác vụ này hoặc Token đã hết hạn !" |
@@ -806,7 +763,7 @@ Ví dụ lỗi:
 | 404 | `ERR_404` | Không tìm thấy nhà xe | Thông báo: "Không tìm thấy nhà xe !" |
 | 409 | `TENANT_DOMAIN_ALREADY_EXISTS` | Domain đã có nhà xe khác dùng | Thông báo: "Domain đã được sử dụng" |
 | 409 | `TENANT_ADMIN_ALREADY_ASSIGNED` | Người này đã là chủ của nhà xe này | |
-| 500 | `ERR_500` | Lỗi hệ thống | Cũng là kết quả của tham số đường dẫn hoặc query sai kiểu. Xem "Lỗi đã biết" ở cuối |
+| 500 | `ERR_500` | Lỗi hệ thống hoặc vi phạm ràng buộc DB tại bước ghi, gồm UNIQUE khi request đồng thời | Tham số đường dẫn/query sai kiểu vẫn trả 400 |
 
 > **Thứ tự kiểm tra:** Spring kiểm tra **định dạng body** (`VALIDATION_ERROR`) **trước** khi kiểm tra quyền. Người không có quyền gửi body sai sẽ nhận 400 chứ chưa phải 403.
 

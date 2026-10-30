@@ -1,10 +1,12 @@
 # KẾ HOẠCH LÀM MODULE TENANT
 
-> **Ngày:** 06/10/2026
+> **Ngày:** 06/10/2026 · **Cập nhật đối chiếu code:** 30/10/2026
 > **Thiết kế chi tiết đi kèm:** [Thiết kế chi tiết module tenant](2026-10-19-tenant-detail-design.md) (API, trường dữ liệu, mã lỗi, sequence diagram)
 > **File này trả lời:** làm theo thứ tự nào, mỗi bước suy ra từ đâu, viết những file gì.
 
 ---
+
+> **Nguồn chuẩn:** hợp đồng API và quy tắc nghiệp vụ theo [Thiết kế chi tiết](2026-10-19-tenant-detail-design.md); khi các tài liệu khác nhau thì theo file đó.
 
 ## 0. CÁCH SUY LUẬN
 
@@ -34,10 +36,11 @@ Mỗi mục trả lời một câu hỏi. Mục sau dựa trên kết quả mụ
 
 **Phạm vi:** 9 API dưới `/api/v1/tenants`, chỉ Super Admin gọi được.
 **Ngoài phạm vi:** sửa cấu hình vận hành (chủ nhà xe tự làm), quản lý nhân viên, đổi vai trò thành viên.
+Cấu hình vận hành do chủ nhà xe chỉnh, quota theo gói, gỡ/đổi chủ và audit dạng bảng không thuộc 9 API hiện tại; cần thiết kế riêng trước khi triển khai.
 
 **Ràng buộc:**
 - Không đổi schema DB; dùng các bảng sẵn có từ migration V1–V7.
-- Không sửa module của người khác (account, auth); chỉ dùng lại entity và repository của họ.
+- Không sửa module account/auth hoặc phần exception dùng chung (`GlobalExceptionHandler`, `ErrorCode`); chỉ dùng lại các thành phần sẵn có. Thay đổi phần chung cần phối hợp với người phụ trách riêng.
 - Theo quy ước dự án: service gồm interface + Impl, lỗi nghiệp vụ dùng `AppException` + `ErrorCode`, phản hồi bọc `ApiResponse`.
 
 ---
@@ -127,13 +130,15 @@ Mỗi mục trả lời một câu hỏi. Mục sau dựa trên kết quả mụ
 | :--- | :--- |
 | Bắt buộc, độ dài, định dạng email | DTO: `@NotBlank`, `@Size`, `@Email` |
 | Domain chữ thường, số, `.` và `-` | DTO: `@Pattern` (nên Service nhận domain đã đúng dạng, không cần chuẩn hóa) |
-| Danh sách chủ có 1–10 phần tử | DTO: `@NotEmpty` + `@Size(max = 10)` + `@Valid` cho từng phần tử. Giới hạn trên vì mỗi chủ tốn truy vấn và một lần băm mật khẩu. Frontend khóa nút thêm khi đủ 10 dòng |
+| Danh sách chủ có 1–10 phần tử | DTO: `@NotEmpty` + `@Size(max = 10)` + `@Valid`; từng phần tử có `@NotNull`. Giới hạn trên vì mỗi chủ tốn truy vấn và một lần băm mật khẩu. Frontend khóa nút thêm khi đủ 10 dòng |
 | Mật khẩu 8–72 ký tự, có chữ và số | DTO: `@Pattern` |
 | Domain trùng (R1) | Service |
 | Email lặp trong danh sách (R3) | Service |
 | Họ tên, mật khẩu bắt buộc khi email mới (R4) | Service, vì phụ thuộc email đã có tài khoản chưa |
 | R5 | Service |
 | `settings` là JSON hợp lệ | Service |
+
+**Tài khoản có sẵn:** chỉ cần `email`; `fullName`/`password` không dùng để đổi tài khoản, nhưng nếu gửi thì vẫn qua validation DTO (mật khẩu rỗng hoặc yếu vẫn trả 400 `VALIDATION_ERROR`). Chi tiết ở [Thiết kế chi tiết, API 1](2026-10-19-tenant-detail-design.md).
 
 Service vẫn **chuẩn hóa email** (bỏ khoảng trắng, chữ thường), vì `@Email` chấp nhận chữ hoa.
 
@@ -186,7 +191,7 @@ record ValidatedAdmin(String email, String fullName, String password, User exist
 | 3 | Gọi `findRejection(tenant, user, adminRoleId)`: **cùng hàm** với API 1, 8 |
 | 4 | Có lý do thì `canBeAdmin = false`, `reason` là thông báo của lý do đó |
 
-Dùng chung một hàm nên lý do luôn khớp lỗi thật (R9).
+Dùng chung một hàm nên lý do từ chối nghiệp vụ khớp API 1, 8 (R9). Đây là kiểm tra tại thời điểm gọi, không giữ chỗ email và không thay thế validation/kiểm tra lại khi ghi.
 
 ### 5.4 Các API còn lại
 - **2:** Controller dựng `PageRequest` (page ≥ 0, size 1–100, `createdAt` giảm dần); Service đổi từ khóa thành `%từ khóa%` chữ thường; Repository nhận `Pageable` nên Spring Data tự sinh `LIMIT/OFFSET` và câu `COUNT`.
@@ -355,6 +360,8 @@ Chi tiết mã lỗi và thông báo ở [thiết kế chi tiết, mục 3.1 và
 
 ---
 
+**Xung đột ghi đồng thời:** lỗi UNIQUE ở bước ghi hiện trả 500 `ERR_500`, giao dịch vẫn rollback; ánh xạ 409 chờ người phụ trách module chung. Chi tiết ở [Thiết kế chi tiết, mục 4](2026-10-19-tenant-detail-design.md).
+
 ## 9. TRANSACTION
 
 - Hai service gắn `@Transactional` cấp lớp; hàm chỉ đọc gắn `@Transactional(readOnly = true)`.
@@ -376,7 +383,7 @@ Chi tiết mã lỗi và thông báo ở [thiết kế chi tiết, mục 3.1 và
 | 4 | Repository theo bảng mục 6 | Service cần chúng | Test repository với DB thật: `search`, `findAdmins`, ba câu INSERT vai trò |
 | 5 | `TenantAdminService` + Impl | `TenantService` phụ thuộc vào nó | Unit test (Mockito): `findRejection`, `validateAdminRequests`, `addAdminsToTenant`, API 7–9 |
 | 6 | `TenantService` + Impl | | Unit test: API 1–6 |
-| 7 | `TenantController` | Lớp ngoài cùng | Test tích hợp gọi API thật (MockMvc + DB) |
+| 7 | `TenantController` | Lớp ngoài cùng | Test tích hợp HTTP thật + PostgreSQL Testcontainers |
 | 8 | Chạy thử bằng Swagger với tài khoản Super Admin và tài khoản thường | | Đi qua 9 API, kiểm tra dữ liệu trong DB |
 | 9 | Cập nhật README nếu có thay đổi cách chạy | | |
 
@@ -403,11 +410,11 @@ Chi tiết mã lỗi và thông báo ở [thiết kế chi tiết, mục 3.1 và
 
 | API | Ca cần có |
 | :-: | :--- |
-| 1 | Thành công với email mới và email có sẵn; DB có đủ 1 nhà xe, 1 cấu hình, 3 vai trò, 22 quyền; trùng domain 409; email lặp; email mới thiếu họ tên hoặc mật khẩu; một chủ không hợp lệ thì **không ghi gì** (R6) |
+| 1 | Thành công với email mới và email có sẵn; DB có đủ 1 nhà xe, 1 cấu hình, 3 vai trò và đúng tập quyền (22 liên kết với seed hiện tại); trùng domain 409; email lặp; email mới thiếu họ tên hoặc mật khẩu; một chủ không hợp lệ thì **không ghi gì** (R6) |
 | 2 | Tìm theo tên, theo domain, không phân biệt hoa thường; lọc trạng thái; `size` ngoài 1–100 bị kẹp |
 | 3 | Có; không có (404) |
 | 4 | Trường tùy chọn null giữ nguyên, rỗng thì xóa; đổi domain trùng nhà xe khác 409; giữ domain cũ không báo trùng |
-| 5, 6 | Đổi trạng thái; gọi lặp vẫn thành công; xóa hai lần vẫn thành công |
+| 5, 6 | Chặn request mang access token của tenant vừa khóa; đổi trạng thái; gọi lặp vẫn thành công; xóa hai lần vẫn thành công |
 | 7 | Chỉ có chủ, không có STAFF hay SALE; sắp theo ngày tham gia |
 | 8 | Các lý do của 11.1 qua API; nhà xe không tồn tại 404 |
 | 9 | Email mới; email có sẵn; mỗi lý do trả đúng câu thông báo như API 8 |
@@ -415,11 +422,25 @@ Chi tiết mã lỗi và thông báo ở [thiết kế chi tiết, mục 3.1 và
 
 ---
 
+### Kiểm thử bổ sung khi hoàn thiện module
+
+| Nhóm | Ca kiểm thử và kết quả |
+| :--- | :--- |
+| Null/biên | `admins: [null]` → 400 `VALIDATION_ERROR`, field `admins[0]`; DTO chấp nhận 1 và 10 phần tử, từ chối 0 và 11 |
+| Định dạng | UUID sai ở đường dẫn, `isActive/page/size=abc` → 400 `ERR_400`; email có sẵn gửi mật khẩu yếu → 400 `VALIDATION_ERROR` |
+| Kiểm tra email | Email mới nhưng tenant bị khóa → `accountExists=false`, `canBeAdmin=false` |
+| Đồng thời (chờ phối hợp) | Khi module chung bổ sung ánh xạ lỗi, thêm test hai request cùng qua bước kiểm tra rồi va chạm UNIQUE; xác nhận 409 và rollback. Chưa triển khai ca này trong lượt hoàn thiện Tenant |
+| Rollback sau ghi | Gây lỗi CHECK khi ghi chủ thứ hai, sau validation: không còn nhà xe/cấu hình/vai trò/quyền/liên kết/tài khoản vừa tạo |
+| Khóa tenant | Đăng nhập lấy access token → khóa tenant → request mang token cũ bị filter từ chối 403 `AUTH_FORBIDDEN` |
+| Quyền mặc định | So tập mã quyền: chủ nhận toàn bộ danh mục hiện tại, STAFF/SALE đúng tập được chỉ định; không chỉ đếm 11/22 |
+
+Test tích hợp dùng PostgreSQL Testcontainers, không dùng DB dev. Đã kiểm tra rollback sau lỗi CHECK ở bước ghi; ánh xạ lỗi UNIQUE và test tranh chấp tương ứng chờ phối hợp module chung.
+
 ## 12. VIỆC CẦN NHÓM QUYẾT ĐỊNH
 
 | Việc | Ghi chú |
 | :--- | :--- |
-| Hai yêu cầu đồng thời cùng domain hoặc email trả 500 | Đề xuất bắt `DataIntegrityViolationException` trả 409 trong `GlobalExceptionHandler` (dùng chung cả dự án) |
+| Hai yêu cầu đồng thời cùng domain/email/thành viên | Hiện DB chặn nhưng lỗi tại bước ghi trả 500; đề xuất ánh xạ 409 cần người phụ trách module chung xử lý, ngoài phạm vi Tenant |
 | Chống ghi đè khi hai người cùng sửa | Thêm `@Version`, cần migration |
 | Giữ trường `settings` không | Giao diện chưa dùng |
 | Giữ cả API 5 và API 6 không | Cùng một việc |

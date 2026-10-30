@@ -18,7 +18,7 @@ import {
 
 export const TENANTS_API = '/api/v1/tenants';
 
-/** Gọi 8 API quản lý nhà xe. Mọi hàm trả về `data` đã bóc khỏi `ApiResponse`. */
+/** Gọi 9 API quản lý nhà xe. Mọi hàm trả về `data` đã bóc khỏi `ApiResponse`. */
 @Injectable({ providedIn: 'root' })
 export class TenantService {
   private readonly http = inject(HttpClient);

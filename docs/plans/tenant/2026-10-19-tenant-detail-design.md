@@ -1,6 +1,6 @@
 # THIẾT KẾ CHI TIẾT: MODULE TENANT
 
-> **Phiên bản:** 1.0 · **Ngày:** 19/10/2026 · **Trạng thái:** Chờ duyệt
+> **Phiên bản:** 1.1 · **Ngày:** 19/10/2026 · **Đối chiếu code:** 30/10/2026 · **Trạng thái:** Đã triển khai, cập nhật sau review
 > **Kế hoạch triển khai:** [2026-10-06-tenant-implementation-plan.md](2026-10-06-tenant-implementation-plan.md)
 
 ---
@@ -9,6 +9,7 @@
 
 **Mục đích:** Super Admin tạo và quản lý nhà xe (tenant) cùng chủ nhà xe (TENANT_ADMIN).
 **Ngoài phạm vi:** cấu hình vận hành `tenant_configs` (chủ nhà xe tự sửa), quản lý nhân viên, đổi vai trò thành viên.
+Cấu hình vận hành do chủ nhà xe chỉnh, quota theo gói, gỡ/đổi chủ và audit dạng bảng không thuộc 9 API hiện tại; cần thiết kế riêng trước khi triển khai.
 
 | # | API | Method | Đường dẫn | Thành công |
 | :-: | :--- | :-: | :--- | :-: |
@@ -53,7 +54,7 @@ Không thay đổi schema.
 
 **Dữ liệu khởi tạo khi tạo nhà xe (API 1):**
 - `tenant_configs`: giữ chỗ 30 phút, phí trễ 100.000 đ/giờ, hoa hồng 5,00%.
-- `roles` + `role_permissions`: TENANT_ADMIN (toàn bộ 11 quyền), STAFF (7 quyền), SALE (4 quyền), tổng 22 dòng.
+- `roles` + `role_permissions`: TENANT_ADMIN (toàn bộ danh mục quyền hiện tại), STAFF (7 quyền), SALE (4 quyền). Với seed V5 hiện tại: 11 + 7 + 4 = 22 liên kết; 11/22 không phải hạn mức cố định.
 
 **Bảng bị ghi theo API:**
 
@@ -95,6 +96,8 @@ flowchart LR
 
 **Giao dịch:** hai service gắn `@Transactional` cấp lớp, hàm chỉ đọc dùng `readOnly = true`. API 1 gọi sang `TenantAdminService` trong cùng giao dịch, lỗi ở bất kỳ bước nào thì rollback toàn bộ.
 
+**Tài khoản có sẵn:** chỉ cần gửi `email`. `fullName`/`password` có thể không gửi hoặc `null`; nếu gửi giá trị thì vẫn phải qua validation DTO (tên ≤255, mật khẩu 8–72 ký tự có chữ và số). Sau validation, Service chỉ liên kết, không đổi họ tên/mật khẩu của tài khoản. Chuỗi mật khẩu rỗng hoặc yếu vẫn trả 400 `VALIDATION_ERROR`, kể cả email đã tồn tại.
+
 ### 3.1 `AdminRejection`: lý do không thể làm chủ (R5)
 
 Kiểm tra theo thứ tự dưới, gặp lý do đầu tiên thì dừng. API 1, 8 ném lỗi; API 9 trả lý do trong `reason`.
@@ -133,6 +136,8 @@ Lý do 1, 4, 5 chỉ xét khi có nhà xe (API 8, API 9 có `tenantId`). Khi t�
 | 401 | `AUTH_UNAUTHORIZED` | Không có token, token sai hoặc hết hạn |
 | 403 | `AUTH_FORBIDDEN` | Không phải Super Admin |
 | 404 | `ERR_404` | Không có nhà xe (mọi API có `tenantId`): "Không tìm thấy nhà xe !" |
+
+**Xung đột ghi đồng thời — phụ thuộc module chung:** hai request có thể cùng qua bước kiểm tra rồi va chạm UNIQUE của DB. Giao dịch thất bại được rollback, nhưng hiện lỗi tại bước ghi trả 500 `ERR_500`. Trùng domain hoặc trùng chủ được Service phát hiện trước khi ghi vẫn trả 409 như đặc tả. Không sửa `GlobalExceptionHandler` hoặc `ErrorCode` trong phạm vi Tenant vì thuộc phần của người khác. Việc ánh xạ lỗi DB sang 409 cần phối hợp với người phụ trách module chung trước khi triển khai; không cam kết 409 cho tranh chấp tại bước ghi ở phiên bản hiện tại.
 
 **Kiểu dữ liệu:** `uuid`; `instant` (ISO-8601, UTC); `PlanTier` = `FREE` \| `BASIC` \| `PRO` \| `ENTERPRISE`.
 
@@ -209,10 +214,10 @@ sequenceDiagram
 | `contactEmail` | string | Không | Định dạng email |
 | `contactPhone` | string | Không | ≤ 20 |
 | `settings` | string | Không | JSON hợp lệ; trống thì `"{}"` |
-| `admins` | array | Có | 1–10 phần tử |
+| `admins` | array | Có | 1–10 phần tử, mỗi phần tử là object không null |
 | `admins[].email` | string | Có | Định dạng email, ≤ 255 |
-| `admins[].fullName` | string | Khi email mới | ≤ 255; bỏ qua nếu email có sẵn |
-| `admins[].password` | string | Khi email mới | 8–72 ký tự, có chữ và số; bỏ qua nếu email có sẵn |
+| `admins[].fullName` | string | Khi email mới | ≤ 255 nếu gửi; không cập nhật tài khoản có sẵn |
+| `admins[].password` | string | Khi email mới | 8–72 ký tự, có chữ và số nếu gửi; không cập nhật tài khoản có sẵn |
 
 ```json
 {
@@ -332,7 +337,7 @@ sequenceDiagram
 
 - API 5: body `{ "isActive": boolean }` (bắt buộc). Trả Tenant; thông báo "Khóa nhà xe thành công !" hoặc "Mở khóa nhà xe thành công !".
 - API 6: không có body. Gọi API 5 với `isActive = false`, không trả `data`; thông báo "Đã khóa nhà xe (xóa mềm) thành công !".
-- Nhà xe bị khóa: thành viên không chọn được nhà xe khi đăng nhập, không thêm được chủ mới.
+- Nhà xe bị khóa: thành viên không đăng nhập/chọn được nhà xe, không thêm được chủ mới. Request mới mang access token của tenant bị khóa cũng bị `CustomUserDetailsServiceImpl` từ chối 403 `AUTH_FORBIDDEN`, kể cả token chưa hết hạn. Không hủy ngược request đã qua filter trước thời điểm khóa; không ảnh hưởng token của nhà xe khác hoặc Super Admin.
 
 ```mermaid
 sequenceDiagram
@@ -401,7 +406,7 @@ sequenceDiagram
 
 ### API 9. Kiểm tra email: `POST /api/v1/tenants/admin-email-check` → 200
 
-Chỉ đọc. Giao diện gọi trước khi gửi API 1 hoặc 8 để biết có cần nhập họ tên, mật khẩu không. Dùng POST để email nằm trong body, không lộ vào log đường dẫn.
+Chỉ đọc. Kết quả phản ánh thời điểm gọi, không giữ chỗ email; API 1/8 vẫn validation và kiểm tra lại khi ghi. Giao diện gọi trước khi gửi API 1 hoặc 8 để biết có cần nhập họ tên, mật khẩu không. Dùng POST để email nằm trong body, không lộ vào log đường dẫn.
 
 | Trường | Kiểu | Bắt buộc | Ghi chú |
 | :--- | :--- | :-: | :--- |
@@ -413,7 +418,7 @@ Chỉ đọc. Giao diện gọi trước khi gửi API 1 hoặc 8 để biết c
 | `email` | string | Đã chuẩn hóa |
 | `accountExists` | boolean | Email đã có tài khoản |
 | `fullName` | string \| null | Họ tên tài khoản có sẵn |
-| `canBeAdmin` | boolean | Email mới thì `true` |
+| `canBeAdmin` | boolean | `true` khi không gặp lý do từ chối ở bảng 3.1; email mới kèm tenant bị khóa vẫn là `false` |
 | `reason` | string \| null | Thông báo theo bảng 3.1 khi `canBeAdmin = false` |
 
 **Lỗi riêng:** 500 `ERR_500` khi có `tenantId` mà nhà xe thiếu vai trò TENANT_ADMIN.
@@ -443,7 +448,7 @@ sequenceDiagram
 
 | # | Vấn đề | Hiện trạng | Đề xuất |
 | :-: | :--- | :--- | :--- |
-| 1 | Hai yêu cầu đồng thời cùng domain hoặc cùng email | DB chặn bằng UNIQUE nhưng trả 500 | Bắt `DataIntegrityViolationException` trong `GlobalExceptionHandler` trả 409 |
+| 1 | Hai yêu cầu đồng thời trùng domain/email/thành viên | UNIQUE chặn dữ liệu trùng, rollback giao dịch; lỗi tại bước ghi hiện trả 500 | Phối hợp người phụ trách module chung về ánh xạ 409; không sửa exception chung trong module Tenant |
 | 2 | Hai người cùng sửa một nhà xe | Người ghi sau ghi đè | Thêm `@Version` (cần migration) |
 | 3 | `settings` | Giao diện đã bỏ ô nhập, backend vẫn nhận | Giữ cho sau này hay bỏ khỏi API? |
 | 4 | API 5 (`isActive=false`) và API 6 làm cùng một việc | Giữ cả hai | Giữ `DELETE` cho đúng REST, hay bỏ? |

@@ -116,6 +116,35 @@ class TenantAdminIntegrationTest extends ApiIntegrationTestSupport {
   }
 
   @Test
+  void should_validate_supplied_password_even_when_account_already_exists() throws Exception {
+    String token = this.superAdminToken();
+    String suffix = this.newSuffix();
+    this.createTenant(token, suffix);
+    String tenantId = this.createTenantAndGetId(token, this.newSuffix());
+
+    ApiResult result = this.addAdmin(token, tenantId, Map.of("email", this.ownerEmail(suffix), "password", "x"));
+
+    assertThat(result.status()).isEqualTo(400);
+    assertThat(result.json().at("/error/code").asText()).isEqualTo("VALIDATION_ERROR");
+    assertThat(result.json().at("/data").has("password")).isTrue();
+    assertThat(this.count("SELECT count(*) FROM user_tenants WHERE tenant_id = ?::uuid", tenantId)).isEqualTo(1);
+  }
+
+  @Test
+  void should_refuse_a_new_email_when_checking_for_a_locked_tenant() throws Exception {
+    String token = this.superAdminToken();
+    String tenantId = this.createTenantAndGetId(token, this.newSuffix());
+    this.send("PATCH", "/api/v1/tenants/" + tenantId + "/status", token, "{\"isActive\":false}");
+
+    ApiResult result = this.checkAdminEmail(token, "new-" + this.newSuffix() + "@integration.test", tenantId);
+
+    assertThat(result.status()).isEqualTo(200);
+    assertThat(result.json().at("/data/accountExists").asBoolean()).isFalse();
+    assertThat(result.json().at("/data/canBeAdmin").asBoolean()).isFalse();
+    assertThat(result.json().at("/data/reason").asText()).isEqualTo("Nhà xe đang bị khóa, không thể thêm chủ nhà xe !");
+  }
+
+  @Test
   void should_report_new_account_when_checking_an_unknown_email() throws Exception {
     String token = this.superAdminToken();
 

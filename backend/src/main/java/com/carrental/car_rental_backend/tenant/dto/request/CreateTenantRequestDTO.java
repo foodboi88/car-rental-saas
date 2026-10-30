@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -51,5 +52,5 @@ public class CreateTenantRequestDTO {
   @NotEmpty(message = "Cần ít nhất một chủ nhà xe")
   @Size(max = MAX_ADMINS_PER_REQUEST, message = "Tối đa {max} chủ nhà xe mỗi lần tạo")
   @Valid // Bắt buộc có, nếu thiếu thì Spring không kiểm tra từng phần tử bên trong
-  private List<AdminAssignmentRequestDTO> admins;
+  private List<@NotNull(message = "Thông tin chủ nhà xe không được trống") AdminAssignmentRequestDTO> admins;
 }
