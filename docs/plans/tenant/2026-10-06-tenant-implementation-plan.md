@@ -131,7 +131,8 @@ Cấu hình vận hành do chủ nhà xe chỉnh, quota theo gói, gỡ/đổi c
 | Bắt buộc, độ dài, định dạng email | DTO: `@NotBlank`, `@Size`, `@Email` |
 | Domain chữ thường, số, `.` và `-` | DTO: `@Pattern` (nên Service nhận domain đã đúng dạng, không cần chuẩn hóa) |
 | Danh sách chủ có 1–10 phần tử | DTO: `@NotEmpty` + `@Size(max = 10)` + `@Valid`; từng phần tử có `@NotNull`. Giới hạn trên vì mỗi chủ tốn truy vấn và một lần băm mật khẩu. Frontend khóa nút thêm khi đủ 10 dòng |
-| Mật khẩu 8–72 ký tự, có chữ và số | DTO: `@Pattern` |
+| Mật khẩu 8–72 ký tự, có chữ và số, tối đa 72 byte UTF-8 | DTO: `@Pattern` + `@MaxUtf8Bytes(72)`; trả 400 `VALIDATION_ERROR` theo trường mật khẩu |
+| Email liên hệ tối đa 255 ký tự | DTO tạo/sửa: `@Email` + `@Size(max = 255)`, khớp cột DB |
 | Domain trùng (R1) | Service |
 | Email lặp trong danh sách (R3) | Service |
 | Họ tên, mật khẩu bắt buộc khi email mới (R4) | Service, vì phụ thuộc email đã có tài khoản chưa |
@@ -141,6 +142,10 @@ Cấu hình vận hành do chủ nhà xe chỉnh, quota theo gói, gỡ/đổi c
 **Tài khoản có sẵn:** chỉ cần `email`; `fullName`/`password` không dùng để đổi tài khoản, nhưng nếu gửi thì vẫn qua validation DTO (mật khẩu rỗng hoặc yếu vẫn trả 400 `VALIDATION_ERROR`). Chi tiết ở [Thiết kế chi tiết, API 1](2026-10-19-tenant-detail-design.md).
 
 Service vẫn **chuẩn hóa email** (bỏ khoảng trắng, chữ thường), vì `@Email` chấp nhận chữ hoa.
+
+`@MaxUtf8Bytes` và `MaxUtf8BytesValidator` nằm trong `tenant/validation`: annotation khai báo giới hạn, validator đo `value.getBytes(StandardCharsets.UTF_8).length`. `null` được chấp nhận vì Service chỉ bắt buộc mật khẩu cho tài khoản mới. Ký tự tiếng Việt có thể chiếm nhiều byte nên không dùng riêng giới hạn số ký tự để bảo vệ BCrypt.
+
+`AdminAssignmentRequestDTO.password` có `@ToString.Exclude` của **Lombok**, để `toString()` của DTO và request chứa DTO không in mật khẩu. Annotation `ToStringExclude` của Apache Commons không điều khiển mã do Lombok sinh. Không log body thô hoặc `ValidatedAdmin` chứa mật khẩu.
 
 ---
 
@@ -152,10 +157,11 @@ Service vẫn **chuẩn hóa email** (bỏ khoảng trắng, chữ thường), v
 | :-: | :--- | :--- | :--- | :--- |
 | 1 | `TenantController.createTenant` | JSON, token | `@Valid`; lấy id người gọi từ `UserPrincipal` | `request`, `actorId` |
 | 2 | `TenantServiceImpl.createTenant` | `request` | Kiểm tra domain (R1), `settings` | |
-| 3 | `TenantAdminService.validateAdminRequests` | danh sách chủ, `tenant = null` | Từng chủ: chuẩn hóa email, R3, R4, R5. **Chưa ghi** (R6) | `List<ValidatedAdmin>` |
+| 3 | `TenantAdminService.validateAdminsForNewTenant` | danh sách chủ | Gọi bước kiểm tra dùng chung trong ngữ cảnh nhà xe chưa được tạo: chuẩn hóa email, R3, R4, R5. **Chưa ghi** (R6) | `List<ValidatedAdmin>` (`validatedAdmins`) |
 | 4 | `saveTenant` | `request` | Lưu nhà xe, gói mặc định FREE | `Tenant` (đã có id) |
 | 5 | `TenantConfig.withDefaults` | `tenantId` | Lưu cấu hình (R2) | |
-| 6 | `createDefaultRoles` | `tenantId` | Tạo 3 vai trò và quyền (R2) | id vai trò chủ |
+| 6 | `createDefaultRoles` | `tenantId` | Tạo 3 vai trò và quyền (R2); hàm chỉ ghi, trả `void` | |
+| 6a | `findAdminRoleOrThrow` | `tenantId` | Lấy vai trò TENANT_ADMIN vừa tạo | id vai trò chủ |
 | 7 | `TenantAdminService.addAdminsToTenant` | `tenantId`, id vai trò chủ, `List<ValidatedAdmin>` | Email mới thì tạo `User`; lưu `UserTenant` | `List<AdminAssignmentResponseDTO>` |
 | 8 | `TenantServiceImpl` | | Dựng `CreateTenantResponseDTO` | Controller trả 201 |
 
@@ -265,6 +271,9 @@ tenant/
 │   ├── TenantConfigRepository.java
 │   ├── TenantRoleRepository.java
 │   └── TenantUserTenantRepository.java
+├── validation/
+│   ├── MaxUtf8Bytes.java              annotation giới hạn số byte UTF-8 trên DTO
+│   └── MaxUtf8BytesValidator.java     đo byte; null để Service quyết định theo nghiệp vụ
 └── service/
     ├── TenantService.java            API 1–6: nhà xe
     ├── TenantAdminService.java       API 7–9: chủ nhà xe, và hai bước kiểm tra / ghi chủ dùng cho API 1
@@ -277,15 +286,18 @@ tenant/
 
 ### 7.2 Quy tắc đặt tên
 - Tên nói **nghiệp vụ**, không nói kỹ thuật. Tránh `prepare`, `process`, `handle`, `data`, `info`.
-- `check...`: kiểm tra, sai thì ném lỗi.
-- `find...`: tìm, có thể không thấy (`Optional`). `find...OrThrow`: không thấy thì 404.
+- `check...`: tên cần nói rõ mục đích; `checkDomainNotTaken` là guard ném lỗi, `checkAdminEmail` trả kết quả kiểm tra để giao diện hiển thị.
+- `find...`: tìm, có thể không thấy (`Optional`). `find...OrThrow`: không thấy thì ném lỗi phù hợp; tenant không có là 404, thiếu vai trò mặc định của tenant là lỗi dữ liệu nền 500.
 - `validate...`: kiểm tra một đầu vào và trả dạng đã kiểm tra.
 - `boolean`: `is...`, `has...`. Danh sách: danh từ số nhiều.
 
 | Hàm / kiểu chính | Nghĩa |
 | :--- | :--- |
 | `validateAdminRequests` / `validateAdminRequest` | Kiểm tra danh sách / một yêu cầu thêm chủ |
+| `validateAdminsForNewTenant` | Kiểm tra chủ khi nhà xe chưa được tạo; che chi tiết tham số ngữ cảnh null khỏi `createTenant` |
 | `ValidatedAdmin` | Một chủ đã qua kiểm tra |
+| `validatedAdmins` | Danh sách đã qua bước kiểm tra, phân biệt với `request.getAdmins()` |
+| `defaultRole` | Một vai trò khởi tạo trong enum `DefaultRole`, phân biệt với entity `Role` |
 | `emailsInRequest` | Các email đã gặp trong lần gửi này (phát hiện R3) |
 | `addAdminsToTenant` | Ghi chủ vào nhà xe |
 | `findRejection` | Lý do người này không làm chủ được (nếu có) |
@@ -330,17 +342,21 @@ private Optional<AdminRejection> findRejection(Tenant tenant, User user, UUID ad
 
 ```java
 public CreateTenantResponseDTO createTenant(CreateTenantRequestDTO request, UUID actorId) {
-  this.checkDomainNotTaken(request.getDomain());                                                             // R1
-  List<ValidatedAdmin> admins = this.tenantAdminService.validateAdminRequests(request.getAdmins(), null, null); // R3–R6
+  this.checkDomainNotTaken(request.getDomain());
+  String settings = this.normalizeSettings(request.getSettings());
+  List<ValidatedAdmin> validatedAdmins = this.tenantAdminService.validateAdminsForNewTenant(request.getAdmins());
 
-  Tenant tenant = this.saveTenant(request);
-  this.tenantConfigRepository.save(TenantConfig.withDefaults(tenant.getId()));                               // R2
-  UUID adminRoleId = this.createDefaultRoles(tenant.getId());                                                // R2
-  List<AdminAssignmentResponseDTO> results = this.tenantAdminService.addAdminsToTenant(tenant.getId(), adminRoleId, admins);
+  Tenant tenant = this.saveTenant(request, settings);
+  this.tenantConfigRepository.save(TenantConfig.withDefaults(tenant.getId()));
+  this.createDefaultRoles(tenant.getId());
+  UUID adminRoleId = this.findAdminRoleOrThrow(tenant.getId()).getId();
+  List<AdminAssignmentResponseDTO> results = this.tenantAdminService.addAdminsToTenant(tenant.getId(), adminRoleId, validatedAdmins);
 
   return CreateTenantResponseDTO.builder().tenant(this.toTenantResponse(tenant)).admins(results).build();
 }
 ```
+
+Các tên helper phản ánh việc thực hiện: `createDefaultRoles` tạo vai trò; `findAdminRoleOrThrow` lấy vai trò chủ; `trimToNull` cắt khoảng trắng và đổi chuỗi trắng thành null. Không đổi trách nhiệm của Controller, Service hoặc Repository khi làm rõ tên.
 
 ---
 
@@ -390,6 +406,8 @@ Chi tiết mã lỗi và thông báo ở [thiết kế chi tiết, mục 3.1 và
 ---
 
 ## 11. KIỂM THỬ
+
+Ca bổ sung cho validation: mật khẩu Unicode đúng 72 byte được tạo tài khoản và đăng nhập; 73 byte và trường hợp dưới 72 ký tự nhưng vượt 72 byte bị chặn 400 trước khi ghi qua API 1/8. Test `toString()` của chủ và request tạo nhà xe không chứa mật khẩu. Email liên hệ 255 ký tự hợp lệ; 256 ký tự bị chặn ở cả tạo/sửa và không làm thay đổi dữ liệu.
 
 ### 11.1 `findRejection` (mỗi dòng một test)
 

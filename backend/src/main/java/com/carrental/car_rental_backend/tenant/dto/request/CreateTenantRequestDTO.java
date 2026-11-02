@@ -42,6 +42,7 @@ public class CreateTenantRequestDTO {
   private String logoUrl;
 
   @Email(message = "Email liên hệ không đúng định dạng")
+  @Size(max = 255, message = "Email liên hệ tối đa 255 ký tự")
   private String contactEmail;
 
   @Size(max = 20, message = "Số điện thoại tối đa 20 ký tự")

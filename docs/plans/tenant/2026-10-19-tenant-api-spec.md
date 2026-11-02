@@ -159,7 +159,7 @@ sequenceDiagram
     T-->>C: 409 TENANT_DOMAIN_ALREADY_EXISTS
   end
   T->>T: settings là JSON hợp lệ
-  T->>A: validateAdminRequests(admins, null, null) - mục 1.5
+  T->>A: validateAdminsForNewTenant(admins) - mục 1.5
   T->>R: TenantRepository.save(Tenant đang hoạt động)
   T->>R: TenantConfigRepository.save(TenantConfig.withDefaults)
   loop TENANT_ADMIN, STAFF, SALE
@@ -181,7 +181,7 @@ sequenceDiagram
 | `domain` | string | Có | Tối đa 255 ký tự; mẫu `^[a-z0-9]+([.-][a-z0-9]+)*$` (chữ thường, số, dấu chấm, gạch ngang; không bắt đầu hoặc kết thúc bằng dấu, không có hai dấu liền nhau) | Domain duy nhất toàn hệ thống |
 | `planTier` | PlanTier | Không | `FREE`, `BASIC`, `PRO`, `ENTERPRISE` | Gói dịch vụ. Thiếu thì mặc định `FREE` |
 | `logoUrl` | string | Không | Tối đa 500 ký tự | Địa chỉ logo |
-| `contactEmail` | string | Không | Đúng dạng email | Email liên hệ |
+| `contactEmail` | string | Không | Đúng dạng email, tối đa 255 ký tự | Email liên hệ |
 | `contactPhone` | string | Không | Tối đa 20 ký tự | Số điện thoại liên hệ |
 | `settings` | string | Không | Phải là JSON hợp lệ. Trống thì lưu `"{}"` | Cấu hình tự do, truyền dưới dạng **chuỗi** JSON |
 | `admins` | array | Có | Ít nhất 1 phần tử; email không trùng nhau (không phân biệt hoa thường) | Danh sách chủ nhà xe |
@@ -192,7 +192,7 @@ sequenceDiagram
 | :--- | :--- | :-: | :--- | :--- |
 | `email` | string | Có | Không rỗng, đúng dạng email, tối đa 255 ký tự | Email chủ nhà xe. Dùng để tìm tài khoản có sẵn |
 | `fullName` | string | **Có điều kiện** | Tối đa 255 ký tự | Bắt buộc **khi email chưa có tài khoản**. Không cập nhật tài khoản có sẵn; nếu gửi vẫn phải đúng định dạng |
-| `password` | string | **Có điều kiện** | 8 đến 72 ký tự, có ít nhất 1 chữ và 1 số | Bắt buộc **khi email chưa có tài khoản**. Không cập nhật tài khoản có sẵn; nếu gửi vẫn phải đúng định dạng |
+| `password` | string | **Có điều kiện** | 8 đến 72 ký tự, có ít nhất 1 chữ và 1 số, tối đa 72 byte UTF-8 | Bắt buộc **khi email chưa có tài khoản**. Không cập nhật tài khoản có sẵn; nếu gửi vẫn phải đúng định dạng |
 
 **Ví dụ yêu cầu** (một chủ mới, một chủ đã có tài khoản):
 ```json
@@ -393,7 +393,7 @@ sequenceDiagram
 | `domain` | string | Có | Như API 1 | Domain. Không đổi thì không kiểm tra trùng; đổi thì không được trùng nhà xe **khác** |
 | `planTier` | PlanTier | Có | `FREE`, `BASIC`, `PRO`, `ENTERPRISE` | Gói dịch vụ. Luôn ghi đè |
 | `logoUrl` | string | Không | Tối đa 500 ký tự | Xem quy tắc bên dưới |
-| `contactEmail` | string | Không | Đúng dạng email | Xem quy tắc bên dưới |
+| `contactEmail` | string | Không | Đúng dạng email, tối đa 255 ký tự | Xem quy tắc bên dưới |
 | `contactPhone` | string | Không | Tối đa 20 ký tự | Xem quy tắc bên dưới |
 | `settings` | string | Không | JSON hợp lệ | Xem quy tắc bên dưới |
 
@@ -603,7 +603,7 @@ sequenceDiagram
 | `tenantId` (đường dẫn) | uuid | Có | | Mã nhà xe |
 | `email` (body) | string | Có | Không rỗng, đúng dạng email, tối đa 255 ký tự | Email chủ nhà xe |
 | `fullName` (body) | string | **Có điều kiện** | Tối đa 255 ký tự | Bắt buộc khi email chưa có tài khoản |
-| `password` (body) | string | **Có điều kiện** | 8 đến 72 ký tự, có chữ và số | Bắt buộc khi email chưa có tài khoản |
+| `password` (body) | string | **Có điều kiện** | 8 đến 72 ký tự, có chữ và số, tối đa 72 byte UTF-8 | Bắt buộc khi email chưa có tài khoản |
 
 Ví dụ: `{ "email": "chu2@binhan.vn", "fullName": "Trần Thị Hai", "password": "Matkhau456" }`
 

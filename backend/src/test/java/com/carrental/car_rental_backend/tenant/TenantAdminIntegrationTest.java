@@ -12,6 +12,34 @@ import com.carrental.car_rental_backend.support.ApiIntegrationTestSupport;
 /** Thêm và xem chủ nhà xe của một nhà xe đã có. */
 class TenantAdminIntegrationTest extends ApiIntegrationTestSupport {
 
+  @Test
+  void should_reject_password_over_bcrypt_byte_limit_before_adding_admin() throws Exception {
+    String token = this.superAdminToken();
+    String tenantId = this.createTenantAndGetId(token, this.newSuffix());
+    String email = "unicode-" + this.newSuffix() + "@integration.test";
+
+    ApiResult result = this.addAdmin(token, tenantId, this.adminOf(email, "Chủ thử", "A1" + "ấ".repeat(30)));
+
+    assertThat(result.status()).isEqualTo(400);
+    assertThat(result.json().at("/error/code").asText()).isEqualTo("VALIDATION_ERROR");
+    assertThat(result.json().at("/data").has("password")).isTrue();
+    assertThat(this.count("SELECT count(*) FROM users WHERE email = ?", email)).isZero();
+    assertThat(this.count("SELECT count(*) FROM user_tenants WHERE tenant_id = ?::uuid", tenantId)).isEqualTo(1);
+  }
+
+  @Test
+  void should_create_and_authenticate_admin_with_unicode_password_at_72_bytes() throws Exception {
+    String token = this.superAdminToken();
+    String tenantId = this.createTenantAndGetId(token, this.newSuffix());
+    String email = "unicode-" + this.newSuffix() + "@integration.test";
+    String password = "A1" + "ấ".repeat(23) + "a";
+
+    ApiResult result = this.addAdmin(token, tenantId, this.adminOf(email, "Chủ thử", password));
+
+    assertThat(result.status()).isEqualTo(201);
+    assertThat(this.login(email, password).status()).isEqualTo(200);
+  }
+
   private ApiResult addAdmin(String token, String tenantId, Object body) throws Exception {
     return this.sendJson("POST", "/api/v1/tenants/" + tenantId + "/admins", token, body);
   }

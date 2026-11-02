@@ -16,6 +16,35 @@ import com.carrental.car_rental_backend.support.ApiIntegrationTestSupport;
 class TenantApiIntegrationTest extends ApiIntegrationTestSupport {
 
   @Test
+  void should_reject_password_over_bcrypt_byte_limit_before_creating_any_data() throws Exception {
+    String suffix = this.newSuffix();
+    Map<String, Object> request = this.tenantRequest(suffix);
+    request.put("admins", List.of(this.adminOf(this.ownerEmail(suffix), "Chủ thử", "A1" + "ấ".repeat(30))));
+
+    ApiResult result = this.createTenant(this.superAdminToken(), request);
+
+    assertThat(result.status()).isEqualTo(400);
+    assertThat(result.json().at("/error/code").asText()).isEqualTo("VALIDATION_ERROR");
+    assertThat(result.json().at("/data").has("admins[0].password")).isTrue();
+    assertThat(this.count("SELECT count(*) FROM tenants WHERE domain = ?", this.domainOf(suffix))).isZero();
+    assertThat(this.count("SELECT count(*) FROM users WHERE email = ?", this.ownerEmail(suffix))).isZero();
+  }
+
+  @Test
+  void should_reject_contact_email_longer_than_database_column_before_create() throws Exception {
+    String suffix = this.newSuffix();
+    Map<String, Object> request = this.tenantRequest(suffix);
+    request.put("contactEmail", "a".repeat(60) + "@" + "b".repeat(63) + "."
+      + "c".repeat(63) + "." + "d".repeat(63) + ".eeeee");
+
+    ApiResult result = this.createTenant(this.superAdminToken(), request);
+
+    assertThat(result.status()).isEqualTo(400);
+    assertThat(result.json().at("/data").has("contactEmail")).isTrue();
+    assertThat(this.count("SELECT count(*) FROM tenants WHERE domain = ?", this.domainOf(suffix))).isZero();
+  }
+
+  @Test
   void should_return_401_when_calling_tenants_without_token() throws Exception {
     ApiResult result = this.send("GET", "/api/v1/tenants", null, null);
 

@@ -1,5 +1,7 @@
 package com.carrental.car_rental_backend.tenant.dto.request;
 
+import com.carrental.car_rental_backend.tenant.validation.MaxUtf8Bytes;
+
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -8,6 +10,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 @Data
 @Builder
@@ -28,5 +31,7 @@ public class AdminAssignmentRequestDTO {
     regexp = "^(?=.*[A-Za-z])(?=.*\\d).{8,72}$",
     message = "Mật khẩu ít nhất 8 ký tự, gồm chữ và số"
   )
+  @MaxUtf8Bytes(value = 72, message = "Mật khẩu tối đa {value} byte UTF-8")
+  @ToString.Exclude
   private String password;
 }

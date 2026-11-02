@@ -113,7 +113,7 @@ Mỗi giai đoạn dựa trên giai đoạn trước. **Làm từ trong ra:** en
 **Chú ý:**
 - DTO chỉ kiểm tra **định dạng** (không hỏi DB). Giới hạn `@Size` khớp độ rộng cột DB. Chi tiết từng trường xem [đặc tả](2026-10-19-tenant-api-spec.md).
 - `fullName` và `password` **không** đánh `@NotBlank`: chỉ bắt buộc khi email chưa có tài khoản, Service kiểm tra điều kiện này.
-- DTO hiện kiểm tra mật khẩu 8–72 ký tự, có chữ và số; Service dùng `PasswordEncoder` để băm.
+- DTO kiểm tra mật khẩu 8–72 ký tự, có chữ và số, đồng thời `@MaxUtf8Bytes(72)` chặn mật khẩu Unicode vượt giới hạn byte của BCrypt. Mật khẩu bị loại khỏi `toString()` bằng `@ToString.Exclude` của Lombok. Email liên hệ có `@Size(max = 255)` ở cả tạo và sửa. Service dùng `PasswordEncoder` để băm.
 - **Thiếu `@Valid` trên danh sách `admins`** thì Spring không kiểm tra từng phần tử. Thêm `@NotNull` cho kiểu phần tử để chặn `admins: [null]` với lỗi `admins[0]`.
 - `@NotBlank` chỉ cho `String`; enum, `Boolean`, `UUID` dùng `@NotNull`.
 - **Không trả mật khẩu**, kể cả bản băm, trong bất kỳ phản hồi nào.
@@ -168,7 +168,7 @@ Mỗi nhà xe mới sinh **3 dòng `roles`**. Với seed hiện tại có **11 +
 | `listTenantAdmins` | Nhà xe phải tồn tại; trả các thành viên có vai trò `TENANT_ADMIN`, xếp theo ngày tham gia |
 
 **`createTenant`: kiểm tra hết rồi mới ghi.**
-1. *Kiểm tra, chưa ghi gì:* domain (làm gọn, đã có người dùng thì 409); `settings` phải là JSON hợp lệ; **cả danh sách chủ** (ít nhất 1 người, email không trùng nhau, từng người qua `TenantAdminService.validateAdminRequests`).
+1. *Kiểm tra, chưa ghi gì:* domain (làm gọn, đã có người dùng thì 409); `settings` phải là JSON hợp lệ; **cả danh sách chủ** qua `TenantAdminService.validateAdminsForNewTenant` (gọi bước `validateAdminRequests` dùng chung trong ngữ cảnh chưa có tenant).
 2. *Ghi, theo thứ tự:* lưu `Tenant` (`.isActive(true)`, gói mặc định `FREE`) → lưu `TenantConfig` (30, 100000, 5.00 truyền tường minh) → sinh 3 vai trò và tập quyền mặc định (22 liên kết với seed hiện tại) → lấy lại vai trò `TENANT_ADMIN` → gán từng chủ.
 3. Ghi log (người gọi, nhà xe, số chủ, **không log mật khẩu**) và trả `CreateTenantResponseDTO`.
 

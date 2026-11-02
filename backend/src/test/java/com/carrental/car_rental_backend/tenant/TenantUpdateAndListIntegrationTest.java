@@ -12,6 +12,23 @@ import com.carrental.car_rental_backend.support.ApiIntegrationTestSupport;
 /** Sửa nhà xe (PUT) và danh sách có tìm kiếm, lọc, phân trang. */
 class TenantUpdateAndListIntegrationTest extends ApiIntegrationTestSupport {
 
+  @Test
+  void should_reject_contact_email_longer_than_column_and_keep_existing_value() throws Exception {
+    String token = this.superAdminToken();
+    String suffix = this.newSuffix();
+    String tenantId = this.createTenantWithContact(token, suffix);
+    Map<String, Object> request = this.requiredFieldsOnly(suffix);
+    request.put("contactEmail", "a".repeat(60) + "@" + "b".repeat(63) + "."
+      + "c".repeat(63) + "." + "d".repeat(63) + ".eeeee");
+
+    ApiResult result = this.sendJson("PUT", "/api/v1/tenants/" + tenantId, token, request);
+
+    assertThat(result.status()).isEqualTo(400);
+    assertThat(result.json().at("/data").has("contactEmail")).isTrue();
+    assertThat(this.jdbcTemplate.queryForObject("SELECT contact_email FROM tenants WHERE id = ?::uuid",
+      String.class, tenantId)).isEqualTo("lienhe-" + suffix + "@integration.test");
+  }
+
   private Map<String, Object> requiredFieldsOnly(String suffix) {
     Map<String, Object> request = new HashMap<>();
     request.put("name", "Nhà xe đã sửa " + suffix);

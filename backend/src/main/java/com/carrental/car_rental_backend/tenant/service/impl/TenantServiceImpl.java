@@ -53,13 +53,14 @@ public class TenantServiceImpl implements TenantService {
     // Bước kiểm tra: domain, settings và toàn bộ chủ nhà xe
     this.checkDomainNotTaken(request.getDomain());
     String settings = this.normalizeSettings(request.getSettings());
-    List<ValidatedAdmin> admins = this.tenantAdminService.validateAdminRequests(request.getAdmins(), null, null);
+    List<ValidatedAdmin> validatedAdmins = this.tenantAdminService.validateAdminsForNewTenant(request.getAdmins());
 
     // Bước ghi: nhà xe -> cấu hình mặc định -> 3 vai trò -> chủ nhà xe
     Tenant tenant = this.saveTenant(request, settings);
     this.tenantConfigRepository.save(TenantConfig.withDefaults(tenant.getId()));
-    UUID adminRoleId = this.createDefaultRoles(tenant.getId());
-    List<AdminAssignmentResponseDTO> adminResults = this.tenantAdminService.addAdminsToTenant(tenant.getId(), adminRoleId, admins);
+    this.createDefaultRoles(tenant.getId());
+    UUID adminRoleId = this.findAdminRoleOrThrow(tenant.getId()).getId();
+    List<AdminAssignmentResponseDTO> adminResults = this.tenantAdminService.addAdminsToTenant(tenant.getId(), adminRoleId, validatedAdmins);
 
     log.info("Người dùng {} tạo nhà xe {} (id = {}) với {} chủ nhà xe", actorId, tenant.getName(), tenant.getId(), adminResults.size());
     return CreateTenantResponseDTO.builder()
@@ -103,13 +104,13 @@ public class TenantServiceImpl implements TenantService {
     tenant.setName(request.getName().trim());
     tenant.setPlanTier(request.getPlanTier());
     if (request.getLogoUrl() != null) {
-      tenant.setLogoUrl(this.blankToNull(request.getLogoUrl()));
+      tenant.setLogoUrl(this.trimToNull(request.getLogoUrl()));
     }
     if (request.getContactEmail() != null) {
-      tenant.setContactEmail(this.blankToNull(request.getContactEmail()));
+      tenant.setContactEmail(this.trimToNull(request.getContactEmail()));
     }
     if (request.getContactPhone() != null) {
-      tenant.setContactPhone(this.blankToNull(request.getContactPhone()));
+      tenant.setContactPhone(this.trimToNull(request.getContactPhone()));
     }
     if (request.getSettings() != null) {
       tenant.setSettings(this.normalizeSettings(request.getSettings()));
@@ -159,19 +160,18 @@ public class TenantServiceImpl implements TenantService {
     );
   }
 
-  private UUID createDefaultRoles(UUID tenantId) {
-    for (DefaultRole role : DefaultRole.values()) {
-      this.tenantRoleRepository.insertSystemRole(tenantId, role.getName(), role.getCode(), role.getDescription());
-      if (role.grantsAllPermissions()) {
-        this.tenantRoleRepository.grantAllPermissions(tenantId, role.getCode()); // TENANT_ADMIN
+  private void createDefaultRoles(UUID tenantId) {
+    for (DefaultRole defaultRole : DefaultRole.values()) {
+      this.tenantRoleRepository.insertSystemRole(tenantId, defaultRole.getName(), defaultRole.getCode(), defaultRole.getDescription());
+      if (defaultRole.grantsAllPermissions()) {
+        this.tenantRoleRepository.grantAllPermissions(tenantId, defaultRole.getCode()); // TENANT_ADMIN
       } else {
-        this.tenantRoleRepository.grantPermissions(tenantId, role.getCode(), role.getPermissionCodes()); // STAFF + SALE
+        this.tenantRoleRepository.grantPermissions(tenantId, defaultRole.getCode(), defaultRole.getPermissionCodes()); // STAFF + SALE
       }
     }
-    return this.findAdminRoleOrThrow(tenantId).getId();
   }
 
-  private String blankToNull(String value) {
+  private String trimToNull(String value) {
     return value.isBlank() ? null : value.trim();
   }
 

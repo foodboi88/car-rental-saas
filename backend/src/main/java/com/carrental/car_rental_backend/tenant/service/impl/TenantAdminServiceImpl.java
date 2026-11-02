@@ -77,6 +77,12 @@ public class TenantAdminServiceImpl implements TenantAdminService {
   }
 
   @Override
+  public List<ValidatedAdmin> validateAdminsForNewTenant(List<AdminAssignmentRequestDTO> requests) {
+    // Chưa tạo nhà xe nên chưa xét được trạng thái tenant hoặc vai trò thành viên trong tenant đó.
+    return this.validateAdminRequests(requests, null, null);
+  }
+
+  @Override
   public List<ValidatedAdmin> validateAdminRequests(List<AdminAssignmentRequestDTO> requests, Tenant tenant, UUID adminRoleId) {
     Set<String> emailsInRequest = new HashSet<>();
     List<ValidatedAdmin> validatedAdmins = new ArrayList<>();
@@ -111,9 +117,9 @@ public class TenantAdminServiceImpl implements TenantAdminService {
   }
 
   @Override 
-  public List<AdminAssignmentResponseDTO> addAdminsToTenant(UUID tenantId, UUID adminRoleId, List<ValidatedAdmin> admins) {
+  public List<AdminAssignmentResponseDTO> addAdminsToTenant(UUID tenantId, UUID adminRoleId, List<ValidatedAdmin> validatedAdmins) {
     List<AdminAssignmentResponseDTO> results = new ArrayList<>();
-    for (ValidatedAdmin admin : admins) {
+    for (ValidatedAdmin admin : validatedAdmins) {
       results.add(this.addAdminToTenant(tenantId, adminRoleId, admin));
     }
     return results;
@@ -124,8 +130,8 @@ public class TenantAdminServiceImpl implements TenantAdminService {
     Tenant tenant = this.findTenantOrThrow(tenantId);
     UUID adminRoleId = this.findAdminRoleOrThrow(tenantId).getId();
 
-    List<ValidatedAdmin> admins = this.validateAdminRequests(List.of(request), tenant, adminRoleId);
-    AdminAssignmentResponseDTO result = this.addAdminsToTenant(tenantId, adminRoleId, admins).get(0);
+    List<ValidatedAdmin> validatedAdmins = this.validateAdminRequests(List.of(request), tenant, adminRoleId);
+    AdminAssignmentResponseDTO result = this.addAdminsToTenant(tenantId, adminRoleId, validatedAdmins).get(0);
 
     log.info("Người dùng {} thêm chủ cho nhà xe {} (id = {}), tài khoản mới: {}", actorId, tenant.getName(), tenantId, result.isAccountCreated());
     return result;

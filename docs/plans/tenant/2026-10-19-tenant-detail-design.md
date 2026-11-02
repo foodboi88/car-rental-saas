@@ -96,7 +96,11 @@ flowchart LR
 
 **Giao dịch:** hai service gắn `@Transactional` cấp lớp, hàm chỉ đọc dùng `readOnly = true`. API 1 gọi sang `TenantAdminService` trong cùng giao dịch, lỗi ở bất kỳ bước nào thì rollback toàn bộ.
 
-**Tài khoản có sẵn:** chỉ cần gửi `email`. `fullName`/`password` có thể không gửi hoặc `null`; nếu gửi giá trị thì vẫn phải qua validation DTO (tên ≤255, mật khẩu 8–72 ký tự có chữ và số). Sau validation, Service chỉ liên kết, không đổi họ tên/mật khẩu của tài khoản. Chuỗi mật khẩu rỗng hoặc yếu vẫn trả 400 `VALIDATION_ERROR`, kể cả email đã tồn tại.
+**Tài khoản có sẵn:** chỉ cần gửi `email`. `fullName`/`password` có thể không gửi hoặc `null`; nếu gửi giá trị thì vẫn phải qua validation DTO (tên ≤255, mật khẩu 8–72 ký tự có chữ và số, tối đa 72 byte UTF-8). Sau validation, Service chỉ liên kết, không đổi họ tên/mật khẩu của tài khoản. Chuỗi mật khẩu rỗng, yếu hoặc vượt giới hạn byte vẫn trả 400 `VALIDATION_ERROR`, kể cả email đã tồn tại.
+
+**Validation và log mật khẩu:** `@MaxUtf8Bytes(72)` dùng validator trong `tenant/validation`, đo số byte UTF-8 trước khi gọi Service. `null` được bỏ qua ở validator; điều kiện mật khẩu bắt buộc cho email mới vẫn do Service kiểm tra. DTO dùng `@ToString.Exclude` của Lombok cho `password`, áp dụng cả khi DTO nằm trong `admins` của request tạo nhà xe. Đây là bảo vệ `toString()`, không thay thế việc tránh ghi body thô và dữ liệu validation nhạy cảm vào log. Không thay đổi exception dùng chung.
+
+**Luồng tạo dễ đọc:** `createTenant` gọi `validateAdminsForNewTenant(request.getAdmins())`; helper chuyển sang bước kiểm tra dùng chung với ngữ cảnh tenant/role chưa có. Danh sách đầu ra tên `validatedAdmins`. `createDefaultRoles` trả `void`; lấy `adminRoleId` bằng `findAdminRoleOrThrow` ở bước kế tiếp. Vòng lặp enum dùng tên `defaultRole`.
 
 ### 3.1 `AdminRejection`: lý do không thể làm chủ (R5)
 
@@ -211,13 +215,13 @@ sequenceDiagram
 | `domain` | string | Có | ≤ 255, mẫu `^[a-z0-9]+([.-][a-z0-9]+)*$` |
 | `planTier` | PlanTier | Không | Mặc định `FREE` |
 | `logoUrl` | string | Không | ≤ 500 |
-| `contactEmail` | string | Không | Định dạng email |
+| `contactEmail` | string | Không | Định dạng email, tối đa 255 ký tự (áp dụng cả API sửa) |
 | `contactPhone` | string | Không | ≤ 20 |
 | `settings` | string | Không | JSON hợp lệ; trống thì `"{}"` |
 | `admins` | array | Có | 1–10 phần tử, mỗi phần tử là object không null |
 | `admins[].email` | string | Có | Định dạng email, ≤ 255 |
 | `admins[].fullName` | string | Khi email mới | ≤ 255 nếu gửi; không cập nhật tài khoản có sẵn |
-| `admins[].password` | string | Khi email mới | 8–72 ký tự, có chữ và số nếu gửi; không cập nhật tài khoản có sẵn |
+| `admins[].password` | string | Khi email mới | 8–72 ký tự, có chữ và số, tối đa 72 byte UTF-8 nếu gửi; không cập nhật tài khoản có sẵn |
 
 ```json
 {
@@ -248,14 +252,15 @@ sequenceDiagram
     T-->>C: 409 TENANT_DOMAIN_ALREADY_EXISTS
   end
   T->>T: settings là JSON hợp lệ
-  T->>A: validateAdminRequests(admins, null, null) - mục 5.0
+  T->>A: validateAdminsForNewTenant(admins) - mục 5.0
+  A-->>T: validatedAdmins
   T->>R: TenantRepository.save(Tenant đang hoạt động)
   T->>R: TenantConfigRepository.save(TenantConfig.withDefaults)
   loop TENANT_ADMIN, STAFF, SALE
     T->>R: TenantRoleRepository.insertSystemRole, cấp quyền
   end
   T->>R: TenantRoleRepository.findByTenantIdAndCode(tenantId, TENANT_ADMIN)
-  T->>A: addAdminsToTenant(tenantId, adminRoleId, admins) - mục 5.0
+  T->>A: addAdminsToTenant(tenantId, adminRoleId, validatedAdmins) - mục 5.0
   T-->>K: CreateTenantResponseDTO
   K-->>C: 201 "Tạo nhà xe thành công !"
 ```
