@@ -11,7 +11,7 @@ import { ThemeToggle } from '../../shared/theme-toggle/theme-toggle';
 
 /**
  * Mật khẩu chung của các tài khoản mẫu trong dữ liệu seed (đã ghi trong README), chỉ dùng cho môi trường dev.
- * Các tài khoản này do backend nạp khi chạy với profile `dev` (thư mục db/dev-seed).
+ * Các tài khoản bổ sung cho từng tình huống cần được chuẩn bị riêng trong DB dev, xem README.
  */
 const SEED_PASSWORD = 'Hieudvt@123';
 

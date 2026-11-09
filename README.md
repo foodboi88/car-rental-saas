@@ -80,11 +80,9 @@ docker run --name postgres-car-rental `
 Di chuyển vào thư mục `backend` và chạy ứng dụng Spring Boot:
 ```powershell
 cd backend
-mvn spring-boot:run "-Dspring-boot.run.profiles=dev"
+mvn spring-boot:run
 ```
 > Khi khởi động, Flyway sẽ tự động chạy các script migration từ `V1` đến `V7` để tạo bảng và nạp dữ liệu gốc vào PostgreSQL.
->
-> Cờ `profiles=dev` bật thêm thư mục `db/dev-seed`: nạp **tài khoản và nhà xe mẫu** để thử đăng nhập (bảng ở mục "Dữ Liệu Tài Khoản Kiểm Thử"). Dữ liệu này chỉ dành cho máy phát triển; **không** bật profile `dev` ở môi trường thật.
 
 ### 4. Truy cập Swagger UI
 Sau khi ứng dụng khởi chạy thành công tại cổng `8080`, mở trình duyệt truy cập:
@@ -99,7 +97,7 @@ npm start
 ```
 Mở **`http://localhost:4200`**. Máy chủ dev chuyển các lời gọi `/api` sang backend ở cổng `8080` (cấu hình trong `frontend/proxy.conf.json`), nên không cần cấu hình CORS. Dùng Chrome hoặc Firefox: cookie refresh token có thuộc tính `Secure` chỉ chạy trên `http://localhost` với hai trình duyệt này.
 
-Chạy test đơn vị: `npm test` (trong thư mục `frontend`). Màn hình đăng nhập có sẵn các nút điền nhanh email và mật khẩu của tài khoản mẫu (chỉ khi chạy dev, cần backend chạy với profile `dev` để các tài khoản tồn tại): Super Admin, chủ nhà xe, nhân viên, sale, tài khoản bị khóa, nhà xe bị khóa.
+Chạy test đơn vị: `npm test` (trong thư mục `frontend`). Màn hình đăng nhập có sẵn các nút điền nhanh email và mật khẩu của tài khoản mẫu khi chạy frontend ở chế độ dev. Các tài khoản bổ sung đánh dấu (*) trong bảng bên dưới cần được chuẩn bị riêng trong DB dev để thử các tình huống tương ứng.
 
 ---
 
@@ -119,7 +117,7 @@ Chạy test đơn vị: `npm test` (trong thư mục `frontend`). Màn hình đ�
 | **`chu.thu@thunghiem.vn`** (*) | `TENANT_ADMIN` | Thử nghiệm (đang hoạt động) | Chưa có chi nhánh nào | Test chủ chỉ thuộc 1 nhà xe, nhà xe chưa có chi nhánh |
 | **`chu.khoa@thunghiem.vn`** (*) | `TENANT_ADMIN` | Thử nghiệm (đã bị khóa) | Không đăng nhập được | Test nhà xe bị khóa chặn người của nhà xe (403) |
 
-> (*) Các tài khoản này **không nằm trong dữ liệu gốc** (migration `V1` đến `V7`) mà do thư mục `backend/src/main/resources/db/dev-seed` nạp, chỉ khi chạy backend với profile `dev` (xem mục 3). Dữ liệu nạp theo kiểu chạy lại được nên DB đã có sẵn một phần vẫn không bị lỗi.
+> (*) Các tài khoản và nhà xe cho những tình huống này cần được chuẩn bị riêng trong DB dev. Migration `V1` đến `V7` tạo các tài khoản gốc như `minh.admin@rentcarhanoi.vn`, `lan.staff@rentcarhanoi.vn`, `mai.admin@saigonauto.vn`; tài khoản Super Admin cần được khởi tạo riêng để thử các API quản trị. Integration test tự tạo tài khoản trong PostgreSQL Testcontainers.
 
 ---
 

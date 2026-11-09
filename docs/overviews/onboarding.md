@@ -733,7 +733,9 @@ CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
 
 ## 10. Hướng Dẫn Kiểm Thử Cục Bộ & Dữ Liệu Seed (Local Verification Guide)
 
-### 10.1 Dữ liệu Tài khoản Mẫu Đã Cấu Hình Sẵn (Seed Credentials)
+### 10.1 Tài khoản mẫu dùng để kiểm thử (Seed Credentials)
+
+Migration V1–V7 nạp các tài khoản gốc như `minh.admin@rentcarhanoi.vn`, `lan.staff@rentcarhanoi.vn` và `mai.admin@saigonauto.vn`. Các tài khoản bổ sung `superadmin@carrental.vn`, `multi.user@carrental.vn`, `locked.user@rentcarhanoi.vn` cần được chuẩn bị riêng trong DB dev để thử các tình huống bên dưới. Integration test tự tạo tài khoản trong PostgreSQL Testcontainers.
 
 > 🔑 **Mật khẩu dùng chung cho tất cả tài khoản:** `Hieudvt@123`
 
