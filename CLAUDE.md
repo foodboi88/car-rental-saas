@@ -86,6 +86,7 @@ Mỗi khi đề cập đến một Spring Annotation, AI phải tóm tắt bản
 
 ### 📍 BƯỚC 1: ĐỌC TÀI LIỆU DỰ ÁN (DOCS FIRST)
 Trước khi trả lời hay hướng dẫn bất kỳ module nào, AI bắt buộc phải đọc kỹ các tài liệu trong `./docs/`:
+- `docs/tutorials/JAVA_SPRING_CODE_CONVENTIONS.md`: Bộ quy chuẩn cấu trúc gói, cú pháp, design pattern, DTO mapping và 3 thiết luật `@Transactional`.
 - `docs/overviews/Architecture-Diagram.md`: Luồng dữ liệu qua Nginx, Monolith Spring Boot, Data Storage.
 - `docs/overviews/Database-Schema.md`: Cấu trúc bảng, quan hệ Foreign Key, ràng buộc `tenant_id`, cơ chế mã hóa AES-256.
 - `docs/overviews/Multi-Tenant-Multi-Branch.md`: Bản chất phân quyền ABAC theo chi nhánh và RBAC theo tenant.
