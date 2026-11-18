@@ -2,7 +2,8 @@
 
 **Cập nhật:** 15/08/2026 — Tối ưu hóa Database Schema & Hoàn thiện Nghiệp vụ Booking Thực tế:
 - **Bổ sung Cấu hình động Nhà xe (`tenant_configs`)**: Quản lý các tham số linh hoạt theo từng tenant: `hold_timeout_minutes` (thời gian giữ chỗ), `late_hourly_price` (phí phạt trễ giờ), `default_commission_rate` (tỷ lệ hoa hồng CTV).
-- **Gộp Thời gian Đặt xe (`pickup_time`, `return_time`)**: Gộp 4 trường ngày/giờ riêng lẻ thành 2 trường `TIMESTAMPTZ` chuẩn ISO-8601 (chứa đầy đủ Ngày + Giờ), tối ưu hóa tính toán số giờ thuê, tính phụ phí trễ giờ và xử lý kiểm tra trùng lịch xe (Overlapping check / GiST range).
+- **Gộp Thời gian Đặt xe (`pickup_time`, `return_time`)**: Gộp 4 trường ngày/giờ riêng lẻ thành 2 trường TIMESTAMPTZ chuẩn ISO-8601 (chứa đầy đủ Ngày + Giờ), tối ưu hóa tính toán số giờ thuê, tính phụ phí trễ giờ và hỗ trợ kiểm tra xung đột lịch xe (Overlapping check) qua chỉ mục B-tree kết hợp Khóa bi quan (Pessimistic Locking) ở tầng Service.
+(Hệ thống có định hướng nâng cấp lên PostgreSQL GiST index & EXCLUDE constraint trong tương lai khi quy mô giao dịch tăng cao).
 - **Loại bỏ Phạt nguội, Quá KM & Vạch xăng**: Hệ thống không quản lý phạt nguội (`traffic_fines`), không theo dõi số km và mức nhiên liệu để tinh gọn tối đa cho việc học Backend và tập trung vào luồng Booking.
 - **Chuẩn hóa Phụ phí Trễ giờ (`late_fee`)**: Quản lý trả trễ tính theo block giờ thực tế (1 – 4 tiếng tính lũy tiến theo `late_hourly_price` từ 80.000đ – 150.000đ/giờ), không áp dụng ân hạn, không làm tròn ngày.
 - **Chuẩn hóa Mã hợp đồng (`booking_code`)**: Định dạng chuẩn `[PREFIX]_[TENANT_CODE]_[YYMMDD]_[RANDOM_4_CHAR]` (VD: `BK_ANR_260815_8F2D`), ràng buộc `UNIQUE(tenant_id, booking_code)`.
@@ -233,7 +234,7 @@ erDiagram
 CREATE TABLE tenants (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã ID định danh nhà xe (UUID PK)
     name VARCHAR(255) NOT NULL,                                  -- Tên nhà xe / doanh nghiệp cho thuê xe
-    domain VARCHAR(255) UNIQUE NOT NULL,                         -- Tên miền / Subdomain truy cập riêng của nhà xe
+    domain VARCHAR(255) NOT NULL,                         -- Tên miền / Subdomain truy cập riêng của nhà xe
     plan_tier SMALLINT NOT NULL DEFAULT 1                        -- Gói dịch vụ: 1: FREE, 2: BASIC, 3: PRO, 4: ENTERPRISE
         CHECK (plan_tier IN (1, 2, 3, 4)),
     logo_url VARCHAR(500),                                       -- Đường dẫn ảnh logo của nhà xe
@@ -287,13 +288,14 @@ CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
 ```sql
 CREATE TABLE roles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã ID nhóm quyền (UUID PK)
-    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,     -- Mã ID nhà xe chủ quản (NULL nếu là role mặc định hệ thống)
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,   -- Mã ID nhà xe chủ quản
     name VARCHAR(100) NOT NULL,                                  -- Tên hiển thị nhóm quyền (VD: Chủ bãi, Quản lý chi nhánh, Sale)
     code VARCHAR(50) NOT NULL,                                   -- Mã định danh nhóm quyền (VD: TENANT_ADMIN, BRANCH_MANAGER, STAFF, SALE)
     description TEXT,                                            -- Mô tả chi tiết phạm vi trách nhiệm của nhóm quyền
     is_system_default BOOLEAN DEFAULT FALSE,                     -- Cờ đánh dấu nhóm quyền mặc định hệ thống (không cho xóa)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tạo nhóm quyền
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật nhóm quyền gần nhất
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Thời điểm cập nhật nhóm quyền gần nhất
+    CONSTRAINT unique_role_tenant UNIQUE (id, tenant_id)
 );
 
 CREATE INDEX idx_roles_tenant_id ON roles(tenant_id);
@@ -305,7 +307,7 @@ CREATE UNIQUE INDEX idx_roles_tenant_code ON roles(tenant_id, code);
 ```sql
 CREATE TABLE permissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã ID quyền nguyên tử (UUID PK)
-    code VARCHAR(100) UNIQUE NOT NULL,                           -- Mã định danh quyền (VD: vehicle:create, booking:handover)
+    code VARCHAR(100) NOT NULL,                           -- Mã định danh quyền (VD: vehicle:create, booking:handover)
     name VARCHAR(255) NOT NULL,                                  -- Tên hiển thị của quyền
     category VARCHAR(50) NOT NULL,                               -- Nhóm chức năng (VD: VEHICLE, BOOKING, REPORT, SYSTEM)
     description TEXT                                             -- Mô tả chi tiết hành động được phép thực hiện
@@ -331,7 +333,7 @@ CREATE INDEX idx_role_permissions_permission_id ON role_permissions(permission_i
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã ID người dùng (UUID PK)
-    email VARCHAR(255) UNIQUE NOT NULL,                          -- Địa chỉ email đăng nhập tập trung (UNIQUE)
+    email VARCHAR(255) NOT NULL,                          -- Địa chỉ email đăng nhập tập trung (UNIQUE)
     password_hash VARCHAR(255) NOT NULL,                         -- Mật khẩu mã hóa BCrypt
     full_name VARCHAR(255),                                      -- Họ và tên người dùng
     phone VARCHAR(20),                                           -- Số điện thoại liên hệ
@@ -344,7 +346,7 @@ CREATE TABLE users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật thông tin gần nhất
 );
 
-CREATE INDEX idx_users_email ON users(email);
+CREATE UNIQUE INDEX idx_users_email ON users(email);
 ```
 
 ### 2.8 user_tenants (N-N: Người dùng thuộc Tenant nào, Role nào)
@@ -356,7 +358,7 @@ CREATE TABLE user_tenants (
     role_id UUID NOT NULL REFERENCES roles(id),                   -- Mã ID nhóm quyền động (FK roles)
     joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm người dùng gia nhập tenant
     PRIMARY KEY (user_id, tenant_id),
-    CONSTRAINT unique_user_tenant_role UNIQUE (user_id, tenant_id, role_id)
+    CONSTRAINT fk_user_tenant_role FOREIGN KEY (role_id, tenant_id) REFERENCES roles(id, tenant_id)
 );
 
 CREATE INDEX idx_user_tenants_tenant_id ON user_tenants(tenant_id);
@@ -392,14 +394,14 @@ CREATE INDEX idx_user_branches_updated_by ON user_branches(updated_by);
 ```sql
 CREATE TABLE vehicle_types (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã ID loại xe (UUID PK)
-    name VARCHAR(50) NOT NULL UNIQUE,                            -- Tên loại xe (VD: SEDAN 4 chỗ, SUV 7 chỗ, MPV 7 chỗ, Bán tải, Xe điện...)
+    name VARCHAR(50) NOT NULL,                            -- Tên loại xe (VD: SEDAN 4 chỗ, SUV 7 chỗ, MPV 7 chỗ, Bán tải, Xe điện...)
     description TEXT,                                            -- Mô tả chi tiết phân loại xe
     is_active BOOLEAN DEFAULT TRUE,                              -- Trạng thái cho phép chọn (TRUE: Active, FALSE: Inactive)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tạo loại xe
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật loại xe
 );
 
-CREATE INDEX idx_vehicle_types_name ON vehicle_types(name);
+CREATE UNIQUE INDEX idx_vehicle_types_name ON vehicle_types(name);
 ```
 
 ### 2.11 vehicles (Thông tin Xe cho thuê)
@@ -430,10 +432,8 @@ CREATE TABLE vehicles (
     CONSTRAINT unique_vehicle_tenant UNIQUE (id, tenant_id)
 );
 
-CREATE INDEX idx_vehicles_tenant_id ON vehicles(tenant_id);
-CREATE INDEX idx_vehicles_branch_id ON vehicles(branch_id);
+CREATE INDEX idx_vehicles_tenant_branch ON vehicles(tenant_id, branch_id);
 CREATE INDEX idx_vehicles_status ON vehicles(tenant_id, status);
-CREATE INDEX idx_vehicles_license_plate ON vehicles(tenant_id, license_plate);
 CREATE UNIQUE INDEX idx_vehicles_tenant_license ON vehicles(tenant_id, license_plate);
 ```
 
@@ -460,7 +460,7 @@ CREATE TABLE customers (
 );
 
 CREATE INDEX idx_customers_tenant_id ON customers(tenant_id);
-CREATE INDEX idx_customers_phone ON customers(tenant_id, phone);
+CREATE UNIQUE INDEX idx_customers_tenant_phone ON customers(tenant_id, phone);
 CREATE INDEX idx_customers_email ON customers(tenant_id, email);
 CREATE INDEX idx_customers_is_risk ON customers(tenant_id, is_risk);
 ```
@@ -471,7 +471,7 @@ CREATE INDEX idx_customers_is_risk ON customers(tenant_id, is_risk);
 CREATE TABLE bookings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã ID đơn hàng (UUID PK)
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Mã ID nhà xe chủ quản (FK tenants)
-    branch_id UUID NOT NULL,                                     -- Mã ID chi nhánh tiếp nhận đơn hàng (FK branches)
+    branch_id UUID NOT NULL,                                     -- Mã ID chi nhánh tiếp nhận và trả xe (MVP: Round-trip - Thuê đâu trả đó; Roadmap: Tách pickup_branch_id & return_branch_id để hỗ trợ trả khác chi nhánh)
     customer_id UUID NOT NULL,                                   -- Mã ID khách hàng thuê xe (FK customers)
     vehicle_id UUID,                                             -- Mã ID xe được thuê (FK vehicles)
     
@@ -486,6 +486,7 @@ CREATE TABLE bookings (
     actual_return_at TIMESTAMP WITH TIME ZONE,                   -- Thời điểm thực tế nhận lại xe (tính trễ giờ thực tế)
     status SMALLINT NOT NULL DEFAULT 1                           -- Trạng thái đơn: 1: HOLD, 2: CONFIRMED, 3: HANDED_OVER, 4: RETURNED, 5: CANCELLED
         CHECK (status IN (1, 2, 3, 4, 5)),
+    -- Đơn chiếm lịch: status IN (CONFIRMED, HANDED_OVER) HOẶC (status = HOLD AND hold_expires_at > CURRENT_TIMESTAMP).
     hold_expires_at TIMESTAMP WITH TIME ZONE,                    -- Thời điểm hết hạn giữ xe tạm (lấy từ tenant_configs.hold_timeout_minutes)
     daily_rate DECIMAL(12, 2) NOT NULL DEFAULT 0,                -- Đơn giá thuê/ngày chốt tại thời điểm đặt xe (VNĐ/ngày)
     total_amount DECIMAL(12, 2) DEFAULT 0,                       -- Tổng giá trị hợp đồng thuê xe (VNĐ)
@@ -520,19 +521,20 @@ CREATE TABLE bookings (
     
     -- RÀNG BUỘC TOÀN VẸN CẤP DB (Composite FK & Unique Constraints)
     CONSTRAINT fk_booking_branch_tenant FOREIGN KEY (branch_id, tenant_id)
-        REFERENCES branches(id, tenant_id),
+        REFERENCES branches(id, tenant_id) ON DELETE RESTRICT,
     CONSTRAINT fk_booking_customer_tenant FOREIGN KEY (customer_id, tenant_id)
-        REFERENCES customers(id, tenant_id),
+        REFERENCES customers(id, tenant_id) ON DELETE RESTRICT,
     CONSTRAINT fk_booking_vehicle_tenant FOREIGN KEY (vehicle_id, tenant_id)
-        REFERENCES vehicles(id, tenant_id) ON DELETE SET NULL (vehicle_id),
+        REFERENCES vehicles(id, tenant_id) ON DELETE RESTRICT,
     CONSTRAINT fk_booking_created_by_tenant FOREIGN KEY (created_by, tenant_id)
         REFERENCES user_tenants(user_id, tenant_id) ON DELETE SET NULL (created_by),
     CONSTRAINT fk_booking_handover_by_tenant FOREIGN KEY (handover_by, tenant_id)
         REFERENCES user_tenants(user_id, tenant_id) ON DELETE SET NULL (handover_by),
     CONSTRAINT fk_booking_returned_by_tenant FOREIGN KEY (returned_by, tenant_id)
         REFERENCES user_tenants(user_id, tenant_id) ON DELETE SET NULL (returned_by),
-    CONSTRAINT unique_booking_tenant_code UNIQUE (tenant_id, booking_code),
-    CONSTRAINT unique_booking_tenant UNIQUE (id, tenant_id)
+    CONSTRAINT unique_booking_tenant UNIQUE (id, tenant_id),
+    CONSTRAINT check_booking_times CHECK (pickup_time < return_time),
+    CONSTRAINT check_booking_amounts CHECK (daily_rate >= 0 AND total_amount >= 0 AND deposit_amount >= 0)
 );
 
 CREATE INDEX idx_bookings_tenant_id ON bookings(tenant_id);
@@ -541,7 +543,7 @@ CREATE INDEX idx_bookings_customer_id ON bookings(customer_id);
 CREATE INDEX idx_bookings_vehicle_id ON bookings(vehicle_id);
 CREATE INDEX idx_bookings_status ON bookings(tenant_id, status);
 CREATE INDEX idx_bookings_times ON bookings(tenant_id, pickup_time, return_time);
-CREATE INDEX idx_bookings_tenant_code ON bookings(tenant_id, booking_code);
+CREATE UNIQUE INDEX idx_bookings_tenant_code ON bookings(tenant_id, booking_code);
 CREATE INDEX idx_bookings_payment_status ON bookings(tenant_id, payment_status);
 ```
 
@@ -565,13 +567,12 @@ CREATE INDEX idx_bookings_payment_status ON bookings(tenant_id, payment_status);
 | user_branches | idx_user_branches_tenant_id | tenant_id | Normal | Lọc gán chi nhánh trong phạm vi tenant |
 | user_branches | idx_user_branches_updated_by | updated_by | Normal | Lịch sử cập nhật nhân sự chi nhánh |
 | vehicle_types | idx_vehicle_types_name | name | UNIQUE | Tra cứu loại xe system-wide |
-| vehicles | idx_vehicles_tenant_id | tenant_id | Normal | Lọc danh sách xe theo nhà xe |
-| vehicles | idx_vehicles_branch_id | branch_id | Normal | Lọc danh sách xe theo bãi |
+| vehicles | idx_vehicles_tenant_branch	 | tenant_id, branch_id | Normal | Lọc danh sách xe theo nhà xe và bãi xe |
 | vehicles | idx_vehicles_status | tenant_id, status | Normal | Tìm xe sẵn sàng cho thuê (`AVAILABLE`) |
-| vehicles | idx_vehicles_license_plate | tenant_id, license_plate | Normal | Tra cứu nhanh biển số xe |
+| vehicles | idx_vehicles_license_plate | tenant_id, license_plate | UNIQUE | Đảm bảo biển số xe không trùng trong cùng 1 nhà xe |
 | vehicles | idx_vehicles_tenant_license | tenant_id, license_plate | UNIQUE | Đảm bảo biển số xe không trùng trong cùng 1 nhà xe |
 | customers | idx_customers_tenant_id | tenant_id | Normal | Lọc khách hàng của tenant |
-| customers | idx_customers_phone | tenant_id, phone | Normal | Tra cứu lịch sử khách qua SĐT |
+| customers | idx_customers_tenant_phone | tenant_id, phone | UNIQUE | Tra cứu và chống trùng SĐT khách trong 1 nhà xe |
 | customers | idx_customers_email | tenant_id, email | Normal | Tra cứu khách qua Email |
 | customers | idx_customers_is_risk | tenant_id, is_risk | Normal | Lọc/Cảnh báo khách hàng có rủi ro |
 | bookings | idx_bookings_tenant_id | tenant_id | Normal | Quét toàn bộ đơn hàng của nhà xe |
@@ -588,7 +589,12 @@ CREATE INDEX idx_bookings_payment_status ON bookings(tenant_id, payment_status);
 ## 4. Multi-tenant Strategy, DB Validation & Compliance
 
 ### 4.1 Row-Level Security (RLS) Policy
-Trong môi trường Shared Database, PostgreSQL RLS tự động chèn bộ lọc `tenant_id` vào mọi truy vấn SQL:
+Nội dung cần làm rõ:
+> [!NOTE]
+
+  > **Trạng thái triển khai:** Hiện tại, cơ chế cô lập dữ liệu (Multi-tenancy) đang được thực thi ở **tầng Application** (thông qua TenantContextThreadLocal và logic kiểm tra tenant_id trong Spring Data JPA).
+
+  > Phần đặc tả PostgreSQL RLS dưới đây là **thiết kế bảo mật mục tiêu (Target Architecture / Roadmap)** cấp Database, sẽ được kích hoạt khi hệ thống hoàn thiện bộ Hibernate Connection Interceptor gán biến phiên.
 
 ```sql
 -- Kích hoạt RLS cho các bảng tenant-scoped
@@ -600,7 +606,32 @@ ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
 
 -- Policy cô lập dữ liệu theo Tenant
+CREATE POLICY tenant_isolation ON tenant_configs
+    USING (
+        (current_setting('app.current_user_role', true) = 'SUPER_ADMIN') OR
+        (tenant_id = current_setting('app.current_tenant', true)::uuid)
+    );
+CREATE POLICY tenant_isolation ON branches
+    USING (
+        (current_setting('app.current_user_role', true) = 'SUPER_ADMIN') OR
+        (tenant_id = current_setting('app.current_tenant', true)::uuid)
+    );
 CREATE POLICY tenant_isolation ON vehicles
+    USING (
+        (current_setting('app.current_user_role', true) = 'SUPER_ADMIN') OR
+        (tenant_id = current_setting('app.current_tenant', true)::uuid)
+    );
+CREATE POLICY tenant_isolation ON bookings
+    USING (
+        (current_setting('app.current_user_role', true) = 'SUPER_ADMIN') OR
+        (tenant_id = current_setting('app.current_tenant', true)::uuid)
+    );
+CREATE POLICY tenant_isolation ON customers
+    USING (
+        (current_setting('app.current_user_role', true) = 'SUPER_ADMIN') OR
+        (tenant_id = current_setting('app.current_tenant', true)::uuid)
+    );
+CREATE POLICY tenant_isolation ON roles
     USING (
         (current_setting('app.current_user_role', true) = 'SUPER_ADMIN') OR
         (tenant_id = current_setting('app.current_tenant', true)::uuid)
@@ -612,9 +643,13 @@ CREATE POLICY tenant_isolation ON vehicles
 ### 4.2 Validate cấp DB & Xử lý Mã lỗi ở Java Backend
 
 #### 1. Ràng buộc toàn vẹn tầng Database (Composite Foreign Key)
-Để đảm bảo **không bao giờ có lỗi logic** (ví dụ: Đơn booking thuộc Tenant A nhưng lại gắn `branch_id` của Tenant B):
-- Tất cả các bảng con đều có ràng buộc Composite FK `(branch_id, tenant_id) REFERENCES branches(id, tenant_id)`.
-- Cơ chế này được PostgreSQL kiểm tra và bảo đảm 100% tại cấp Database mà không phụ thuộc hoàn toàn vào code Java.
+Để đảm bảo không bao giờ có lỗi logic (ví dụ: Đơn booking thuộc Tenant A nhưng lại gắn branch_id của Tenant B):
+
+Các bảng nghiệp vụ liên quan đến chi nhánh (vehicles, bookings, user_branches) đều có ràng buộc Composite FK (branch_id, tenant_id) REFERENCES branches(id, tenant_id).
+Cơ chế này được PostgreSQL kiểm tra và bảo đảm tại cấp Database, giúp loại bỏ nguy cơ rò rỉ dữ liệu chéo giữa các chi nhánh khác tenant.
+
+> [!NOTE]
+> **Toàn vẹn phân quyền đa khách hàng (user_tenants.role_id)**: Mỗi khi Tenant được khởi tạo, hệ thống tự động sinh một bộ Role mặc định riêng (TENANT_ADMIN, STAFF, SALE) mang chính tenant_id của Tenant đó (roles.tenant_id NOT NULL). Nhờ đó, quan hệ phân quyền được khóa chặt ở cấp CSDL bằng Composite Foreign Key CONSTRAINT fk_user_tenant_role FOREIGN KEY (role_id, tenant_id) REFERENCES roles(id, tenant_id), loại bỏ 100% nguy cơ gán nhầm hoặc leo thang đặc quyền chéo giữa các nhà xe.
 
 #### 2. Xử lý Exception sạch sẽ trong Java Spring Boot
 Khi Database ném lỗi vi phạm ràng buộc (Unique Violation `23505`, Foreign Key Violation `23503`), hệ thống tuyệt đối **không quăng nguyên stacktrace SQL hay lỗi thô ra client** để tránh rủi ro lộ cấu trúc cơ sở dữ liệu.
@@ -642,6 +677,20 @@ public class GlobalExceptionHandler {
 }
 ```
 
+#### 3. Chiến lược Bảo vệ Dữ liệu Vòng đời Xe (Database Constraint & Soft Delete)
+
+Đối với các thực thể tài sản cốt lõi như Xe (vehicles), Khách hàng (customers), Hợp đồng (bookings), hệ thống áp dụng nguyên tắc Bảo vệ Toàn vẹn 2 Lớp (Defense in Depth) để tránh mất dấu dữ liệu lịch sử kế toán/pháp lý:
+
+**Lớp 1: CSDL (Hard Constraint - ON DELETE RESTRICT):**
+
+Ràng buộc khóa ngoại fk_booking_vehicle_tenant được cấu hình ON DELETE RESTRICT.
+Nếu Developer hoặc Tool DB vô tình thực thi lệnh DELETE FROM vehicles WHERE id = ... trên một chiếc xe đã từng phát sinh booking, PostgreSQL sẽ lập tức chặn lại và ném lỗi 23503 (ForeignKeyViolation). Không bao giờ có chuyện mất dấu xe trong các hợp đồng cũ.
+
+**Lớp 2: Ứng dụng (Application Soft Delete / Deactivate):**
+
+Khi xe bị hư hỏng nặng, bán thanh lý hoặc ngừng kinh doanh, nhà xe không thực hiện xóa bản ghi vật lý mà chỉ cập nhật: vehicles.status = 5 (INACTIVE).
+Chiếc xe sẽ tự động bị loại khỏi danh sách gợi ý đặt xe mới, nhưng toàn bộ lịch sử hợp đồng, biên bản bàn giao và doanh thu cũ vẫn được bảo lưu 100% phục vụ đối soát, kiểm toán và xử lý phạt nguội.
+
 ---
 
 ### 4.3 Bảo mật CCCD, GPLX (Nghị định 13/2023/NĐ-CP) & Invoicing
@@ -658,3 +707,143 @@ Nhằm tuân thủ **Nghị định 13/2023/NĐ-CP về Bảo vệ Dữ liệu C
    - Chỉ người dùng có thẩm quyền (`TENANT_ADMIN` khi xuất biên bản giao xe chính thức hoặc làm việc với công an) mới được cấp quyền xem dữ liệu giải mã đầy đủ.
 4. **Chính sách Tự động Dọn dẹp (Data Retention)**:
    - File ảnh chụp CCCD/GPLX gốc (`id_card_images`, `driver_license_images`): Hệ thống thiết lập Background Cronjob tự động xóa tệp nhị phân trên S3/MinIO sau **60 – 90 ngày** kể từ khi hợp đồng kết thúc thành công (`status = RETURNED`) và đã hoàn tất thanh toán cọc.
+
+### 4.4 BÀI TOÁN CHỐNG TRÙNG LỊCH XE (DOUBLE BOOKING) & CONCURRENCY
+#### 📊 So sánh 3 Chiến lược Kỹ thuật Chống Trùng Lịch (Double Booking):
+
+| Giải pháp | Cách làm | Ưu điểm | Nhược điểm (Tử huyệt) |
+| :--- | :--- | :--- | :--- |
+| **Cách 1: Chỉ Query ở Service** *(Naive Check)* | Java chạy: `SELECT COUNT(*) WHERE vehicle_id = ... AND trùng_giờ`. Nếu `= 0` thì gọi `save()`. | Đơn giản nhất, code dễ viết, không cần cấu hình phức tạp. | **Tử huyệt:** Bị Double Booking nếu 2 khách bấm đặt cùng 1 mili-giây do dính lỗi bất đồng bộ **TOCTOU** (Race Condition). |
+| **Cách 2: Dùng Lock** *(Pessimistic Locking)* <br>👉 **LỰA CHỌN HIỆN TẠI** | Khi đặt xe, Java chạy: `SELECT * FROM vehicles WHERE id = :id FOR UPDATE;` (Khóa chiếc xe lại) rồi mới check lịch và insert. | Rất an toàn, dùng B-tree thông thường, không cần cài extension DB, dễ kiểm soát và debug ở tầng Java. | Giữ khóa chiếc xe trong suốt transaction. Tuy nhiên với quy mô vài trăm xe của dự án, thời gian khóa chỉ **2 – 5 mili-giây** nên không lo nghẽn hàng đợi. |
+| **Cách 3: Dùng GiST + EXCLUDE** <br>🚀 **ĐỊNH HƯỚNG TƯƠNG LAI** | Khai báo ràng buộc `EXCLUDE USING gist` ngay trong CSDL. Java chỉ việc `INSERT`, nếu trùng lịch DB tự ném Exception `23P01`. | **Bảo vệ tuyệt đối 100% ở tầng CSDL**, hiệu năng cực cao, không phụ thuộc vào tầng code. | Phải cài extension `btree_gist`, cú pháp migration phức tạp hơn (phải loại trừ đơn hủy `status != CANCELLED`). |
+
+---
+#### 1. "Tại sao em dùng Pessimistic Lock (`SELECT ... FOR UPDATE`) thay vì để DB tự lo?"
+
+* **Bản chất kỹ thuật:**
+  Khi 2 khách hàng cùng bấm đặt 1 chiếc xe tại cùng 1 mili-giây, nếu chỉ dùng câu lệnh `SELECT COUNT(*)` kiểm tra thông thường, cả 2 luồng đều thấy xe còn trống và cùng `INSERT`. Đây là lỗi kinh điển **TOCTOU** (*Time-of-Check to Time-of-Use*) dẫn đến **Double Booking**.
+
+* **Cơ chế khóa:**
+  * Sử dụng **Khóa cấp dòng (Row-Level Lock)** trên bảng `vehicles`:
+    ```sql
+    SELECT * FROM vehicles WHERE id = :id FOR UPDATE;
+    ```
+  * Dòng xe đó đóng vai trò là vật thế chấp (**Mutex/Semaphore**). Ai đến trước cầm chìa khóa xe trước, người đến sau được đưa vào hàng đợi **FIFO (Lock Queue)** của PostgreSQL.
+  * **Nguyên tắc sống còn:** Bắt buộc **Lock xe trước** $\rightarrow$ **Check lịch sau** $\rightarrow$ **Insert booking** $\rightarrow$ **Commit nhả Lock**.
+
+---
+
+#### 2. "Tại sao không dùng PostgreSQL GiST Index & EXCLUDE Constraint ngay bây giờ?"
+
+> **Sếp hỏi:** *"PostgreSQL có `EXCLUDE USING gist` rất mạnh, sao em không dùng?"*
+
+**Câu trả lời chuẩn Tech Lead:**
+
+* *"Dạ thưa anh, GiST + EXCLUDE Constraint là vũ khí tối thượng ở tầng CSDL vì nó dùng cấu trúc cây Interval Tree kiểm tra toán tử giao nhau `&&` trong độ phức tạp $O(\log N)$ và không cần lock dòng xe."*
+* *"Tuy nhiên, ở giai đoạn hiện tại của dự án, em chủ động chọn Pessimistic Lock vì 3 lý do thực tế:*
+  1. *Quy mô dự án Car Rental SaaS hiện tại (vài trăm xe, giao dịch đặt xe cách nhau vài giây/phút), xác suất nghẽn hàng đợi trên 1 chiếc xe là gần như bằng 0. Khóa chỉ giữ trong 2 - 5 mili-giây.*
+  2. *`EXCLUDE` constraint đòi hỏi cài extension `btree_gist` và cú pháp rất phức tạp khi phải loại trừ các đơn hủy (`WHERE status != 'CANCELLED'`).*
+  3. *Pessimistic Lock giúp đội ngũ dev kiểm soát 100% luồng nghiệp vụ ở tầng Java Service một cách tường minh, dễ debug."*
+* *"Hệ thống đã để ngỏ Lộ trình nâng cấp lên GiST khi lượng người dùng tăng đột biến trong tương lai."*
+
+---
+
+#### 3. "Đã dùng Lock rồi thì tại sao VẪN PHẢI đánh B-Tree Index trên `(tenant_id, pickup_time, return_time)`?"
+
+> **Sếp hỏi:** *"Đã khóa xe rồi thì cần gì index nữa?"*
+
+**Câu trả lời:**
+
+* **Lock** chỉ làm nhiệm vụ giữ trật tự (xếp hàng), Lock không tìm kiếm dữ liệu.
+* **B-tree Index** đóng vai trò là ngọn đèn soi sáng: Khi khách hàng cầm chìa khóa bước vào phòng kiểm tra lịch, Index giúp câu query `SELECT COUNT(*)` chạy vèo trong **1 - 2 mili-giây** thay vì mất **500 mili-giây** quét toàn bảng (*Full Table Scan*).
+* **Càng có Index tốt $\rightarrow$ Thời gian giữ Lock càng ngắn $\rightarrow$ Người xếp hàng phía sau không phải chờ!**
+
+---
+
+#### 4. "Tại sao B-tree index lại xử lý được câu query có 2 điều kiện thời gian `<` và `>`?"
+
+**Câu query:**
+```sql
+WHERE tenant_id = :tenantId 
+  AND pickup_time < :newReturnTime 
+  AND return_time > :newPickupTime;
+```
+
+**Cơ chế Index Filter trên RAM:**
+* B-tree nhảy nhị phân khớp chính xác `tenant_id` ($O(\log N)$).
+* Quét dải `pickup_time < :newReturnTime` bằng **Index Range Scan**.
+* Vì cột thứ 2 đã là khoảng `<` nên B-tree không nhảy nhị phân ở cột `return_time` được nữa. Nhưng do `return_time` đã nằm sẵn trong trang Index trên RAM (**Buffer Pool**), PostgreSQL sẽ thực hiện **Index Filter** trực tiếp trên RAM, loại bỏ các bản ghi không khớp mà không cần đọc bảng chính (*Heap Table*) dưới đĩa cứng. Rút ngắn thời gian truy vấn hàng trăm lần!
+
+---
+
+#### 5. "Tại sao công thức check trùng lịch lại viết là `pickup_time < :newReturn` AND `return_time > :newPickup`?"
+
+**Chứng minh toán học (Định luật De Morgan - Tư duy ngược):**
+
+* Thay vì chia 4 trường hợp trùng nhau rất phức tạp, ta tìm điều kiện để 2 đơn **HOÀN TOÀN KHÔNG CHẠM NHAU**:
+  1. Đơn mới trả xe trước khi đơn cũ bắt đầu: `:newReturnTime <= pickup_time`
+  2. **HOẶC** Đơn mới lấy xe sau khi đơn cũ đã trả xe: `:newPickupTime >= return_time`
+
+  $$\implies \text{KHÔNG TRÙNG} = (\text{:newReturnTime} \le \text{pickup\_time}) \quad \mathbf{OR} \quad (\text{:newPickupTime} \ge \text{return\_time})$$
+
+* Phủ định của **KHÔNG TRÙNG** chính là **TRÙNG LỊCH**:
+
+  $$\implies \mathbf{\text{pickup\_time} < \text{:newReturnTime} \quad \text{AND} \quad \text{return\_time} > \text{:newPickupTime}}$$
+
+* Công thức này bao trọn 100% mọi trường hợp: đè đầu, đè đuôi, bao trọn, hoặc nằm lọt thỏm ở giữa (ví dụ đơn cũ 6-10h, đơn mới 7-9h).
+
+---
+
+#### 6. "Phân biệt rạch ròi giữa LOCK và HOLD?"
+
+* **LOCK (Kỹ thuật cấp DB):** Khóa toàn bộ bản ghi chiếc xe, diễn ra trong **2 - 5 mili-giây** của Transaction, mục đích chống xung đột luồng CPU.
+* **HOLD (Nghiệp vụ cấp App):** Giữ một khung giờ cụ thể của chiếc xe, kéo dài **15 - 30 phút**, mục đích chờ khách thanh toán tiền cọc.
+
+---
+
+#### 7. "Tại sao điều kiện đơn chiếm lịch lại là `hold_expires_at > CURRENT_TIMESTAMP`?"
+
+`hold_expires_at` là **Mốc thời gian hết hạn** (ví dụ tạo lúc 10h00, hết hạn lúc 10h15).
+
+* **Lúc 10h05:** $10\text{h}15 > 10\text{h}05 \implies \text{hết\_hạn} > \text{hiện\_tại} \rightarrow$ Hạn còn ở tương lai $\rightarrow$ **Vẫn đang giữ xe (chiếm lịch).**
+* **Lúc 10h20:** $10\text{h}15 < 10\text{h}20 \implies \text{hết\_hạn} < \text{hiện\_tại} \rightarrow$ Hạn đã trôi vào quá khứ $\rightarrow$ **Đã hết hạn giữ (giải phóng lịch).**
+
+### 4.5: KIẾN TRÚC INDEX VÀ BẢO MẬT MULTI-TENANT
+
+---
+
+#### 8. "Tại sao khai báo `UNIQUE` ở cột rồi thì không được gõ thêm `CREATE INDEX`?"
+
+* Khai báo `UNIQUE` ở cột/bảng khiến PostgreSQL tự động sinh ngầm một **Unique B-tree Index** dưới gầm bàn.
+* Nếu gõ thêm `CREATE INDEX idx_name ON table(col);` $\rightarrow$ DB sinh ra **2 index chạy song song** trên cùng 1 cột. Tốn gấp đôi dung lượng ổ đĩa, tốn bộ đệm RAM và làm chậm tốc độ ghi (`INSERT`/`UPDATE`) vì mỗi lần thêm mới phải ghi vào cả 2 cây index.
+
+---
+
+#### 9. "Tại sao lại dùng `SMALLINT` thay vì `INTEGER` hay `BYTE` cho các cột Status?"
+
+* PostgreSQL không hỗ trợ kiểu `BYTE` hay `TINYINT`. Kiểu số nguyên nhỏ nhất của Postgres là `SMALLINT` (**2 bytes**, phạm vi `-32,768` đến `32,767`).
+* Trên CPU 64-bit và JVM Stack, số 1 byte hay 2 bytes đều được chuyển thành 32-bit `int` khi tính toán, nên 1 byte không hề nhanh hơn 2 bytes.
+* `SMALLINT` giúp **tiết kiệm 50% dung lượng RAM Buffer Pool** so với `INTEGER` (**4 bytes**) khi bảng đạt hàng chục triệu dòng.
+
+---
+
+#### 10. "Bản chất của PostgreSQL RLS và vì sao cần `SET LOCAL` trong Connection Interceptor?"
+
+* **Row-Level Security (RLS):** Là lớp bảo mật vật lý của DB. Mọi câu query vào bảng đều bị DB tự động chèn thêm điều kiện trong Policy (ví dụ: `WHERE tenant_id = current_setting('app.current_tenant', true)::uuid`).
+* **Tại sao phải dùng `SET LOCAL`?** Vì Spring Boot dùng Connection Pool (**HikariCP**) tái sử dụng các kết nối TCP. Nếu dùng lệnh `SET` thường, biến tenant sẽ bị lưu vĩnh viễn trên kết nối đó $\rightarrow$ Request sau của Nhà xe B mượn lại kết nối sẽ đọc trộm dữ liệu của Nhà xe A. Từ khóa `LOCAL` đảm bảo biến phiên **tự hủy ngay khi Transaction kết thúc**!
+* **Tham số `true` trong `current_setting('...', true)`:** Là cờ `missing_ok = true`. Nếu biến chưa được set, DB trả về `NULL` an toàn thay vì quăng `Exception` làm sập ứng dụng.
+
+### 4.6 CHIẾN LƯỢC NGHIỆP VỤ CHI NHÁNH (ROUND-TRIP VS ROADMAP ONE-WAY)
+
+#### Phạm vi triển khai hiện tại (Giai đoạn MVP):
+
+**Nghiệp vụ Round-trip (Thuê đâu trả đó)**: Khách hàng nhận xe tại chi nhánh nào thì bắt buộc phải hoàn trả xe tại chính chi nhánh đó (pickup_branch trùng return_branch).
+**Mục tiêu kiến trúc**: Giữ cho luồng nghiệp vụ gọn gàng, nhân viên chi nhánh tự chủ kiểm soát đội xe và bàn giao/nhận xe tại chỗ; tập trung tối đa nguồn lực vào việc tối ưu thuật toán giữ cọc (Hold engine), khóa chống trùng lịch và tính phụ phí trễ giờ thực tế.
+
+#### Định hướng mở rộng tương lai (Roadmap One-way Rental - Trả khác chi nhánh):
+
+**Khi nhu cầu mở rộng mạng lưới liên tỉnh phát sinh, bảng bookings sẽ tách cột branch_id thành 2 khóa ngoại độc lập**: pickup_branch_id và return_branch_id.
+**Quy trình bổ trợ cần xây dựng**:
+Thu thêm phụ phí trả khác điểm (Drop-off Fee) để bù chi phí điều xe.
+Tự động điều chuyển vị trí xe vehicles.branch_id = return_branch_id khi đơn hàng chuyển sang trạng thái RETURNED.
+Xây dựng luồng Điều phối xe liên chi nhánh (vehicles.status = 4: TRANSFERRED).

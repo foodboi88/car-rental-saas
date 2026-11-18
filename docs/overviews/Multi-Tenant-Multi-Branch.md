@@ -331,83 +331,97 @@ Branch A1 không thấy xe của Branch A2 (multi-branch, cùng tenant)
 
 ---
 
-## 7. Cơ chế Phân quyền Multi-Branch: RBAC + ABAC
+## 7. Cơ chế Phân quyền: Dynamic RBAC + ABAC theo Chi nhánh
 
-### 7.1 Bài toán
+### 7.1 Bài toán Phân quyền trong Hệ thống Car Rental SaaS
 
-Một User có thể làm việc tại nhiều Branch trong cùng một Tenant. Cần cơ chế phân quyền đảm bảo:
-- User chỉ truy cập được dữ liệu thuộc Tenant của họ (Multi-tenant isolation)
-- User chỉ thấy dữ liệu thuộc các Branch họ được phân công (Multi-branch scoping)
-- Cùng một Role (vd: STAFF) nhưng khác Branch sẽ thấy dữ liệu khác nhau
+Một User có thể làm việc tại nhiều Chi nhánh (Branch) trong cùng một Nhà xe (Tenant). Hệ thống cần cơ chế phân quyền 2 lớp kết hợp:
+- **Lớp 1 (Hành động):** User có được phép thực hiện chức năng này hay không? (VD: Xem danh sách xe, Duyệt đơn, Giao xe).
+- **Lớp 2 (Phạm vi dữ liệu):** Nếu được phép, User được xem/sửa dữ liệu của Nhà xe nào và Chi nhánh nào?
+- **Yêu cầu thực tế:** Cùng có quyền xem lịch xe, nhưng nhân viên Chi nhánh Hà Nội tuyệt đối không được xem hoặc can thiệp vào xe của Chi nhánh Đà Nẵng.
 
-### 7.2 RBAC (Role-Based Access Control) — "Ai được làm gì?"
+---
 
-RBAC phân quyền theo **vai trò cố định** được gán cho User. Role quyết định tập hành động (permissions) được phép thực hiện.
+### 7.2 Dynamic RBAC (Role-Based Access Control) — "Được làm hành động gì?"
 
-```
-VÍ DỤ PHÂN QUYỀN:
-─────────────────────────────────────────────
-SUPER_ADMIN    → Toàn quyền trên tất cả Tenant, bypass RLS
-TENANT_ADMIN   → Full quyền trong Tenant: CRUD Branch, Vehicle, User, Booking, Report
-BRANCH_MANAGER → Quản lý 1+ Branch được gán: CRUD Vehicle, Booking, Staff của branch đó
-STAFF          → Tác nghiệp tại Branch: tạo Booking, giao/nhận xe, xem lịch xe
-```
+RBAC kiểm soát quyền truy cập dựa trên **Quyền nguyên tử (Permissions)** thông qua **Nhóm quyền động (Dynamic Roles)** trong từng Tenant:
 
-**Cách triển khai:**
-- Mỗi User có 1 Role (`user.role` column)
-- Role → Permissions mapping được định nghĩa tập trung (enum hoặc config)
-- Spring Security `@PreAuthorize` kiểm tra role tại tầng API/Service
-- Ví dụ: `@PreAuthorize("hasRole('TENANT_ADMIN')")` trên endpoint tạo Branch
-
-### 7.3 ABAC (Attribute-Based Access Control) — "Trên dữ liệu nào?"
-
-ABAC kiểm soát truy cập dựa trên **thuộc tính động** của request và resource. ABAC bổ sung cho RBAC khi cần kiểm soát mịn hơn cấp Role.
+* **Bảng `permissions`:** Danh mục các hành động nghiệp vụ cố định toàn hệ thống (VD: `vehicle:read`, `vehicle:create`, `booking:create`, `booking:handover`, `booking:return`).
+* **Bảng `roles`:** Các nhóm quyền được khởi tạo riêng cho từng Tenant (`tenant_id NOT NULL`), gồm các role hệ thống mặc định (`TENANT_ADMIN`, `STAFF`, `SALE`) hoặc custom role do nhà xe tự tạo thêm.
+* **Bảng `role_permissions`:** Gán tập hợp các quyền nguyên tử (`permissions`) vào từng `role`.
 
 ```
-CÁC THUỘC TÍNH (ATTRIBUTES):
-─────────────────────────────────────────────
-USER attributes:     user.id, user.role, user.assigned_branches[]
-RESOURCE attributes: booking.branch_id, vehicle.tenant_id, booking.status
-CONTEXT attributes:  current_time, request_ip, booking.state_transition
+CẤU TRÚC PHÂN QUYỀN ĐỘNG:
+────────────────────────────────────────────────────────────────────────
+TENANT_ADMIN → Sở hữu toàn bộ Permissions của Tenant.
+STAFF        → booking:read, booking:create, booking:handover, booking:return, vehicle:read...
+SALE         → booking:read, booking:create, customer:create...
 ```
 
-**Ví dụ ABAC rules:**
+* **Cách triển khai ở Backend:**
+  - Token JWT chứa danh sách quyền nguyên tử (Authorities) của User ứng với Tenant hiện tại.
+  - Sử dụng `@PreAuthorize("hasAuthority('booking:create')")` tại tầng Controller/Service để kiểm soát hành động.
 
-| Rule | Mô tả |
-|------|-------|
-| `user.tenant_id == resource.tenant_id` | User chỉ đọc được dữ liệu thuộc Tenant của mình |
-| `resource.branch_id IN user.assigned_branches` | User chỉ thấy dữ liệu của Branch họ được gán |
-| `booking.status == 'in_progress' AND user.role == 'STAFF'` | STAFF chỉ được sửa booking đang in_progress |
-| `payment.amount < 5_000_000 OR user.role == 'BRANCH_MANAGER'` | STAFF không được duyệt thanh toán > 5tr |
+---
 
-**Cách triển khai:**
-- `TenantInterceptor` set `app.current_tenant_id` vào DB session → PostgreSQL RLS tự động filter
-- `BranchContext` lưu `current_branch_id` từ request (header hoặc query param)
-- Query layer tự động append `WHERE branch_id = ?` khi User có role STAFF/BRANCH_MANAGER
-- SUPER_ADMIN và TENANT_ADMIN có thể switch branch context để xem dữ liệu đa chi nhánh
+### 7.3 ABAC (Attribute-Based Access Control) — "Trên dữ liệu / Chi nhánh nào?"
 
-### 7.4 Cách RBAC + ABAC kết hợp trong 1 request
+Sau khi RBAC xác nhận User có quyền thực hiện hành động, **ABAC** tiếp tục can thiệp ở tầng Service/Repository để giới hạn **phạm vi dòng dữ liệu (Data Scoping)** dựa trên các thuộc tính ngữ cảnh:
 
 ```
-REQUEST: STAFF "user_A" (thuộc Branch 1, 2) gọi API GET /bookings
+CÁC THUỘC TÍNH NGỮ CẢNH (ATTRIBUTES):
+────────────────────────────────────────────────────────────────────────
+THUỘC TÍNH USER:     user.tenant_id, user.active_branch_id, user.assigned_branches[]
+THUỘC TÍNH DỮ LIỆU:  booking.tenant_id, booking.branch_id, vehicle.branch_id, vehicle.status
+THUỘC TÍNH MÔI TRƯỜNG: current_timestamp, hold_expires_at
+```
 
-BƯỚC 1 — RBAC (API layer):
-──────────────────────────
-@PreAuthorize("hasAnyRole('STAFF', 'BRANCH_MANAGER', 'TENANT_ADMIN')")
-→ Role STAFF được phép gọi endpoint này → PASS
+**Quy tắc lọc dữ liệu (Scoping Rules) theo Role:**
 
-BƯỚC 2 — ABAC (Service layer):
-──────────────────────────
-Xác định scope từ user context:
-  user.assigned_branches = [branch_1, branch_2]
-  current_branch = branch_1 (từ request header)
-→ Tự động filter: SELECT * FROM bookings WHERE branch_id IN ('branch_1', 'branch_2')
+| Nhóm Role | Thuộc tính kiểm tra | Phạm vi dữ liệu nhìn thấy / tác nghiệp |
+| :--- | :--- | :--- |
+| **TENANT_ADMIN** | `tenant_id` | Toàn quyền xem và tác nghiệp trên **toàn bộ Chi nhánh** của Nhà xe. |
+| **STAFF** | `tenant_id` + `active_branch_id` | Chỉ xem và tác nghiệp trên dữ liệu của **Chi nhánh đang trực** (`active_branch_id` nằm trong danh sách `user_branches` được phân công). |
+| **SALE** | `tenant_id` + `created_by` | Xem toàn bộ xe khả dụng trong Tenant để tư vấn chốt khách, nhưng chỉ quản lý các đơn booking do chính mình tạo ra (`created_by = user.id`) để theo dõi hoa hồng. |
 
-BƯỚC 3 — ABAC (DB layer):
-──────────────────────────
-PostgreSQL RLS policy:
-  USING (tenant_id = current_setting('app.current_tenant_id'))
-→ DB đảm bảo không lộ data cross-tenant, kể cả khi code quên filter
+---
+
+### 7.4 Cách phối hợp RBAC + ABAC trong 1 Luồng Request Thực tế
+
+Dưới đây là luồng xử lý hoàn chỉnh khi nhân viên bãi gọi API lấy danh sách đơn thuê xe:
+
+```
+REQUEST: Nhân viên STAFF gửi request: GET /api/v1/bookings
+Context: tenant_id = "TN-01", active_branch_id = "BR-HN-01"
+
+┌─────────────────────────────────────────────────────────────────┐
+│ BƯỚC 1: KIỂM TRA HÀNH ĐỘNG (RBAC tại Controller Layer)          │
+├─────────────────────────────────────────────────────────────────┤
+│ @PreAuthorize("hasAuthority('booking:read')")                   │
+│ → User có quyền "booking:read" trong token → HỢP LỆ (PASS)      │
+└────────────────┬────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ BƯỚC 2: RÀNG BUỘC PHẠM VI DỮ LIỆU (ABAC tại Service Layer)     │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Đọc tenant_id từ TenantContext (ThreadLocal).                │
+│ 2. Lấy active_branch_id từ Header ("X-Active-Branch-Id").       │
+│ 3. Kiểm tra User có thực sự thuộc active_branch_id này không:   │
+│    userBranchRepository.existsByUserIdAndBranchId(...)          │
+│    -> Nếu không thuộc -> Ném 403 Forbidden.                     │
+└────────────────┬────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ BƯỚC 3: TRUY VẤN DỮ LIỆU CÔ LẬP (Repository / SQL Layer)       │
+├─────────────────────────────────────────────────────────────────┤
+│ SQL Query thực thi:                                             │
+│ SELECT * FROM bookings                                          │
+│ WHERE tenant_id = :currentTenantId                              │
+│   AND branch_id = :activeBranchId;                              │
+│ → Kết quả: Chỉ trả về đơn hàng của đúng Chi nhánh Hà Nội.       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### 7.5 Mô hình dữ liệu User-Tenant-Branch
@@ -429,11 +443,12 @@ CREATE TABLE users (
 -- N-N: User thuộc những Tenant nào, với Role gì trong từng Tenant
 -- Cùng 1 User có thể là TENANT_ADMIN ở Tenant A, nhưng chỉ là STAFF ở Tenant B
 CREATE TABLE user_tenants (
-    user_id UUID NOT NULL REFERENCES users(id),
-    tenant_id UUID NOT NULL REFERENCES tenants(id),
-    role SMALLINT NOT NULL CHECK (role IN (1, 2, 3)), -- 1: TENANT_ADMIN, 2: STAFF, 3: SALE
-    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (user_id, tenant_id)
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, -- Mã ID người dùng (FK users)
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Mã ID nhà xe (FK tenants)
+    role_id UUID NOT NULL REFERENCES roles(id),                   -- Mã ID nhóm quyền động (FK roles)
+    joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm người dùng gia nhập tenant
+    PRIMARY KEY (user_id, tenant_id),
+    CONSTRAINT fk_user_tenant_role FOREIGN KEY (role_id, tenant_id) REFERENCES roles(id, tenant_id)
 );
 
 -- SUPER_ADMIN: role được lưu trực tiếp trên users (không cần user_tenants)
@@ -443,39 +458,37 @@ CREATE TABLE user_tenants (
 -- Áp dụng cho STAFF (Admin chọn danh sách branch để phân công) và SALE (Hệ thống tự động gán toàn bộ active branches của Tenant).
 -- Cả STAFF và SALE đều phải chọn active_branch_id khi tác nghiệp. TENANT_ADMIN bypass kiểm tra user_branches.
 CREATE TABLE user_branches (
-    user_id UUID NOT NULL,
-    tenant_id UUID NOT NULL,
-    branch_id UUID NOT NULL,
-    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    status SMALLINT DEFAULT 1, -- 1: ACTIVE, 0: INACTIVE
+    user_id UUID NOT NULL,                                       -- Mã ID người dùng (FK user_tenants)
+    tenant_id UUID NOT NULL,                                     -- Mã ID nhà xe (FK user_tenants)
+    branch_id UUID NOT NULL,                                     -- Mã ID chi nhánh được gán (FK branches)
+    status SMALLINT NOT NULL DEFAULT 1                           -- Trạng thái làm việc: 1: ACTIVE (Đang làm), 2: SUSPENDED (Tạm dừng), 3: RESIGNED (Nghỉ việc)
+        CHECK (status IN (1, 2, 3)),
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Ngày bắt đầu làm việc tại chi nhánh này
+    ended_at TIMESTAMP WITH TIME ZONE,                           -- Ngày kết thúc làm việc tại chi nhánh (NULL nếu đang làm)
+    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,     -- ID Admin thực hiện cập nhật trạng thái/gán chi nhánh
     PRIMARY KEY (user_id, branch_id),
-    -- FK composite: đảm bảo user thuộc cùng tenant với branch
-    CONSTRAINT fk_user_branch_user_tenant FOREIGN KEY (user_id, tenant_id) 
+    CONSTRAINT fk_user_branch_user_tenant FOREIGN KEY (user_id, tenant_id)
         REFERENCES user_tenants(user_id, tenant_id) ON DELETE CASCADE,
-    -- FK composite: đảm bảo branch thuộc cùng tenant với user
-    CONSTRAINT fk_user_branch_branch_tenant FOREIGN KEY (branch_id, tenant_id) 
+    CONSTRAINT fk_user_branch_branch_tenant FOREIGN KEY (branch_id, tenant_id)
         REFERENCES branches(id, tenant_id) ON DELETE CASCADE
 );
 ```
 
 **Quy tắc phân quyền theo role:**
 
-| Role | Giá trị số | Phạm vi Tenant | Phạm vi Branch | Ghi chú |
+| Role | CODE | Phạm vi Tenant | Phạm vi Branch | Ghi chú |
 |------|:---:|---------------|----------------|---------|
 | `SUPER_ADMIN` | N/A | Tất cả Tenant (bypass RLS) | Tất cả Branch | Lưu trực tiếp trên `users`, không cần `user_tenants` |
-| `TENANT_ADMIN`| `1` | 1 Tenant | Tất cả Branch trong Tenant | Có `user_tenants`, không cần `user_branches` (bypass) |
-| `STAFF`       | `2` | 1 Tenant | 1+ Branch được phân công | Admin chọn danh sách branch trên form (`branchIds`), lưu vào `user_branches`. Chọn `active_branch_id` khi tác nghiệp (giao, nhận xe, quản lý bãi). |
-| `SALE`        | `3` | 1 Tenant | Toàn bộ Branch của Tenant | 1 Sale có thể thuộc nhiều Tenant. Form không cần chọn branch, Backend tự động gán full active branches vào `user_branches`. Bắt buộc chọn `active_branch_id` khi tác nghiệp để BE biết ngữ cảnh xử lý. |
+| `TENANT_ADMIN`| `TENANT_ADMIN` | 1 Tenant | Tất cả Branch trong Tenant | Có `user_tenants`, không cần `user_branches` (bypass) |
+| `STAFF`       | `STAFF` | 1 Tenant | 1+ Branch được phân công | Admin chọn danh sách branch trên form (`branchIds`), lưu vào `user_branches`. Chọn `active_branch_id` khi tác nghiệp. |
+| `SALE`        | `SALE` | 1 Tenant | Toàn bộ Branch của Tenant | 1 Sale có thể thuộc nhiều Tenant. Tự động gán full active branches vào `user_branches`. Chọn `active_branch_id` khi tác nghiệp. |
+
 
 **Ví dụ thực tế:**
 ```
-User "Nguyen Van A" (email: anv@email.com)
-├── Tenant "RentCar VN":     role = 1 (TENANT_ADMIN) → toàn quyền tất cả Branch
-└── Tenant "Xe Điện Sài Gòn": role = 2 (STAFF)        → Admin phân công vào Branch B1, B2 (chọn 1 Branch để trực)
+User "Nguyen Van A" (email: anv@email.com) ├── Tenant "RentCar VN": role = TENANT_ADMIN → toàn quyền tất cả Branch └── Tenant "Xe Điện Sài Gòn": role = STAFF → Admin phân công vào Branch B1, B2 (chọn 1 Branch để trực)
 
-User "Tran Thi B" (email: btt@email.com)
-├── Tenant "RentCar VN":     role = 2 (STAFF)        → Admin phân công vào Branch A1
-└── Tenant "Taxi Nha Trang": role = 3 (SALE)         → kinh doanh tại Taxi Nha Trang (tự động gán toàn bộ Branch, chọn 1 Branch để tác nghiệp)
+User "Tran Thi B" (email: btt@email.com) ├── Tenant "RentCar VN": role = STAFF → Admin phân công vào Branch A1 └── Tenant "Taxi Nha Trang": role = SALE → kinh doanh tại Taxi Nha Trang (chọn 1 Branch để tác nghiệp)
 ```
 
 **Lợi ích của thiết kế này:**

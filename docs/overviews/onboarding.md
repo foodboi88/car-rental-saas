@@ -197,7 +197,7 @@ Khi khách hàng trả xe về bãi:
 Dự án sử dụng kiến trúc Spring Boot Monolith gọn nhẹ nhằm tối ưu hóa thời gian phát triển và chi phí hạ tầng trong giai đoạn MVP.
 
 ### 4.1 Tech Stack Thực Tế (MVP Scope)
-*   **Backend Framework:** Java 17 + Spring Boot 3.3.x (Spring Data JPA, Spring Security).
+*   **Backend Framework:** Java 17 + Spring Boot 4.0.x (Spring Data JPA, Spring Security).
 *   **Database:** PostgreSQL 15+ (Single instance, shared schema, phân tách dữ liệu qua `tenant_id`).
 *   **Hạ tầng:** Docker Compose (single instance để chạy BE + DB).
 *   **File Storage:** AWS S3 / MinIO (Lưu ảnh xe, ảnh giấy tờ khách hàng).
@@ -217,19 +217,23 @@ Thay vì sử dụng Redis Distributed Lock, hệ thống sử dụng giải ph�
 [Xe đang rảnh trong khoảng ngày]                     [Xe đã bị giữ/đã thuê]
       │                                                         │
       ▼                                                         ▼
-[Tạo bản ghi Booking ở trạng thái PENDING_HANDOVER]     [Trả về lỗi: VEHICLE_NOT_AVAILABLE]
-[Kích hoạt Hold Timer trên Memory (5 phút)]
+[Tạo bản ghi Booking ở trạng thái HOLD ]     [Trả về lỗi: VEHICLE_NOT_AVAILABLE]
+[Kích hoạt Hold Timer trên Memory (cấu hình động theo từng nhà xe (mặc định 30 phút trong tenant_configs.hold_timeout_minutes))]
       │
-      ├────────────────────────────┐
-      ▼ (Ghi nhận cọc thành công)   ▼ (Hết 5 phút không cọc)
-[Hủy Hold Timer, chốt giữ xe]      [Hệ thống tự động hủy booking]
-[Booking tiếp tục ở trạng thái      [Giải phóng trạng thái xe]
- PENDING_HANDOVER (Chờ giao xe)]
+      ├───────────────────────────────────────────────────────────────────┐
+      ▼ (Ghi nhận cọc thành công)                                         ▼ (Hết thời gian không cọc)
+[Hủy Hold Timer, chốt giữ xe]                               [Hệ thống tự động hủy booking]
+[Booking tiếp tục ở trạng thái CONFIRMED  (Chờ giao xe)] [Đổi trạng thái booking sang Cancelled]
+      |                                                                      
+  HANDED_OVER 
+      |
+  RETURNED
+
 ```
 
 1.  **SELECT FOR UPDATE:** Khi có yêu cầu kiểm tra và tạo giữ chỗ cho một xe từ ngày A đến ngày B, hệ thống thực hiện truy vấn khóa dòng dữ liệu của xe đó trong Database để đảm bảo tại một thời điểm chỉ có duy nhất một tiến trình được quyền xử lý nghiệp vụ đặt xe cho chiếc xe này.
-2.  **Hold Timer (Giữ chỗ tạm):** Bản ghi booking được tạo ra ở trạng thái chờ bàn giao/chờ cọc (`PENDING_HANDOVER`) với thời gian giữ chỗ mặc định là 5 phút. 
-3.  **Xác nhận/Hủy tự động:** Nếu trong vòng 5 phút nhà xe ghi nhận khách đã đóng tiền cọc thành công, hệ thống sẽ hủy Timer tự động hủy và chốt giữ xe cố định ở trạng thái `PENDING_HANDOVER`. Nếu quá 5 phút mà không có thông tin cọc được ghi nhận, hệ thống tự động hủy booking, giải phóng xe về trạng thái `AVAILABLE`.
+2.  **Hold Timer (Giữ chỗ tạm):** Bản ghi booking được tạo ra ở trạng thái chờ bàn giao/chờ cọc (`HOLD `) với thời gian giữ chỗ duoc cau hinh trong tenant_configs.hold_timeout_minutes. 
+3.  **Xác nhận/Hủy tự động:** Nếu trong vòng thời gian hold nhà xe ghi nhận khách đã đóng tiền cọc thành công, hệ thống sẽ hủy Timer tự động hủy và chốt giữ xe cố định ở trạng thái `CONFIRMED `. Nếu quá thời gian hold mà không có thông tin cọc được ghi nhận, hệ thống tự động hủy booking, giải phóng xe về trạng thái `AVAILABLE`.
 
 ---
 
@@ -243,6 +247,7 @@ Trường `plan_tier` của bảng `tenants` được lưu trữ dưới dạng 
 *   `4`: `ENTERPRISE` (Gói doanh nghiệp lớn).
 
 ### 5.2 Cơ Chế Cô Lập Dữ Liệu (Postgres Row-Level Security)
+Hiện tại ở giai đoạn MVP, cơ chế cô lập đang được thực thi ở tầng Application (TenantContext ThreadLocal). Mục 5.2 là thiết kế mục tiêu cấp Database RLS trong tương lai.
 Để ngăn ngừa hoàn toàn nguy cơ rò rỉ chéo dữ liệu giữa các nhà xe đối thủ (IDOR, SQL Injection bypass), dự án áp dụng chính sách bảo mật **Row-Level Security (RLS)** ở tầng cơ sở dữ liệu trên tất cả các bảng có chứa cột `tenant_id`.
 
 1.  **Tầng Application:** `JwtAuthenticationFilter` giải mã access token của người dùng, lấy ra `tenant_id` và lưu trữ vào ThreadLocal thông qua class `TenantContext`.
@@ -282,11 +287,11 @@ Trường `plan_tier` của bảng `tenants` được lưu trữ dưới dạng 
 ```
 
 ### 6.1 Chi Tiết Các Phase Phát Triển
-
+Hiện tại ở giai đoạn MVP, cơ chế cô lập đang được thực thi ở tầng Application (TenantContext ThreadLocal). Mục 5.2 là thiết kế mục tiêu cấp Database RLS trong tương lai.
 #### Phase 1: Thiết Lập Nền Móng (Weeks 1 - 5)
 *   **Mục tiêu:** Xây dựng xong bộ khung kỹ thuật vững chắc cho việc bảo mật và tách biệt dữ liệu đa chi nhánh, đa khách hàng.
 *   **Nhiệm vụ trọng tâm:**
-    *   Setup Boilerplate backend (Spring Boot 3.3, Flyway migration, Exception handler, Swagger).
+    *   Setup Boilerplate backend (Spring Boot 4.0.x, Flyway migration, Exception handler, Swagger).
     *   Thiết kế DB Schema cơ bản, kích hoạt Postgres RLS trên toàn bộ các bảng nghiệp vụ.
     *   Xây dựng hệ thống Đăng nhập tập trung bằng JWT (AccessToken 15 phút, RefreshToken 7 ngày đặt trong HttpOnly Cookie).
     *   Xây dựng tính năng Tenant Picker cho người dùng có nhiều doanh nghiệp.
@@ -298,7 +303,7 @@ Trường `plan_tier` của bảng `tenants` được lưu trữ dưới dạng 
     *   **Module Fleet:** CRUD Chi nhánh (`branches`), CRUD Loại xe (`vehicle_types`), CRUD Xe (`vehicles`) kèm quy trình chuyển đổi trạng thái xe.
     *   **Module Khách hàng:** CRUD thông tin khách hàng, tích hợp tính năng tự động mã hóa AES-256 các trường nhạy cảm (`id_card`, `driver_license`). Setup SDK S3 lưu trữ ảnh giấy tờ.
     *   **Module Booking:** Xây dựng công cụ đặt xe trực quan (Calendar/Table) cho nhân viên Back Office.
-    *   **Hold Engine:** Hiện thực hóa cơ chế lock DB giữ xe trong 5 phút chờ cọc.
+    *   **Hold Engine:** Hiện thực hóa cơ chế lock DB giữ xe theo thời gian cấu hình của nhà xe (mặc định 30 phút trong tenant_configs).
     *   **Module Giao/Nhận xe:** Form 3 bước ghi nhận km, mức nhiên liệu, ghi chú hư hại lúc giao xe và nhận xe.
     *   **Module Thanh toán:** Ghi nhận thông tin thanh toán (Số tiền, Phương thức: Tiền mặt/Chuyển khoản, Mã tham chiếu, Ngày thanh toán) được nhân viên nhập thủ công sau khi khách thanh toán ngoại tuyến bên ngoài.
     *   **Module Báo cáo:** 3 báo cáo thiết yếu gồm doanh thu ngày, hiệu suất khai thác đội xe, và danh sách booking cần xử lý trong ngày.
@@ -337,7 +342,7 @@ Tất cả giao diện của hệ thống được tối ưu hóa cho **Mobile W
     > *"Design a responsive, mobile-first web page containing a 'Create Booking' form for a car rental SaaS application. At the top, place a prominent dashed-border upload area with a camera icon labeled 'Scan ID/Driver License to Autofill'. Below this, show input fields for Customer Name, Phone, ID Card Number, and Driver License (styled as autofilled fields). Next, add selectors for Branch, Select Vehicle (with small green 'Available' tags), and Datetime Pickers for pickup/return. At the bottom, display a summary card showing 'Total Amount' and a numeric input for 'Deposit Amount' with a payment method toggle. Clean Tailwind CSS, optimized for one-hand mobile input."*
 
 #### MÀN HÌNH 3: Chi Tiết Đơn Hàng & Giao Nhận Xe (Booking Detail & Handover Checklist)
-*   **Mô tả:** Đầu màn hình hiển thị thanh tiến trình 3 bước (`Pending Handover` -> `In Progress` -> `Completed`). Có nút gọi điện nhanh cho khách (`tel:`). Phần cốt lõi là checklist bàn giao vật lý: Nhập số Km hiện tại, chọn vạch xăng trực quan (1/4, 1/2, 3/4, Full), và upload tối đa 4 ảnh chụp hiện trạng xe. Nút hành động chính đổi động: `Deliver Vehicle` (khi trạng thái là PENDING_HANDOVER - Chờ giao xe) và `Receive Vehicle` (khi trạng thái là IN_PROGRESS - Đang thuê / Đã bàn giao).
+*   **Mô tả:** Đầu màn hình hiển thị thanh tiến trình 4 bước (HOLD →→ CONFIRMED →→ HANDED_OVER →→ RETURNED (hoặc CANCELLED)). Có nút gọi điện nhanh cho khách (`tel:`). Phần cốt lõi là checklist bàn giao vật lý: Nhập số Km hiện tại, chọn vạch xăng trực quan (1/4, 1/2, 3/4, Full), và upload tối đa 4 ảnh chụp hiện trạng xe. Nút hành động chính đổi động: `Deliver Vehicle` (khi trạng thái là CONFIRMED - Đã chốt cọc / Chờ giao xe) và `Receive Vehicle` (khi trạng thái là HANDED_OVER - Đang thuê / Đã bàn giao xe).
 *   **Prompt mẫu cho AI:**
     > *"Create a mobile-first, responsive web page for a 'Booking Detail & Handover' screen of a SaaS car rental platform. Display a status progress bar at the top (Pending Handover -> In Progress -> Completed) with appropriate status badges. Show customer details with a quick-call link (tel:), and booking details. Include a 'Vehicle Handover Checklist' section where staff can input current Kilometers, Fuel Level (visual progress bar selector), and upload 4 photos of the vehicle's current state. The primary action button at the bottom should change dynamically based on status: 'Deliver Vehicle' (when pending_handover) and 'Receive Vehicle' (when in_progress). Use a clean card layout with high contrast."*
 
@@ -373,7 +378,7 @@ Khi API trả về thất bại (`success: false`), client cần dựa vào `err
 *   `AUTH_FAILED`: Đăng nhập thất bại (sai email hoặc mật khẩu).
 *   `TENANT_ACCESS_DENIED`: Người dùng không có quyền truy cập vào Tenant được chọn hoặc một chi nhánh không thuộc Tenant của họ.
 *   `VEHICLE_NOT_AVAILABLE`: Xe đã có lịch đặt hoặc đang được giữ chỗ tạm thời trong khoảng thời gian yêu cầu.
-*   `BOOKING_EXPIRED`: Hết hạn giữ xe (quá 5 phút giữ chỗ tạm mà chưa đóng cọc).
+*   `BOOKING_EXPIRED`: Hết hạn giữ xe (quá quá thời gian giữ chỗ tạm mà chưa đóng cọc).
 *   `CUSTOMER_ALREADY_EXISTS`: Khách hàng đã được đăng ký trong hệ thống của nhà xe (trùng SĐT hoặc CCCD).
 *   `INVALID_OPERATION`: Thao tác sai quy trình nghiệp vụ (ví dụ: Nhân viên Sales cố tình thực hiện handover xe, hoặc cố tình promoted nhân viên thường lên Tenant Admin).
 
@@ -394,7 +399,7 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 
 #### A. Tổng quan & Trạng thái
 * **Trạng thái**: **ĐÃ HOÀN THÀNH (Done)**
-* **Mục tiêu**: Khởi tạo base project Spring Boot 3.3.x (Java 17, Spring Security, Spring Data JPA, Flyway, PostgreSQL) và xây dựng hệ thống đăng nhập tập trung, cấp JWT token (Access + Refresh) hỗ trợ người dùng thuộc 1 hoặc nhiều Tenant.
+* **Mục tiêu**: Khởi tạo base project Spring Boot 4.0.x (Java 17, Spring Security, Spring Data JPA, Flyway, PostgreSQL) và xây dựng hệ thống đăng nhập tập trung, cấp JWT token (Access + Refresh) hỗ trợ người dùng thuộc 1 hoặc nhiều Tenant.
 
 #### B. Phân quyền & Vai trò trong hệ thống
 * `SUPER_ADMIN`: Quản trị viên toàn hệ thống SaaS (`is_super_admin = true` trong bảng `users`).

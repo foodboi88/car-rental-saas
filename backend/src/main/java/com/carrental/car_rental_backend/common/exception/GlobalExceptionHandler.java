@@ -3,6 +3,8 @@ package com.carrental.car_rental_backend.common.exception;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -82,5 +84,14 @@ public class GlobalExceptionHandler {
       String.format("Bạn đang truyền sai kiểu dữ liệu của parameter '%s', kiểu dữ liệu mong muốn '%s'", methodEx.getName(), methodEx.getRequiredType())
     );
     return ResponseEntity.status(errorCode.getHttpStatus()).body(response);
+  }
+
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException ex) {
+      log.error("Database constraint violation detected: ", ex);
+      // Trả về HTTP 409 CONFLICT
+      return ResponseEntity.status(HttpStatus.CONFLICT).body(
+          ApiResponse.error("DATA_INTEGRITY_CONFLICT", "Dữ liệu gửi lên không hợp lệ hoặc xảy ra xung đột...")
+      );
   }
 }
