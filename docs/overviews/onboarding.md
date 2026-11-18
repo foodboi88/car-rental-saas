@@ -115,14 +115,14 @@ erDiagram
 
 #### C. Tuân thủ Tiêu hủy Dữ liệu (Auto-delete S3)
 *   **Dữ liệu văn bản (Text):** Dữ liệu chữ (sau khi đã được mã hóa) được lưu trữ lâu dài trong Database để phục vụ nghiệp vụ Autofill khi khách hàng quay lại thuê xe lần sau.
-*   **Dữ liệu hình ảnh (Images):** Ảnh chụp giấy tờ là dữ liệu có độ nhạy cảm pháp lý cao. Hệ thống cấu hình **S3 Lifecycle Rules** tự động quét và xóa vĩnh viễn (Hard Delete) toàn bộ file ảnh giấy tờ của khách hàng trên S3 sau **180 ngày (6 tháng)** kể từ ngày tải lên. 
+*   **Dữ liệu hình ảnh (Images):** Ảnh chụp giấy tờ là dữ liệu có độ nhạy cảm pháp lý cao. Hệ thống cấu hình xóa sau 60–90 ngày sau khi đơn RETURNED bằng Cronjob. 
     *   *Ý nghĩa:* Giải phóng dung lượng đĩa cứng lưu trữ của hệ thống SaaS, đồng thời loại bỏ hoàn toàn rủi ro pháp lý về việc lưu trữ ảnh tài sản cá nhân quá thời hạn nghiệp vụ cần thiết.
 
 #### D. Tra cứu Xử lý Sự cố (Phạt nguội / Yêu cầu của Cơ quan Chức năng)
 Khi có sự cố xảy ra (ví dụ: phạt nguội giao thông, tai nạn, xe bị chiếm đoạt):
 1.  Nhà xe truy cập Dashboard quản trị, nhập Biển số xe và Thời điểm vi phạm.
 2.  Hệ thống truy xuất Booking tương ứng, tiến hành giải mã dữ liệu text và hiển thị thông tin người lái xe lúc đó: Họ tên, Số CCCD, SĐT, Số Bằng lái.
-3.  Tải ảnh giấy tờ đối chiếu (nếu sự cố xảy ra trong vòng 180 ngày). Nếu quá 180 ngày, ảnh giấy tờ đã bị xóa tự động trên S3, nhà xe sử dụng thông tin dạng văn bản kết hợp với Hợp đồng ký kết offline bên ngoài để làm việc với Công an.
+3.  Tải ảnh giấy tờ đối chiếu (nếu sự cố xảy ra trong vòng 60–90 ngày). Nếu quá 60–90 ngày, ảnh giấy tờ đã bị xóa tự động trên S3, nhà xe sử dụng thông tin dạng văn bản kết hợp với Hợp đồng ký kết offline bên ngoài để làm việc với Công an.
 
 ### 3.3 Chi Tiết Tích Hợp OCR Tự Động Nhập Liệu
 Để tối ưu hóa trải nghiệm trên di động, hệ thống tích hợp API nhận diện ký tự quang học qua cổng Gateway nội bộ:
@@ -312,7 +312,7 @@ Hiện tại ở giai đoạn MVP, cơ chế cô lập đang được thực thi
 *   **Mục tiêu:** Đảm bảo hệ thống đạt độ bảo mật tối đa, hiệu năng cao dưới tải lớn và sẵn sàng onboard khách hàng thật.
 *   **Nhiệm vụ trọng tâm:**
     *   **Tích hợp & Kiểm thử:** Viết Unit Test cho Backend (mục tiêu coverage > 60%). Thực hiện viết kịch bản Integration Test giả lập toàn bộ luồng nghiệp vụ tự động từ lúc đặt xe đến khi trả xe.
-    *   **Lifecycle Rules:** Cấu hình tự động quét tiêu hủy ảnh giấy tờ sau 180 ngày trên S3 Bucket của AWS/MinIO.
+    *   **Lifecycle Rules:** Cấu hình tự động quét tiêu hủy ảnh giấy tờ sau 60–90 ngày trên S3 Bucket của AWS/MinIO.
     *   **Bảo mật:** Thực hiện kiểm tra lỗi bảo mật IDOR (do dữ liệu multi-tenant rất nhạy cảm) và SQL Injection.
     *   **Hiệu năng:** Thực hiện Load Test giả lập tải của 100 tenant chạy song song với 1000 đầu xe hoạt động liên tục. Đảm bảo thời gian phản hồi API trung bình < 500ms.
     *   **Triển khai:** Setup hạ tầng VPS Cloud Production, trỏ Domain hệ thống, cấu hình SSL/TLS tự động cho toàn bộ Tenant.
@@ -698,16 +698,15 @@ CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
 #### A. Tổng quan & Phạm vi
 * **Trạng thái**: **ĐÃ HOÀN THÀNH SPEC & BRAINSTORMING UI/UX**
 * **Mục tiêu**: Cho phép Chủ nhà xe (`TENANT_ADMIN`) và Nhân viên (`STAFF`) xem, khai thác và quản lý danh mục phân khúc xe (`vehicle_types`) cùng danh sách các xe vật lý (`vehicles`) trong hệ thống Multi-tenant Car Rental SaaS.
+* vehicle_types là danh mục dùng chung toàn hệ thống do Super Admin quản lý (TENANT_ADMIN chỉ được Read-only chọn loại xe khi tạo xe).
 
 #### B. Phân quyền & Quota Cước (`max_vehicles`)
 1. **Phân quyền**:
-   * `TENANT_ADMIN`: Full CRUD đối với Loại xe và Xe. Được phép thêm, sửa, đổi trạng thái bảo dưỡng, đổi chi nhánh và xóa xe.
+   * `TENANT_ADMIN`: Full CRUD đối với Xe. Được phép thêm, sửa, đổi trạng thái bảo dưỡng, đổi chi nhánh và xóa xe.
    * `STAFF`: Quản lý danh sách xe tại chi nhánh được phân công (Read-only Loại xe, cập nhật Odo / Trạng thái bảo dưỡng / đổi vị trí xe đỗ).
    * `SALE`: Read-only danh sách xe trống trên toàn hệ thống để tư vấn booking.
 2. **Kiểm soát Hybrid SaaS Quota (`max_vehicles`)**:
-   * Gói **Starter**: Tối đa 15 Xe.
-   * Gói **Growth**: Tối đa 50 Xe.
-   * Gói **Enterprise**: Tối đa 200 Xe.
+   * Gói **FREE, BASIC, PRO, ENTERPRISE**
    * Kiểm tra quota khi gọi API `POST /api/v1/vehicles`. Nếu vượt quá quota trả về HTTP `400`/`403` mã lỗi `VEHICLE_QUOTA_EXCEEDED`.
 
 #### C. Quy tắc Trạng thái & Ràng buộc An toàn
@@ -717,7 +716,7 @@ CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
    * `3` - MAINTENANCE (🔴 Bảo dưỡng): Xe đang bảo dưỡng hoặc hỏng hóc.
    * `4` - TRANSFERRED (🟡 Điều phối): Xe đang di chuyển giữa các chi nhánh.
 2. **Ràng buộc khi Xóa**:
-   * **Xe**: Không cho phép xóa xe (Hard Delete) nếu xe đang nằm trong Booking active hoặc có lịch sử hợp đồng. Thực hiện Soft Delete (`is_active = false`).
+   * **Xe**: Không cho phép xóa xe (Hard Delete) nếu xe đang nằm trong Booking active hoặc có lịch sử hợp đồng. Thực hiện Soft Delete (Xóa xe dùng Soft Delete: chuyển trạng thái status = 5 (INACTIVE) (vì bảng xe không có cột is_active)).
    * **Loại xe**: Không cho phép xóa loại xe đang chứa xe (`Số xe thuộc loại > 0`). Hiển thị **Modal Cảnh báo Thông minh** kèm nút điều hướng `[Xem danh sách N xe này]` để đổi phân khúc cho các xe trước khi xóa.
 
 #### D. Thiết Kế Giao Diện Frontend (Mobile-First UI/UX Specification)

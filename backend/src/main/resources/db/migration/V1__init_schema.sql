@@ -1,17 +1,17 @@
--- ============================================================================
+﻿-- ============================================================================
 -- Car Rental SaaS - Squash Migration V1 (Initial Schema)
 -- Target: PostgreSQL 15+
 -- Specifications: docs/overviews/Database-Schema.md
 -- ============================================================================
 
--- Bật extension pgcrypto để phục vụ gen_random_uuid() và mã hóa dữ liệu
+-- Báº­t extension pgcrypto Ä‘á»ƒ phá»¥c vá»¥ gen_random_uuid() vÃ  mÃ£ hÃ³a dá»¯ liá»‡u
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================================================
--- 1. BẢNG ĐỘC LẬP (TẦNG 1: Core Systems, Catalogs & Identifiers)
+-- 1. Báº¢NG Äá»˜C Láº¬P (Táº¦NG 1: Core Systems, Catalogs & Identifiers)
 -- ============================================================================
 
--- 1.1 tenants: Nhà xe / Doanh nghiệp cho thuê xe
+-- 1.1 tenants: NhÃ  xe / Doanh nghiá»‡p cho thuÃª xe
 CREATE TABLE tenants (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
@@ -21,12 +21,12 @@ CREATE TABLE tenants (
     contact_email VARCHAR(255),
     contact_phone VARCHAR(20),
     settings JSONB DEFAULT '{}'::jsonb,
-    is_active BOOLEAN DEFAULT TRUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 1.2 permissions: Danh mục Quyền nguyên tử toàn hệ thống
+-- 1.2 permissions: Danh má»¥c Quyá»n nguyÃªn tá»­ toÃ n há»‡ thá»‘ng
 CREATE TABLE permissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code VARCHAR(100) NOT NULL,
@@ -35,17 +35,17 @@ CREATE TABLE permissions (
     description TEXT
 );
 
--- 1.3 vehicle_types: Danh mục Loại xe System-wide
+-- 1.3 vehicle_types: Danh má»¥c Loáº¡i xe System-wide
 CREATE TABLE vehicle_types (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(50) NOT NULL,
     description TEXT,
-    is_active BOOLEAN DEFAULT TRUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 1.4 users: Tài khoản người dùng trung tâm
+-- 1.4 users: TÃ i khoáº£n ngÆ°á»i dÃ¹ng trung tÃ¢m
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) NOT NULL,
@@ -53,7 +53,7 @@ CREATE TABLE users (
     full_name VARCHAR(255),
     phone VARCHAR(20),
     avatar_url VARCHAR(500),
-    is_active BOOLEAN DEFAULT TRUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     is_super_admin BOOLEAN DEFAULT FALSE,
     last_login_at TIMESTAMP WITH TIME ZONE,
     current_session_id UUID,
@@ -62,10 +62,10 @@ CREATE TABLE users (
 );
 
 -- ============================================================================
--- 2. BẢNG PHỤ THUỘC TẦNG 2 (Cấu hình, Chi nhánh, Nhóm quyền & Khách hàng)
+-- 2. Báº¢NG PHá»¤ THUá»˜C Táº¦NG 2 (Cáº¥u hÃ¬nh, Chi nhÃ¡nh, NhÃ³m quyá»n & KhÃ¡ch hÃ ng)
 -- ============================================================================
 
--- 2.1 tenant_configs: Cấu hình động theo nhà xe (Quan hệ 1-1)
+-- 2.1 tenant_configs: Cáº¥u hÃ¬nh Ä‘á»™ng theo nhÃ  xe (Quan há»‡ 1-1)
 CREATE TABLE tenant_configs (
     tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
     hold_timeout_minutes INTEGER NOT NULL DEFAULT 30 CHECK (hold_timeout_minutes > 0),
@@ -75,7 +75,7 @@ CREATE TABLE tenant_configs (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2.2 branches: Chi nhánh / Bãi xe trực thuộc Nhà xe
+-- 2.2 branches: Chi nhÃ¡nh / BÃ£i xe trá»±c thuá»™c NhÃ  xe
 CREATE TABLE branches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -85,13 +85,13 @@ CREATE TABLE branches (
     email VARCHAR(255),
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
-    is_active BOOLEAN DEFAULT TRUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_branch_tenant UNIQUE (id, tenant_id)
 );
 
--- 2.3 roles: Danh mục Nhóm quyền động trong Tenant
+-- 2.3 roles: Danh má»¥c NhÃ³m quyá»n Ä‘á»™ng trong Tenant
 CREATE TABLE roles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -104,14 +104,14 @@ CREATE TABLE roles (
     CONSTRAINT unique_role_tenant UNIQUE (id, tenant_id)
 );
 
--- 2.4 role_permissions: Bảng liên kết N-N Nhóm quyền & Quyền nguyên tử
+-- 2.4 role_permissions: Báº£ng liÃªn káº¿t N-N NhÃ³m quyá»n & Quyá»n nguyÃªn tá»­
 CREATE TABLE role_permissions (
     role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
     permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
     PRIMARY KEY (role_id, permission_id)
 );
 
--- 2.5 customers: Khách hàng thuê xe & Quản lý hồ sơ / rủi ro
+-- 2.5 customers: KhÃ¡ch hÃ ng thuÃª xe & Quáº£n lÃ½ há»“ sÆ¡ / rá»§i ro
 CREATE TABLE customers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -132,10 +132,10 @@ CREATE TABLE customers (
 );
 
 -- ============================================================================
--- 3. BẢNG PHỤ THUỘC TẦNG 3 (Liên kết Thành viên & Quản lý Xe)
+-- 3. Báº¢NG PHá»¤ THUá»˜C Táº¦NG 3 (LiÃªn káº¿t ThÃ nh viÃªn & Quáº£n lÃ½ Xe)
 -- ============================================================================
 
--- 3.1 user_tenants: Phân quyền Người dùng theo từng Tenant (N-N)
+-- 3.1 user_tenants: PhÃ¢n quyá»n NgÆ°á»i dÃ¹ng theo tá»«ng Tenant (N-N)
 CREATE TABLE user_tenants (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -146,7 +146,7 @@ CREATE TABLE user_tenants (
         REFERENCES roles(id, tenant_id)
 );
 
--- 3.2 vehicles: Danh sách Xe cho thuê
+-- 3.2 vehicles: Danh sÃ¡ch Xe cho thuÃª
 CREATE TABLE vehicles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -172,10 +172,10 @@ CREATE TABLE vehicles (
 );
 
 -- ============================================================================
--- 4. BẢNG PHỤ THUỘC TẦNG 4 (Gán Chi nhánh cho Nhân sự)
+-- 4. Báº¢NG PHá»¤ THUá»˜C Táº¦NG 4 (GÃ¡n Chi nhÃ¡nh cho NhÃ¢n sá»±)
 -- ============================================================================
 
--- 4.1 user_branches: Phân công Nhân viên trực tại Chi nhánh (N-N)
+-- 4.1 user_branches: PhÃ¢n cÃ´ng NhÃ¢n viÃªn trá»±c táº¡i Chi nhÃ¡nh (N-N)
 CREATE TABLE user_branches (
     user_id UUID NOT NULL,
     tenant_id UUID NOT NULL,
@@ -192,10 +192,10 @@ CREATE TABLE user_branches (
 );
 
 -- ============================================================================
--- 5. BẢNG PHỤ THUỘC TẦNG 5 (Hợp đồng Thuê xe & Giao dịch)
+-- 5. Báº¢NG PHá»¤ THUá»˜C Táº¦NG 5 (Há»£p Ä‘á»“ng ThuÃª xe & Giao dá»‹ch)
 -- ============================================================================
 
--- 5.1 bookings: Đơn hàng thuê xe, Giữ cọc & Quyết toán
+-- 5.1 bookings: ÄÆ¡n hÃ ng thuÃª xe, Giá»¯ cá»c & Quyáº¿t toÃ¡n
 CREATE TABLE bookings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -235,7 +235,7 @@ CREATE TABLE bookings (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 
-    -- Ràng buộc toàn vẹn dữ liệu cấp Database
+    -- RÃ ng buá»™c toÃ n váº¹n dá»¯ liá»‡u cáº¥p Database
     CONSTRAINT fk_booking_branch_tenant FOREIGN KEY (branch_id, tenant_id)
         REFERENCES branches(id, tenant_id) ON DELETE RESTRICT,
     CONSTRAINT fk_booking_customer_tenant FOREIGN KEY (customer_id, tenant_id)
@@ -250,11 +250,14 @@ CREATE TABLE bookings (
         REFERENCES user_tenants(user_id, tenant_id) ON DELETE SET NULL (returned_by),
     CONSTRAINT unique_booking_tenant UNIQUE (id, tenant_id),
     CONSTRAINT check_booking_times CHECK (pickup_time < return_time),
-    CONSTRAINT check_booking_amounts CHECK (daily_rate >= 0 AND total_amount >= 0 AND deposit_amount >= 0)
+    CONSTRAINT check_booking_amounts CHECK (
+        daily_rate >= 0 AND total_amount >= 0 AND deposit_amount >= 0 
+        AND late_fee >= 0 AND commission_amount >= 0
+    )
 );
 
 -- ============================================================================
--- 6. HỆ THỐNG CHỈ MỤC TỐI ƯU TRUY VẤN (INDEXES)
+-- 6. Há»† THá»NG CHá»ˆ Má»¤C Tá»I Æ¯U TRUY Váº¤N (INDEXES)
 -- ============================================================================
 
 -- 6.1 tenants & branches
@@ -296,3 +299,4 @@ CREATE INDEX idx_bookings_status ON bookings(tenant_id, status);
 CREATE INDEX idx_bookings_times ON bookings(tenant_id, pickup_time, return_time);
 CREATE UNIQUE INDEX idx_bookings_tenant_code ON bookings(tenant_id, booking_code);
 CREATE INDEX idx_bookings_payment_status ON bookings(tenant_id, payment_status);
+

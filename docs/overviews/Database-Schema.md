@@ -241,7 +241,7 @@ CREATE TABLE tenants (
     contact_email VARCHAR(255),                                  -- Email liên hệ chính của nhà xe
     contact_phone VARCHAR(20),                                   -- Số điện thoại liên hệ chính của nhà xe
     settings JSONB DEFAULT '{}',                                 -- Cấu hình hệ thống mở rộng (JSONB)
-    is_active BOOLEAN DEFAULT TRUE,                              -- Trạng thái hoạt động (TRUE: Active, FALSE: Khóa / Tạm dừng dịch vụ)
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,                     -- Trạng thái hoạt động (TRUE: Active, FALSE: Khóa / Tạm dừng dịch vụ)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm khởi tạo tài khoản tenant
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật thông tin tenant gần nhất
 );
@@ -254,9 +254,9 @@ CREATE UNIQUE INDEX idx_tenants_domain ON tenants(domain);
 ```sql
 CREATE TABLE tenant_configs (
     tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE, -- Mã ID nhà xe chủ quản (PK, FK tenants - 1-1)
-    hold_timeout_minutes INTEGER NOT NULL DEFAULT 30,             -- Thời gian hold giữ chỗ chờ cọc (mặc định: 30 phút)
-    late_hourly_price DECIMAL(12, 2) NOT NULL DEFAULT 100000,     -- Đơn giá phạt trễ giờ (mặc định: 100.000 VNĐ/giờ)
-    default_commission_rate DECIMAL(5, 2) NOT NULL DEFAULT 5.00,  -- Tỷ lệ hoa hồng mặc định cho Sale/CTV (mặc định: 5.00%)
+    hold_timeout_minutes INTEGER NOT NULL DEFAULT 30 CHECK (hold_timeout_minutes > 0),             -- Thời gian hold giữ chỗ chờ cọc (mặc định: 30 phút)
+    late_hourly_price DECIMAL(12, 2) NOT NULL DEFAULT 100000 CHECK (late_hourly_price >= 0),     -- Đơn giá phạt trễ giờ (mặc định: 100.000 VNĐ/giờ)
+    default_commission_rate DECIMAL(5, 2) NOT NULL DEFAULT 5.00 CHECK (default_commission_rate >= 0 AND default_commission_rate <= 100),  -- Tỷ lệ hoa hồng mặc định cho Sale/CTV (mặc định: 5.00%)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tạo bản ghi cấu hình
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật cấu hình gần nhất
 );
@@ -274,7 +274,7 @@ CREATE TABLE branches (
     email VARCHAR(255),                                          -- Email liên hệ chi nhánh
     latitude DECIMAL(10, 8),                                     -- Tọa độ vĩ độ (GPS Latitude)
     longitude DECIMAL(11, 8),                                    -- Tọa độ kinh độ (GPS Longitude)
-    is_active BOOLEAN DEFAULT TRUE,                              -- Trạng thái hoạt động (TRUE: Active, FALSE: Inactive)
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,                              -- Trạng thái hoạt động (TRUE: Active, FALSE: Inactive)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tạo chi nhánh
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm cập nhật chi nhánh gần nhất
     CONSTRAINT unique_branch_tenant UNIQUE (id, tenant_id)
@@ -338,7 +338,7 @@ CREATE TABLE users (
     full_name VARCHAR(255),                                      -- Họ và tên người dùng
     phone VARCHAR(20),                                           -- Số điện thoại liên hệ
     avatar_url VARCHAR(500),                                     -- Đường dẫn ảnh đại diện
-    is_active BOOLEAN DEFAULT TRUE,                              -- Trạng thái kích hoạt tài khoản
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,                              -- Trạng thái kích hoạt tài khoản
     is_super_admin BOOLEAN DEFAULT FALSE,                        -- Cờ đánh dấu Super Admin toàn hệ thống SaaS (Bypasses RLS)
     last_login_at TIMESTAMP WITH TIME ZONE,                      -- Thời điểm đăng nhập thành công gần nhất
     current_session_id UUID,                                     -- Mã phiên đăng nhập hiện tại (Single Session - Chống đăng nhập đồng thời)
@@ -416,8 +416,8 @@ CREATE TABLE vehicles (
     model VARCHAR(100),                                          -- Dòng xe / Tên mẫu xe chi tiết (VD: Mazda 3, VF8)
     color VARCHAR(30),                                           -- Màu sơn xe
     year INTEGER,                                                -- Năm sản xuất / Đời xe
-    price_per_day DECIMAL(12, 2) NOT NULL DEFAULT 0,             -- Giá thuê ngày thường niêm yết (VNĐ/ngày)
-    weekend_price_per_day DECIMAL(12, 2),                        -- Giá thuê cuối tuần niêm yết (tùy chọn, VNĐ/ngày)
+    price_per_day DECIMAL(12, 2) NOT NULL DEFAULT 0 CHECK (price_per_day >= 0),             -- Giá thuê ngày thường niêm yết (VNĐ/ngày)
+    weekend_price_per_day DECIMAL(12, 2) CHECK (weekend_price_per_day IS NULL OR weekend_price_per_day >= 0),                        -- Giá thuê cuối tuần niêm yết (tùy chọn, VNĐ/ngày)
     parking_location TEXT,                                       -- Ghi chú vị trí đỗ thực tế (bãi ngoài, gửi nhà anh A/B/C, kho phụ)
     inspection_expiry_date DATE,                                 -- Ngày hết hạn đăng kiểm xe
     insurance_expiry_date DATE,                                  -- Ngày hết hạn bảo hiểm TNDS / Thân vỏ
@@ -534,7 +534,10 @@ CREATE TABLE bookings (
         REFERENCES user_tenants(user_id, tenant_id) ON DELETE SET NULL (returned_by),
     CONSTRAINT unique_booking_tenant UNIQUE (id, tenant_id),
     CONSTRAINT check_booking_times CHECK (pickup_time < return_time),
-    CONSTRAINT check_booking_amounts CHECK (daily_rate >= 0 AND total_amount >= 0 AND deposit_amount >= 0)
+    CONSTRAINT check_booking_amounts CHECK (
+        daily_rate >= 0 AND total_amount >= 0 AND deposit_amount >= 0 AND
+        late_fee >= 0 AND commission_amount >= 0
+    )
 );
 
 CREATE INDEX idx_bookings_tenant_id ON bookings(tenant_id);
@@ -569,7 +572,6 @@ CREATE INDEX idx_bookings_payment_status ON bookings(tenant_id, payment_status);
 | vehicle_types | idx_vehicle_types_name | name | UNIQUE | Tra cứu loại xe system-wide |
 | vehicles | idx_vehicles_tenant_branch	 | tenant_id, branch_id | Normal | Lọc danh sách xe theo nhà xe và bãi xe |
 | vehicles | idx_vehicles_status | tenant_id, status | Normal | Tìm xe sẵn sàng cho thuê (`AVAILABLE`) |
-| vehicles | idx_vehicles_license_plate | tenant_id, license_plate | UNIQUE | Đảm bảo biển số xe không trùng trong cùng 1 nhà xe |
 | vehicles | idx_vehicles_tenant_license | tenant_id, license_plate | UNIQUE | Đảm bảo biển số xe không trùng trong cùng 1 nhà xe |
 | customers | idx_customers_tenant_id | tenant_id | Normal | Lọc khách hàng của tenant |
 | customers | idx_customers_tenant_phone | tenant_id, phone | UNIQUE | Tra cứu và chống trùng SĐT khách trong 1 nhà xe |
