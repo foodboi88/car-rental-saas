@@ -10,6 +10,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,16 +20,14 @@ import com.carrental.car_rental_backend.account.entity.Role;
 import com.carrental.car_rental_backend.account.entity.User;
 import com.carrental.car_rental_backend.account.entity.UserBranch;
 import com.carrental.car_rental_backend.account.entity.UserTenant;
-import com.carrental.car_rental_backend.account.mapper.UserBranchMapper;
-import com.carrental.car_rental_backend.account.mapper.UserMapper;
-import com.carrental.car_rental_backend.account.mapper.UserTenantMapper;
 import com.carrental.car_rental_backend.account.repository.RoleRepository;
 import com.carrental.car_rental_backend.account.repository.UserRepository;
 import com.carrental.car_rental_backend.account.repository.UserTenantRepository;
+import com.carrental.car_rental_backend.branch.dto.BranchSummaryDTO;
 import com.carrental.car_rental_backend.branch.entity.Branch;
-import com.carrental.car_rental_backend.branch.mapper.BranchMapper;
 import com.carrental.car_rental_backend.branch.repository.BranchRepository;
 import com.carrental.car_rental_backend.common.enums.user.UserRole;
+import com.carrental.car_rental_backend.common.enums.user_branch_status.UserBranchStatus;
 import com.carrental.car_rental_backend.common.exception.AppException;
 import com.carrental.car_rental_backend.common.exception.ErrorCode;
 import com.carrental.car_rental_backend.security.context.TenantContext;
@@ -44,11 +43,39 @@ public class UserService {
     private final UserTenantRepository userTenantRepository;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
-    private final UserMapper userMapper;
-    private final UserTenantMapper userTenantMapper;
-    private final UserBranchMapper userBranchMapper;
     private final BranchRepository branchRepository;
-    private final BranchMapper branchMapper;
+    private final PasswordEncoder passwordEncoder;
+
+    // Helper map User entity sang UserDTOResponse bằng Builder
+    private UserDTOResponse toResponse(User user) {
+        if (user == null) {
+            return null;
+        }
+        return UserDTOResponse.builder()
+                .id(user.getId())
+                .email(user.getEmail())
+                .fullname(user.getFullname())
+                .phone(user.getPhone())
+                .avatarUrl(user.getAvatarUrl())
+                .isActive(user.getIsActive())
+                .isSuperAdmin(user.getIsSuperAdmin())
+                .lastLoginAt(user.getLastLoginAt())
+                .createdAt(user.getCreatedAt())
+                .build();
+    }
+
+    // Helper map Branch sang BranchSummaryDTO bằng Builder
+    private BranchSummaryDTO toBranchSummary(Branch branch) {
+        if (branch == null) {
+            return null;
+        }
+        return BranchSummaryDTO.builder()
+                .id(branch.getId())
+                .name(branch.getName())
+                .address(branch.getAddress())
+                .phone(branch.getPhone())
+                .build();
+    }
 
     public Page<UserDTOResponse> getListUser(UserDTORequest userDTORequest) {
         if (userDTORequest == null) {
@@ -56,7 +83,7 @@ public class UserService {
             userDTORequest = new UserDTORequest();
         }
 
-        //Bố sung thêm tenantId để lấy chính xác danh sách user
+        //Bổ sung thêm tenantId để lấy chính xác danh sách user
         UUID tenantId = TenantContext.getTenantId();
 
         int pageIndex = userDTORequest.getPageIndex() != null ? userDTORequest.getPageIndex() : 0;
@@ -69,7 +96,7 @@ public class UserService {
             userDTORequest.getPhone(),
             pageable
         );
-        return users.map(user -> userMapper.toResponse(user));
+        return users.map(this::toResponse);
     }
 
     @Transactional
@@ -80,10 +107,11 @@ public class UserService {
         }
 
         UUID tenantId = TenantContext.getTenantId();
+
         // Validate danh sách chi nhánh (Branch) đối với STAFF
         // tạo 2 mảng rỗng
-        List<UUID> uniqueBranchIds = Collections.emptyList();
         List<Branch> validBranches = Collections.emptyList();
+        List<UUID> uniqueBranchIds = Collections.emptyList();
 
         if (requestCreate.getRole() == UserRole.STAFF) {
             if (requestCreate.getBranchIds() == null || requestCreate.getBranchIds().isEmpty()) {
@@ -127,12 +155,28 @@ public class UserService {
                 }
                 savedUser = existingUser;
             } else {
-                User newUser = userMapper.toEntity(requestCreate);
+                User newUser = User.builder()
+                        .email(requestCreate.getEmail())
+                        .passwordHash(passwordEncoder.encode(requestCreate.getPassword()))
+                        .fullname(requestCreate.getFullname())
+                        .phone(requestCreate.getPhone())
+                        .avatarUrl(requestCreate.getAvatarUrl())
+                        .isActive(true)
+                        .isSuperAdmin(false)
+                        .build();
                 savedUser = userRepository.save(newUser);
             }
         } else {
-            // tạo user mới hoàn toàn 
-            User newUser = userMapper.toEntity(requestCreate);
+            // tạo user mới hoàn toàn bằng Builder
+            User newUser = User.builder()
+                    .email(requestCreate.getEmail())
+                    .passwordHash(passwordEncoder.encode(requestCreate.getPassword()))
+                    .fullname(requestCreate.getFullname())
+                    .phone(requestCreate.getPhone())
+                    .avatarUrl(requestCreate.getAvatarUrl())
+                    .isActive(true)
+                    .isSuperAdmin(false)
+                    .build();
             savedUser = userRepository.save(newUser);
         }
 
@@ -142,21 +186,36 @@ public class UserService {
         Role role = roleRepository.findByTenantIdAndCode(tenantId, roleCode)
             .orElseThrow(() -> new AppException(ErrorCode.VALIDATION_ERROR, "Vai trò không hợp lệ trong hệ thống"));
         
-        //lưu liên kết vào bảng user_tenants
+        //lưu liên kết vào bảng user_tenants bằng Builder
         UUID roleId = role.getId();
-        UserTenant userTenant = userTenantMapper.toUserTenant(tenantId, savedUser.getId(), roleId);
+        UserTenant userTenant = UserTenant.builder()
+                .tenantId(tenantId)
+                .userId(savedUser.getId())
+                .roleId(roleId)
+                .joinedAt(java.time.Instant.now())
+                .build();
         userTenantRepository.save(userTenant);
-        // lưu phân công chi nhánh nếu là STAFF
+
+        // lưu phân công chi nhánh nếu là STAFF bằng Builder
         if (requestCreate.getRole() == UserRole.STAFF) {
-            List<UserBranch> userBranches = userBranchMapper.toEntities(tenantId, savedUser.getId(), uniqueBranchIds);
+            List<UserBranch> userBranches = uniqueBranchIds.stream()
+                    .map(branchId -> UserBranch.builder()
+                            .tenantId(tenantId)
+                            .userId(savedUser.getId())
+                            .branchId(branchId)
+                            .startedAt(java.time.Instant.now())
+                            .status(UserBranchStatus.ACTIVE)
+                            .build())
+                    .toList();
             userBranchRepository.saveAll(userBranches);
         }
-        UserDTOResponse response = userMapper.toResponse(savedUser);
+
+        UserDTOResponse response = toResponse(savedUser);
         response.setRoleCode(role.getCode());
         response.setRoleName(role.getName());
 
         if (requestCreate.getRole() == UserRole.STAFF) {
-            response.setBranches(branchMapper.toSummaryList(validBranches));
+            response.setBranches(validBranches.stream().map(this::toBranchSummary).toList());
         } else {
             response.setBranches(Collections.emptyList());
         }
@@ -164,7 +223,7 @@ public class UserService {
         return response;
     }
 
-    // Sử dụng Transactional để đảm bảo nếu bị lõi sẽ rollback lại thao tác
+    // Sử dụng Transactional để đảm bảo nếu bị lỗi sẽ rollback lại thao tác
     @Transactional 
     public UserDTOResponse updateUser(UUID id, UserDTORequest.UserDTORequestToUpdate requestUpdate){
         // Kiểm tra tài khoản cần update có thuộc tenant hiện tại không
@@ -181,8 +240,20 @@ public class UserService {
             }
         }
 
-        //Nếu có, tiến hành sử dụng mapper để map lại các thông tin cần cập nhật
-        userMapper.updateUser(requestUpdate, existUser);
+        // Cập nhật thông tin cho existUser (thay thế mapper bằng setter thủ công)
+        if(requestUpdate.getEmail() != null) {
+            existUser.setEmail(requestUpdate.getEmail());
+        }
+        if(requestUpdate.getFullname() != null) {
+            existUser.setFullname(requestUpdate.getFullname());
+        }
+        if(requestUpdate.getPhone() != null) {
+            existUser.setPhone(requestUpdate.getPhone());
+        }
+        if(requestUpdate.getAvatarUrl() != null) {
+            existUser.setAvatarUrl(requestUpdate.getAvatarUrl());
+        }
+
         //Lưu thông tin vào DB
         User updateUser = userRepository.save(existUser);
         //Nếu cần update role
@@ -217,7 +288,15 @@ public class UserService {
                     }
                 }
                 userBranchRepository.deleteByTenantIdAndUserId(tenantId, id);
-                List<UserBranch> newBranches = userBranchMapper.toEntities(tenantId, id, uniqueBranchIds);
+                List<UserBranch> newBranches = uniqueBranchIds.stream()
+                        .map(branchId -> UserBranch.builder()
+                                .tenantId(tenantId)
+                                .userId(id)
+                                .branchId(branchId)
+                                .startedAt(java.time.Instant.now())
+                                .status(UserBranchStatus.ACTIVE)
+                                .build())
+                        .toList();
                 userBranchRepository.saveAll(newBranches);
             } else {
                 // Kiểm tra nếu vai trò hiện tại là STAFF thì không được để rỗng chi nhánh
@@ -229,7 +308,7 @@ public class UserService {
             }
         }
         //Trả lại thông tin cho client
-        return userMapper.toResponse(updateUser);
+        return toResponse(updateUser);
     }
 
     @Transactional 
@@ -254,4 +333,3 @@ public class UserService {
         userTenantRepository.deleteByUserIdAndTenantId(id, tenantId);
     }
 }
-

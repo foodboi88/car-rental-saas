@@ -17,7 +17,6 @@ import com.carrental.car_rental_backend.branch.dto.BranchDTORequest;
 import com.carrental.car_rental_backend.branch.dto.BranchDTOResponse;
 import com.carrental.car_rental_backend.branch.dto.BranchSummaryDTO;
 import com.carrental.car_rental_backend.branch.entity.Branch;
-import com.carrental.car_rental_backend.branch.mapper.BranchMapper;
 import com.carrental.car_rental_backend.branch.repository.BranchRepository;
 import com.carrental.car_rental_backend.common.constant.RoleConstant;
 import com.carrental.car_rental_backend.common.exception.AppException;
@@ -36,8 +35,6 @@ public class BranchService {
     private final BranchRepository branchRepository;
     private final UserBranchRepository userBranchRepository;
 
-    private final BranchMapper branchMapper;
-
     private UserPrincipal getCurrentUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if(authentication != null && authentication.getPrincipal() instanceof UserPrincipal userPrincipal){
@@ -45,6 +42,20 @@ public class BranchService {
         }
         // khi throw lỗi, GlobalExceptionHandler sẽ bắt lỗi, xử lý lỗi toàn cục
         throw new AppException(ErrorCode.UNAUTHORIZED);
+    }
+
+    private BranchDTOResponse toResponse(Branch branch) {
+        if (branch == null) {
+            return null;
+        }
+        return BranchDTOResponse.builder()
+                .id(branch.getId())
+                .name(branch.getName())
+                .phone(branch.getPhone())
+                .email(branch.getEmail())
+                .address(branch.getAddress())
+                .isActive(branch.getIsActive())
+                .build();
     }
     
     //thêm mới chi nhánh
@@ -54,12 +65,17 @@ public class BranchService {
         if(branchRepository.existsByTenantIdAndName(tenantId, requestToCreate.getName())){
             throw new AppException(ErrorCode.INTERNAL_SERVER_ERROR, "Tên chi nhánh đã tồn tại");
         }
-        //Khởi tạo đối tượng Branch
-        Branch branch = branchMapper.toEntity(requestToCreate);
-        //tenantId not null, MapSruct không thể tự map tenantId
-        branch.setTenantId(tenantId);
-        branchRepository.save(branch);
-        return branchMapper.toResponse(branch);
+        //Khởi tạo đối tượng Branch bằng Builder
+        Branch branch = Branch.builder()
+                .tenantId(tenantId)
+                .name(requestToCreate.getName())
+                .phone(requestToCreate.getPhone())
+                .email(requestToCreate.getEmail())
+                .address(requestToCreate.getAddress())
+                .isActive(true)
+                .build();
+        Branch savedBranch = branchRepository.save(branch);
+        return toResponse(savedBranch);
     }
 
     //xem chi tiết branch
@@ -77,8 +93,9 @@ public class BranchService {
             }
         }
 
-        return branchMapper.toResponse(branch);
+        return toResponse(branch);
     }
+
     @Transactional
     public BranchDTOResponse updateBranch(UUID id, BranchDTORequestToUpdate requestToUpdate){
         UUID tenantId = TenantContext.getTenantId();
@@ -89,9 +106,20 @@ public class BranchService {
                 throw new AppException(ErrorCode.INTERNAL_SERVER_ERROR, "Đã tồn tại tên chi nhánh");
             }
         }
-        branchMapper.updateBranch(requestToUpdate, existsBranch);
+        if(requestToUpdate.getName() != null) {
+            existsBranch.setName(requestToUpdate.getName());
+        }
+        if(requestToUpdate.getPhone() != null) {
+            existsBranch.setPhone(requestToUpdate.getPhone());
+        }
+        if(requestToUpdate.getEmail() != null) {
+            existsBranch.setEmail(requestToUpdate.getEmail());
+        }
+        if(requestToUpdate.getAddress() != null) {
+            existsBranch.setAddress(requestToUpdate.getAddress());
+        }
         Branch savedBranch = branchRepository.save(existsBranch);
-        return branchMapper.toResponse(savedBranch);
+        return toResponse(savedBranch);
     }
 
     @Transactional 
@@ -104,26 +132,33 @@ public class BranchService {
         // lưu lại thông tin vào DB
         Branch savedBranch = branchRepository.save(existsBranch);
         // trả về cho client
-        return branchMapper.toResponse(savedBranch);
+        return toResponse(savedBranch);
     }
 
     public Page<BranchDTOResponse> searchBranch(BranchDTORequest request) {
-    UUID tenantId = TenantContext.getTenantId();
-    Pageable pageable = PageRequest.of(request.getPageIndex(), request.getPageSize());
-    
-    Page<Branch> branchPage = branchRepository.searchBranch(
-        tenantId, 
-        request.getKeyword(), 
-        request.getIsActive(), 
-        pageable
-    );
+        UUID tenantId = TenantContext.getTenantId();
+        Pageable pageable = PageRequest.of(request.getPageIndex(), request.getPageSize());
+        
+        Page<Branch> branchPage = branchRepository.searchBranch(
+            tenantId, 
+            request.getKeyword(), 
+            request.getIsActive(), 
+            pageable
+        );
         // trả về response cho client
-        return branchPage.map(branch -> branchMapper.toResponse(branch));
+        return branchPage.map(this::toResponse);
     }
 
     public List<BranchSummaryDTO> getActiveBranchesSummary(){
         UUID tenantId = TenantContext.getTenantId();
         List<Branch> activeBranches = branchRepository.findByTenantIdAndIsActiveTrueOrderByNameAsc(tenantId);
-        return branchMapper.toSummaryList(activeBranches);
+        return activeBranches.stream()
+                .map(branch -> BranchSummaryDTO.builder()
+                        .id(branch.getId())
+                        .name(branch.getName())
+                        .address(branch.getAddress())
+                        .phone(branch.getPhone())
+                        .build())
+                .toList();
     }
 }
