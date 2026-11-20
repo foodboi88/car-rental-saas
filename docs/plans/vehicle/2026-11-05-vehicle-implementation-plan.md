@@ -3,7 +3,7 @@
 > **Ngày:** 05/11/2026 · **Trạng thái:** Bản nháp, chưa triển khai
 > **Thiết kế chi tiết đi kèm:** [Thiết kế chi tiết](2026-11-05-vehicle-detail-design.md) (quy tắc, API, mã lỗi, sequence diagram) · [Đặc tả API](2026-11-05-vehicle-api-spec.md)
 > **File này trả lời:** làm theo thứ tự nào, mỗi bước suy ra từ đâu, viết những file gì.
-> **Khuôn:** theo [kế hoạch module tenant](../tenant/2026-10-06-tenant-implementation-plan.md) và phụ lục "khung dùng lại cho module khác" của file đó.
+> **Tham khảo cách phân tích và phân rã nhiệm vụ:** [hướng dẫn triển khai module Tenant](../tenant/2026-10-06-tenant-implementation-guide.md).
 
 ---
 

@@ -75,7 +75,7 @@ public class TenantController {
     PageRequest pageRequest = PageRequest.of(
       Math.max(page, 0),
       Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
-      Sort.by(Sort.Direction.DESC, "createdAt")
+      Sort.by(Sort.Direction.DESC, "createdAt", "id")
     );
     Page<TenantResponseDTO> response = this.tenantService.listTenants(keyword, isActive, pageRequest);
 

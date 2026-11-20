@@ -24,7 +24,7 @@ public interface TenantAdminService {
   }
 
   public List<ValidatedAdmin> validateAdminsForNewTenant(List<AdminAssignmentRequestDTO> requests);
-  public List<ValidatedAdmin> validateAdminRequests(List<AdminAssignmentRequestDTO> requests, Tenant tenant, UUID adminRoleId);
+  public List<ValidatedAdmin> validateAdminRequests(List<AdminAssignmentRequestDTO> requests, Tenant tenant);
   public List<AdminAssignmentResponseDTO> addAdminsToTenant(UUID tenantId, UUID adminRoleId, List<ValidatedAdmin> validatedAdmins);
   public AdminAssignmentResponseDTO addTenantAdmin(UUID tenantId, AdminAssignmentRequestDTO request, UUID actorId);
   public List<TenantAdminResponseDTO> listTenantAdmins(UUID tenantId);

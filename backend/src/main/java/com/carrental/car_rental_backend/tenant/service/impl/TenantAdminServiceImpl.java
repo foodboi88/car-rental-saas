@@ -31,7 +31,6 @@ import com.carrental.car_rental_backend.tenant.repository.TenantRepository;
 import com.carrental.car_rental_backend.tenant.repository.TenantRoleRepository;
 import com.carrental.car_rental_backend.tenant.repository.TenantUserTenantRepository;
 import com.carrental.car_rental_backend.tenant.service.TenantAdminService;
-import com.carrental.car_rental_backend.tenant.service.TenantAdminService.ValidatedAdmin;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,14 +49,12 @@ public class TenantAdminServiceImpl implements TenantAdminService {
 
   private AdminAssignmentResponseDTO addAdminToTenant(UUID tenantId, UUID adminRoleId, ValidatedAdmin admin) {
     User user = admin.isNewAccount() ? this.createAccount(admin) : admin.existingUser();
-    this.userTenantRepository.save(
-      UserTenant.builder()
-        .userId(user.getId())
-        .tenantId(tenantId)
-        .roleId(adminRoleId)
-        .joinedAt(Instant.now())
-        .build()
+    int insertedRows = this.tenantUserTenantRepository.insertMembershipIfNotExists(
+      user.getId(), tenantId, adminRoleId, Instant.now()
     );
+    if (insertedRows == 0) {
+      throw AdminRejection.ALREADY_MEMBER.toException();
+    }
     return AdminAssignmentResponseDTO.builder()
       .email(admin.email())
       .accountCreated(admin.isNewAccount())
@@ -79,27 +76,27 @@ public class TenantAdminServiceImpl implements TenantAdminService {
   @Override
   public List<ValidatedAdmin> validateAdminsForNewTenant(List<AdminAssignmentRequestDTO> requests) {
     // Chưa tạo nhà xe nên chưa xét được trạng thái tenant hoặc vai trò thành viên trong tenant đó.
-    return this.validateAdminRequests(requests, null, null);
+    return this.validateAdminRequests(requests, null);
   }
 
   @Override
-  public List<ValidatedAdmin> validateAdminRequests(List<AdminAssignmentRequestDTO> requests, Tenant tenant, UUID adminRoleId) {
+  public List<ValidatedAdmin> validateAdminRequests(List<AdminAssignmentRequestDTO> requests, Tenant tenant) {
     Set<String> emailsInRequest = new HashSet<>();
     List<ValidatedAdmin> validatedAdmins = new ArrayList<>();
     for (AdminAssignmentRequestDTO request : requests) {
-      validatedAdmins.add(this.validateAdminRequest(request, tenant, adminRoleId, emailsInRequest));
+      validatedAdmins.add(this.validateAdminRequest(request, tenant, emailsInRequest));
     }
     return validatedAdmins;
   }
 
-  private ValidatedAdmin validateAdminRequest(AdminAssignmentRequestDTO request, Tenant tenant, UUID adminRoleId, Set<String> emailsInRequest) {
+  private ValidatedAdmin validateAdminRequest(AdminAssignmentRequestDTO request, Tenant tenant, Set<String> emailsInRequest) {
     String email = this.normalizeEmail(request.getEmail());
     if (!emailsInRequest.add(email)) {
       throw new AppException(ErrorCode.BAD_REQUEST, "Email chủ nhà xe bị trùng trong danh sách: " + email);
     }
 
     User existingUser = this.userRepository.findByEmail(email).orElse(null);
-    Optional<AdminRejection> rejection = this.findRejection(tenant, existingUser, adminRoleId);
+    Optional<AdminRejection> rejection = this.findRejection(tenant, existingUser);
     if (rejection.isPresent()) {
       throw rejection.get().toException();
     }
@@ -130,7 +127,7 @@ public class TenantAdminServiceImpl implements TenantAdminService {
     Tenant tenant = this.findTenantOrThrow(tenantId);
     UUID adminRoleId = this.findAdminRoleOrThrow(tenantId).getId();
 
-    List<ValidatedAdmin> validatedAdmins = this.validateAdminRequests(List.of(request), tenant, adminRoleId);
+    List<ValidatedAdmin> validatedAdmins = this.validateAdminRequests(List.of(request), tenant);
     AdminAssignmentResponseDTO result = this.addAdminsToTenant(tenantId, adminRoleId, validatedAdmins).get(0);
 
     log.info("Người dùng {} thêm chủ cho nhà xe {} (id = {}), tài khoản mới: {}", actorId, tenant.getName(), tenantId, result.isAccountCreated());
@@ -148,11 +145,10 @@ public class TenantAdminServiceImpl implements TenantAdminService {
   @Transactional(readOnly = true)
   public AdminEmailCheckResponseDTO checkAdminEmail(String email, UUID tenantId) {
     Tenant tenant = tenantId == null ? null : this.findTenantOrThrow(tenantId);
-    UUID adminRoleId = tenant == null ? null : this.findAdminRoleOrThrow(tenantId).getId();
 
     String normalizedEmail = this.normalizeEmail(email);
     Optional<User> existingUser = this.userRepository.findByEmail(normalizedEmail);
-    Optional<AdminRejection> rejection = this.findRejection(tenant, existingUser.orElse(null), adminRoleId);
+    Optional<AdminRejection> rejection = this.findRejection(tenant, existingUser.orElse(null));
 
     return AdminEmailCheckResponseDTO.builder()
       .email(normalizedEmail)
@@ -163,7 +159,7 @@ public class TenantAdminServiceImpl implements TenantAdminService {
       .build();
   }
 
-  private Optional<AdminRejection> findRejection(Tenant tenant, User user, UUID adminRoleId) {
+  private Optional<AdminRejection> findRejection(Tenant tenant, User user) {
     if (tenant != null && !tenant.isActive()) {
       return Optional.of(AdminRejection.TENANT_LOCKED);
     }
@@ -183,9 +179,7 @@ public class TenantAdminServiceImpl implements TenantAdminService {
     if (membership.isEmpty()) {
       return Optional.empty();
     }
-    return Optional.of(adminRoleId.equals(membership.get().getRoleId())
-      ? AdminRejection.ALREADY_ADMIN
-      : AdminRejection.HAS_OTHER_ROLE);
+    return Optional.of(AdminRejection.ALREADY_MEMBER);
   }
 
   private Tenant findTenantOrThrow(UUID tenantId) {

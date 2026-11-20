@@ -124,6 +124,10 @@ export class TenantDetail {
     // Người dùng có thể bấm gửi ngay khi vừa nhập email, nên kiểm tra nếu chưa có kết quả
     this.addingAdmin.set(true);
     this.emailCheck.ensureChecked(this.adminForm.controls.email.value).subscribe((status) => {
+      if (status === 'idle' || status === 'checking') {
+        this.addingAdmin.set(false);
+        return;
+      }
       this.applyRequirements();
       if (status === 'blocked' || this.adminForm.invalid) {
         this.adminForm.markAllAsTouched();

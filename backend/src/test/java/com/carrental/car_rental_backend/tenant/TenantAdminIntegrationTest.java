@@ -84,6 +84,7 @@ class TenantAdminIntegrationTest extends ApiIntegrationTestSupport {
     ApiResult result = this.addAdmin(token, tenantId, this.adminOf(this.ownerEmail(suffix), "Chủ", OWNER_PASSWORD));
 
     assertThat(result.status()).isEqualTo(409);
+    assertThat(result.json().at("/error/code").asText()).isEqualTo("TENANT_MEMBER_ALREADY_EXISTS");
   }
 
   @Test
@@ -200,7 +201,7 @@ class TenantAdminIntegrationTest extends ApiIntegrationTestSupport {
   }
 
   @Test
-  void should_say_already_admin_when_checking_with_the_tenant_the_account_owns() throws Exception {
+  void should_say_already_member_when_checking_with_the_tenant_the_account_owns() throws Exception {
     String token = this.superAdminToken();
     String suffix = this.newSuffix();
     String tenantId = this.createTenantAndGetId(token, suffix);
@@ -209,7 +210,7 @@ class TenantAdminIntegrationTest extends ApiIntegrationTestSupport {
 
     assertThat(result.status()).isEqualTo(200);
     assertThat(result.json().at("/data/canBeAdmin").asBoolean()).isFalse();
-    assertThat(result.json().at("/data/reason").asText()).contains("đã là chủ nhà xe");
+    assertThat(result.json().at("/data/reason").asText()).isEqualTo("Người dùng đã thuộc nhà xe này");
   }
 
   @Test

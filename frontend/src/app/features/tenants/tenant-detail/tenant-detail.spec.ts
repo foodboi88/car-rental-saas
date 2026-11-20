@@ -156,6 +156,31 @@ describe('TenantDetail', () => {
     expect(root.querySelector('.admin-form')).toBeNull();
   });
 
+  it('should_not_add_from_an_old_check_after_the_email_changes_and_should_allow_retry', async () => {
+    await render();
+    button('Thêm chủ').click();
+    await fixture.whenStable();
+    const component = fixture.componentInstance;
+    component.adminForm.patchValue({ email: 'cu@binhan.vn' });
+    submitAdminForm();
+    const oldCheck = http.expectOne(`${TENANTS_API}/admin-email-check`);
+    component.adminForm.patchValue({ email: 'moi@binhan.vn' });
+    component.onEmailInput();
+    oldCheck.flush(apiOk(adminEmailCheck({ accountExists: true })));
+
+    http.expectNone(`${TENANT_URL}/admins`);
+    expect(component.addingAdmin()).toBe(false);
+
+    component.checkEmail();
+    answerEmailCheck({ accountExists: true });
+    submitAdminForm();
+    const added = http.expectOne(`${TENANT_URL}/admins`);
+    expect(added.request.body).toEqual({ email: 'moi@binhan.vn' });
+    added.flush(apiOk({ email: 'moi@binhan.vn', accountCreated: false }));
+    http.expectOne(`${TENANT_URL}/admins`).flush(apiOk([tenantAdmin()]));
+    await fixture.whenStable();
+  });
+
   it('should_send_only_the_email_when_linking_an_existing_account_even_if_a_name_and_password_were_typed', async () => {
     await render();
     button('Thêm chủ').click();
@@ -208,13 +233,13 @@ describe('TenantDetail', () => {
     answerEmailCheck({ accountExists: true, fullName: 'Nguyễn Văn Bình' });
     http
       .expectOne(`${TENANT_URL}/admins`)
-      .flush(failure('TENANT_ADMIN_ALREADY_ASSIGNED', 'Người này đã là chủ nhà xe của nhà xe này: chu1@binhan.vn'), {
+      .flush(failure('TENANT_MEMBER_ALREADY_EXISTS', 'Người dùng đã thuộc nhà xe này'), {
         status: 409,
         statusText: 'Conflict',
       });
     await fixture.whenStable();
 
-    expect(root.querySelector('.admin-form .alert-error')?.textContent).toContain('đã là chủ nhà xe');
+    expect(root.querySelector('.admin-form .alert-error')?.textContent).toContain('Người dùng đã thuộc nhà xe này');
   });
 
   it('should_hide_name_and_password_for_an_existing_account_and_show_them_for_a_new_one', async () => {

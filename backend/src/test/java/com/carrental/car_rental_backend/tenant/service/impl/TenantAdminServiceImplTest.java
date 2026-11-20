@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -49,7 +50,6 @@ class TenantAdminServiceImplTest {
   private static final UUID EXISTING_USER_ID = UUID.randomUUID();
   private static final String EXISTING_EMAIL = "co.san@x.vn";
   private static final String TENANT_LOCKED_MESSAGE = "Nhà xe đang bị khóa, không thể thêm chủ nhà xe !";
-  private static final String HAS_OTHER_ROLE_MESSAGE = "Người này đang là nhân viên của nhà xe, chưa hỗ trợ nâng quyền";
 
   @Mock private TenantRepository tenantRepository;
   @Mock private TenantRoleRepository tenantRoleRepository;
@@ -133,6 +133,18 @@ class TenantAdminServiceImplTest {
   }
 
   @Test
+  void should_throw_internal_error_when_adding_admin_to_tenant_without_admin_role() {
+    this.stubTenant(activeTenant());
+    when(tenantRoleRepository.findByTenantIdAndCode(TENANT_ID, "TENANT_ADMIN")).thenReturn(Optional.empty());
+
+    assertAppException(() -> tenantAdminService.addTenantAdmin(TENANT_ID, emailOnlyRequest(EXISTING_EMAIL), ACTOR_ID),
+      ErrorCode.INTERNAL_SERVER_ERROR);
+
+    verify(userRepository, never()).findByEmail(anyString());
+    verify(tenantUserTenantRepository, never()).insertMembershipIfNotExists(any(), any(), any(), any());
+  }
+
+  @Test
   void should_refuse_with_tenant_locked_message_and_write_nothing_when_adding_admin_to_inactive_tenant() {
     this.stubTenant(inactiveTenant());
     this.stubAdminRoleLookup();
@@ -145,7 +157,7 @@ class TenantAdminServiceImplTest {
       });
 
     verify(userRepository, never()).save(any(User.class));
-    verify(userTenantRepository, never()).save(any(UserTenant.class));
+    verify(tenantUserTenantRepository, never()).insertMembershipIfNotExists(any(), any(), any(), any());
   }
 
   @Test
@@ -153,12 +165,14 @@ class TenantAdminServiceImplTest {
     this.stubTenant(activeTenant());
     this.stubAdminRoleLookup();
     this.stubNewUserSaving();
+    when(tenantUserTenantRepository.insertMembershipIfNotExists(any(UUID.class), eq(TENANT_ID), eq(ADMIN_ROLE_ID), any(Instant.class)))
+      .thenReturn(1);
 
     AdminAssignmentResponseDTO result = tenantAdminService.addTenantAdmin(TENANT_ID, newAccountRequest(" Moi@X.vn "), ACTOR_ID);
 
     assertThat(result.getEmail()).isEqualTo("moi@x.vn");
     assertThat(result.isAccountCreated()).isTrue();
-    verify(userTenantRepository).save(any(UserTenant.class));
+    verify(tenantUserTenantRepository).insertMembershipIfNotExists(any(UUID.class), eq(TENANT_ID), eq(ADMIN_ROLE_ID), any(Instant.class));
   }
 
   @Test
@@ -167,12 +181,14 @@ class TenantAdminServiceImplTest {
     this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(true, false));
     when(userTenantRepository.findByUserIdAndTenantId(EXISTING_USER_ID, TENANT_ID)).thenReturn(Optional.empty());
+    when(tenantUserTenantRepository.insertMembershipIfNotExists(eq(EXISTING_USER_ID), eq(TENANT_ID), eq(ADMIN_ROLE_ID), any(Instant.class)))
+      .thenReturn(1);
 
     AdminAssignmentResponseDTO result = tenantAdminService.addTenantAdmin(TENANT_ID, emailOnlyRequest(EXISTING_EMAIL), ACTOR_ID);
 
     assertThat(result.isAccountCreated()).isFalse();
     verify(userRepository, never()).save(any(User.class));
-    verify(userTenantRepository).save(any(UserTenant.class));
+    verify(tenantUserTenantRepository).insertMembershipIfNotExists(eq(EXISTING_USER_ID), eq(TENANT_ID), eq(ADMIN_ROLE_ID), any(Instant.class));
   }
 
   @Test
@@ -183,35 +199,35 @@ class TenantAdminServiceImplTest {
     this.stubMembership(ADMIN_ROLE_ID);
     AdminAssignmentRequestDTO request = emailOnlyRequest(EXISTING_EMAIL);
 
-    assertAppException(() -> tenantAdminService.addTenantAdmin(TENANT_ID, request, ACTOR_ID), ErrorCode.TENANT_ADMIN_ALREADY_ASSIGNED);
+    assertAppException(() -> tenantAdminService.addTenantAdmin(TENANT_ID, request, ACTOR_ID), ErrorCode.TENANT_MEMBER_ALREADY_EXISTS);
 
-    verify(userTenantRepository, never()).save(any(UserTenant.class));
+    verify(tenantUserTenantRepository, never()).insertMembershipIfNotExists(any(), any(), any(), any());
   }
 
   @Test
-  void should_throw_bad_request_and_write_nothing_when_user_is_staff_of_tenant() {
+  void should_throw_conflict_and_write_nothing_when_user_is_staff_of_tenant() {
     this.stubTenant(activeTenant());
     this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(true, false));
     this.stubMembership(STAFF_ROLE_ID);
     AdminAssignmentRequestDTO request = emailOnlyRequest(EXISTING_EMAIL);
 
-    assertAppException(() -> tenantAdminService.addTenantAdmin(TENANT_ID, request, ACTOR_ID), ErrorCode.BAD_REQUEST);
+    assertAppException(() -> tenantAdminService.addTenantAdmin(TENANT_ID, request, ACTOR_ID), ErrorCode.TENANT_MEMBER_ALREADY_EXISTS);
 
-    verify(userTenantRepository, never()).save(any(UserTenant.class));
+    verify(tenantUserTenantRepository, never()).insertMembershipIfNotExists(any(), any(), any(), any());
   }
 
   @Test
-  void should_throw_bad_request_and_write_nothing_when_user_is_sale_of_tenant() {
+  void should_throw_conflict_and_write_nothing_when_user_is_sale_of_tenant() {
     this.stubTenant(activeTenant());
     this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(true, false));
     this.stubMembership(SALE_ROLE_ID);
     AdminAssignmentRequestDTO request = emailOnlyRequest(EXISTING_EMAIL);
 
-    assertAppException(() -> tenantAdminService.addTenantAdmin(TENANT_ID, request, ACTOR_ID), ErrorCode.BAD_REQUEST);
+    assertAppException(() -> tenantAdminService.addTenantAdmin(TENANT_ID, request, ACTOR_ID), ErrorCode.TENANT_MEMBER_ALREADY_EXISTS);
 
-    verify(userTenantRepository, never()).save(any(UserTenant.class));
+    verify(tenantUserTenantRepository, never()).insertMembershipIfNotExists(any(), any(), any(), any());
   }
 
   // ---------- listTenantAdmins (API 7) ----------
@@ -294,20 +310,21 @@ class TenantAdminServiceImplTest {
   }
 
   @Test
-  void should_throw_internal_error_when_checking_for_a_tenant_without_an_admin_role() {
-    // Nhà xe tạo tay, không qua API nên thiếu nhóm quyền chủ: báo lỗi dữ liệu hỏng với mọi email, kể cả email mới
+  void should_check_email_without_looking_up_the_admin_role() {
     this.stubTenant(activeTenant());
-    when(tenantRoleRepository.findByTenantIdAndCode(TENANT_ID, "TENANT_ADMIN")).thenReturn(Optional.empty());
+    when(userRepository.findByEmail("moi@x.vn")).thenReturn(Optional.empty());
 
-    assertAppException(() -> tenantAdminService.checkAdminEmail("moi@x.vn", TENANT_ID), ErrorCode.INTERNAL_SERVER_ERROR);
+    AdminEmailCheckResponseDTO result = tenantAdminService.checkAdminEmail("moi@x.vn", TENANT_ID);
 
-    verify(userRepository, never()).findByEmail(anyString());
+    assertThat(result.isAccountExists()).isFalse();
+    assertThat(result.isCanBeAdmin()).isTrue();
+    assertThat(result.getReason()).isNull();
+    verify(tenantRoleRepository, never()).findByTenantIdAndCode(any(), anyString());
   }
 
   @Test
   void should_refuse_even_a_new_email_when_the_tenant_is_locked() {
     this.stubTenant(inactiveTenant());
-    this.stubAdminRoleLookup();
     when(userRepository.findByEmail("moi@x.vn")).thenReturn(Optional.empty());
 
     AdminEmailCheckResponseDTO result = tenantAdminService.checkAdminEmail("moi@x.vn", TENANT_ID);
@@ -321,7 +338,6 @@ class TenantAdminServiceImplTest {
   void should_report_the_locked_tenant_first_when_both_the_tenant_and_the_account_are_locked() {
     // findRejection kiểm tra nhà xe bị khóa trước tài khoản, nên khi có cả hai lý do thì báo "nhà xe bị khóa"
     this.stubTenant(inactiveTenant());
-    this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(false, false));
 
     AdminEmailCheckResponseDTO result = tenantAdminService.checkAdminEmail(EXISTING_EMAIL, TENANT_ID);
@@ -334,46 +350,42 @@ class TenantAdminServiceImplTest {
   @Test
   void should_refuse_an_account_that_is_already_admin_of_the_tenant() {
     this.stubTenant(activeTenant());
-    this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(true, false));
     this.stubMembership(ADMIN_ROLE_ID);
 
     AdminEmailCheckResponseDTO result = tenantAdminService.checkAdminEmail(EXISTING_EMAIL, TENANT_ID);
 
     assertThat(result.isCanBeAdmin()).isFalse();
-    assertThat(result.getReason()).isEqualTo("Người này đã là chủ nhà xe của nhà xe này");
+    assertThat(result.getReason()).isEqualTo(ErrorCode.TENANT_MEMBER_ALREADY_EXISTS.getMessage());
   }
 
   @Test
   void should_refuse_an_account_that_is_staff_of_the_tenant() {
     this.stubTenant(activeTenant());
-    this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(true, false));
     this.stubMembership(STAFF_ROLE_ID);
 
     AdminEmailCheckResponseDTO result = tenantAdminService.checkAdminEmail(EXISTING_EMAIL, TENANT_ID);
 
     assertThat(result.isCanBeAdmin()).isFalse();
-    assertThat(result.getReason()).isEqualTo(HAS_OTHER_ROLE_MESSAGE);
+    assertThat(result.getReason()).isEqualTo(ErrorCode.TENANT_MEMBER_ALREADY_EXISTS.getMessage());
   }
 
   @Test
   void should_refuse_an_account_that_is_sale_of_the_tenant() {
     this.stubTenant(activeTenant());
-    this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(true, false));
     this.stubMembership(SALE_ROLE_ID);
 
     AdminEmailCheckResponseDTO result = tenantAdminService.checkAdminEmail(EXISTING_EMAIL, TENANT_ID);
 
     assertThat(result.isCanBeAdmin()).isFalse();
-    assertThat(result.getReason()).isEqualTo(HAS_OTHER_ROLE_MESSAGE);
+    assertThat(result.getReason()).isEqualTo(ErrorCode.TENANT_MEMBER_ALREADY_EXISTS.getMessage());
   }
 
   @Test
   void should_allow_an_existing_account_that_is_not_yet_a_member_of_the_tenant_and_write_nothing() {
     this.stubTenant(activeTenant());
-    this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(true, false));
     when(userTenantRepository.findByUserIdAndTenantId(EXISTING_USER_ID, TENANT_ID)).thenReturn(Optional.empty());
 
@@ -381,6 +393,6 @@ class TenantAdminServiceImplTest {
 
     assertThat(result.isCanBeAdmin()).isTrue();
     verify(userRepository, never()).save(any(User.class));
-    verify(userTenantRepository, never()).save(any(UserTenant.class));
+    verify(tenantUserTenantRepository, never()).insertMembershipIfNotExists(any(), any(), any(), any());
   }
 }

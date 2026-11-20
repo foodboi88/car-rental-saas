@@ -71,7 +71,8 @@ export class AdminEmailCheck {
         if (ticket === this.ticket) this.status.set('failed');
         return of(null);
       }),
-      map(() => this.status()),
+      // Kết quả cũ không được dùng trạng thái của email mới để tiếp tục một lần gửi cũ.
+      map(() => ticket === this.ticket ? this.status() : 'idle'),
     );
   }
 }

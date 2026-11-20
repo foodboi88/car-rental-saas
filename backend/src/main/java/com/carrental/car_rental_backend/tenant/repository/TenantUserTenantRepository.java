@@ -1,9 +1,11 @@
 package com.carrental.car_rental_backend.tenant.repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -12,6 +14,20 @@ import com.carrental.car_rental_backend.account.entity.UserTenantId;
 import com.carrental.car_rental_backend.tenant.dto.response.TenantAdminResponseDTO;
 
 public interface TenantUserTenantRepository extends JpaRepository<UserTenant, UserTenantId> {
+  // Chỉ thêm quan hệ mới, giữ nguyên quan hệ đã tồn tại; trả số dòng được thêm (1 hoặc 0).
+  @Modifying(flushAutomatically = true)
+  @Query(value = """
+    INSERT INTO user_tenants (user_id, tenant_id, role_id, joined_at)
+    VALUES (:userId, :tenantId, :roleId, :joinedAt)
+    ON CONFLICT DO NOTHING
+  """, nativeQuery = true)
+  int insertMembershipIfNotExists(
+    @Param("userId") UUID userId,
+    @Param("tenantId") UUID tenantId,
+    @Param("roleId") UUID roleId,
+    @Param("joinedAt") Instant joinedAt
+  );
+
   // Constructor expression: Danh sách chủ (TENANT_ADMIN) của một nhà xe, trả thẳng DTO.
   @Query("""
     SELECT new com.carrental.car_rental_backend.tenant.dto.response.TenantAdminResponseDTO(

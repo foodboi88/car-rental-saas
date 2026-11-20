@@ -162,10 +162,12 @@ export class TenantForm {
     const checks = this.admins.controls.map((group) =>
       this.emailCheckOf(group)
         .ensureChecked(group.value.email)
-        .pipe(tap(() => this.applyRequirements(group))),
+        .pipe(tap((status) => {
+          if (status !== 'idle' && status !== 'checking') this.applyRequirements(group);
+        })),
     );
     forkJoin(checks).subscribe((statuses) => {
-      if (statuses.includes('blocked') || this.form.invalid) {
+      if (statuses.some((status) => status === 'blocked' || status === 'idle' || status === 'checking') || this.form.invalid) {
         this.form.markAllAsTouched();
         this.submitting.set(false);
         return;

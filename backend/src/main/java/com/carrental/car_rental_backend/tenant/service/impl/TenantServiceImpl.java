@@ -51,7 +51,9 @@ public class TenantServiceImpl implements TenantService {
   @Override
   public CreateTenantResponseDTO createTenant(CreateTenantRequestDTO request, UUID actorId) {
     // Bước kiểm tra: domain, settings và toàn bộ chủ nhà xe
-    this.checkDomainNotTaken(request.getDomain());
+    if (this.tenantRepository.existsByDomain(request.getDomain())) {
+      throw new AppException(ErrorCode.TENANT_DOMAIN_ALREADY_EXISTS);
+    }
     String settings = this.normalizeSettings(request.getSettings());
     List<ValidatedAdmin> validatedAdmins = this.tenantAdminService.validateAdminsForNewTenant(request.getAdmins());
 
@@ -137,12 +139,6 @@ public class TenantServiceImpl implements TenantService {
   @Override
   public void deleteTenant(UUID tenantId, UUID actorId) {
     this.updateTenantStatus(tenantId, false, actorId);
-  }
-
-  private void checkDomainNotTaken(String domain) {
-    if (this.tenantRepository.existsByDomain(domain)) {
-      throw new AppException(ErrorCode.TENANT_DOMAIN_ALREADY_EXISTS);
-    }
   }
 
   private Tenant saveTenant(CreateTenantRequestDTO request, String settings) {

@@ -95,6 +95,24 @@ describe('AdminEmailCheck', () => {
     expect(request.request.body).toEqual({ email: 'chu1@binhan.vn', tenantId: 'tenant-1' });
     request.flush(apiOk(adminEmailCheck()));
   });
+
+  it.each(['success', 'error'])('should_return_idle_to_the_old_subscriber_after_reset_on_%s', (outcome) => {
+    const statuses: string[] = [];
+    emailCheck.ensureChecked('cu@binhan.vn').subscribe((status) => statuses.push(status));
+    const oldRequest = http.expectOne(EMAIL_CHECK_URL);
+    emailCheck.reset();
+    emailCheck.ensureChecked('moi@binhan.vn').subscribe();
+    http.expectOne(EMAIL_CHECK_URL).flush(apiOk(adminEmailCheck({ accountExists: true })));
+
+    if (outcome === 'success') {
+      oldRequest.flush(apiOk(adminEmailCheck()));
+    } else {
+      oldRequest.flush({}, { status: 500, statusText: 'Server Error' });
+    }
+
+    expect(statuses).toEqual(['idle']);
+    expect(emailCheck.status()).toBe('existing');
+  });
 });
 
 describe('applyAccountRequirements', () => {

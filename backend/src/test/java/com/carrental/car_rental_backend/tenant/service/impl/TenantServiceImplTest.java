@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,7 +31,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.carrental.car_rental_backend.account.entity.Role;
 import com.carrental.car_rental_backend.account.entity.User;
-import com.carrental.car_rental_backend.account.entity.UserTenant;
 import com.carrental.car_rental_backend.account.repository.UserRepository;
 import com.carrental.car_rental_backend.account.repository.UserTenantRepository;
 import com.carrental.car_rental_backend.common.enums.plan_tier.PlanTierTenant;
@@ -144,6 +144,8 @@ class TenantServiceImplTest {
     this.stubTenantSaving();
     this.stubAdminRoleLookup();
     this.stubNewUserSaving();
+    when(tenantUserTenantRepository.insertMembershipIfNotExists(any(UUID.class), eq(TENANT_ID), eq(ADMIN_ROLE_ID), any(Instant.class)))
+      .thenReturn(1);
     return tenantService.createTenant(createRequest(newAccountRequest(" Chu@X.vn ")), ACTOR_ID);
   }
 
@@ -151,6 +153,8 @@ class TenantServiceImplTest {
     this.stubTenantSaving();
     this.stubAdminRoleLookup();
     this.stubExistingUserLookup(existingUser(true, false));
+    when(tenantUserTenantRepository.insertMembershipIfNotExists(eq(EXISTING_USER_ID), eq(TENANT_ID), eq(ADMIN_ROLE_ID), any(Instant.class)))
+      .thenReturn(1);
     return tenantService.createTenant(createRequest(emailOnlyRequest(" CO.SAN@x.vn ")), ACTOR_ID);
   }
 
@@ -241,13 +245,10 @@ class TenantServiceImplTest {
   void should_link_new_account_to_tenant_with_admin_role() {
     this.createTenantWithNewAccount();
 
-    ArgumentCaptor<UserTenant> captor = ArgumentCaptor.forClass(UserTenant.class);
-    verify(userTenantRepository).save(captor.capture());
-    UserTenant link = captor.getValue();
-    assertThat(link.getTenantId()).isEqualTo(TENANT_ID);
-    assertThat(link.getRoleId()).isEqualTo(ADMIN_ROLE_ID);
-    assertThat(link.getUserId()).isNotNull();
-    assertThat(link.getJoinedAt()).isNotNull();
+    ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+    verify(userRepository).save(captor.capture());
+    verify(tenantUserTenantRepository).insertMembershipIfNotExists(
+      eq(captor.getValue().getId()), eq(TENANT_ID), eq(ADMIN_ROLE_ID), any(Instant.class));
   }
 
   @Test
@@ -271,10 +272,8 @@ class TenantServiceImplTest {
   void should_link_existing_account_to_tenant_with_admin_role() {
     this.createTenantWithExistingAccount();
 
-    ArgumentCaptor<UserTenant> captor = ArgumentCaptor.forClass(UserTenant.class);
-    verify(userTenantRepository).save(captor.capture());
-    assertThat(captor.getValue().getUserId()).isEqualTo(EXISTING_USER_ID);
-    assertThat(captor.getValue().getRoleId()).isEqualTo(ADMIN_ROLE_ID);
+    verify(tenantUserTenantRepository).insertMembershipIfNotExists(
+      eq(EXISTING_USER_ID), eq(TENANT_ID), eq(ADMIN_ROLE_ID), any(Instant.class));
   }
 
   @Test

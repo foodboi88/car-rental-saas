@@ -1,7 +1,8 @@
 # THIẾT KẾ CHI TIẾT: MODULE TENANT
 
-> **Phiên bản:** 1.1 · **Ngày:** 19/10/2026 · **Đối chiếu code:** 30/10/2026 · **Trạng thái:** Đã triển khai, cập nhật sau review
-> **Kế hoạch triển khai:** [2026-10-06-tenant-implementation-plan.md](2026-10-06-tenant-implementation-plan.md)
+> **Hướng dẫn triển khai:** [Tenant implementation guide](2026-10-06-tenant-implementation-guide.md).
+
+> **Phiên bản:** 1.2 · **Ngày:** 19/10/2026
 
 ---
 
@@ -9,7 +10,7 @@
 
 **Mục đích:** Super Admin tạo và quản lý nhà xe (tenant) cùng chủ nhà xe (TENANT_ADMIN).
 **Ngoài phạm vi:** cấu hình vận hành `tenant_configs` (chủ nhà xe tự sửa), quản lý nhân viên, đổi vai trò thành viên.
-Cấu hình vận hành do chủ nhà xe chỉnh, quota theo gói, gỡ/đổi chủ và audit dạng bảng không thuộc 9 API hiện tại; cần thiết kế riêng trước khi triển khai.
+Cấu hình vận hành do chủ nhà xe chỉnh, quota theo gói, gỡ/đổi chủ và audit dạng bảng không thuộc phạm vi chín API; cần thiết kế riêng khi mở rộng.
 
 | # | API | Method | Đường dẫn | Thành công |
 | :-: | :--- | :-: | :--- | :-: |
@@ -31,7 +32,7 @@ Cấu hình vận hành do chủ nhà xe chỉnh, quota theo gói, gỡ/đổi c
 | R2 | Tạo nhà xe kèm cấu hình mặc định và 3 vai trò có quyền, trong một giao dịch | 1 |
 | R3 | Nhà xe mới có từ 1 đến 10 chủ; email không lặp trong cùng một lần gửi | 1 |
 | R4 | Email mới: bắt buộc họ tên, mật khẩu, tạo tài khoản. Email có sẵn: chỉ liên kết, không đổi họ tên hay mật khẩu | 1, 8 |
-| R5 | Không làm chủ được nếu: tài khoản bị khóa, là Super Admin, nhà xe bị khóa, đã là chủ (409), đã có vai trò khác trong nhà xe (STAFF, SALE hoặc vai trò tự tạo) | 1, 8, 9 |
+| R5 | Không làm chủ được nếu: tài khoản bị khóa, là Super Admin, nhà xe bị khóa, hoặc đã thuộc nhà xe này với bất kỳ vai trò nào. Thành viên đã tồn tại bị từ chối với 409; thao tác thêm chủ không đổi vai trò hiện tại | 1, 8, 9 |
 | R6 | Kiểm tra hết mọi chủ rồi mới ghi | 1 |
 | R7 | Xóa là xóa mềm (`is_active = false`); đặt trạng thái đang có vẫn thành công | 5, 6 |
 | R8 | Khi sửa: trường tùy chọn `null` giữ nguyên, chuỗi rỗng xóa | 4 |
@@ -54,7 +55,7 @@ Không thay đổi schema.
 
 **Dữ liệu khởi tạo khi tạo nhà xe (API 1):**
 - `tenant_configs`: giữ chỗ 30 phút, phí trễ 100.000 đ/giờ, hoa hồng 5,00%.
-- `roles` + `role_permissions`: TENANT_ADMIN (toàn bộ danh mục quyền hiện tại), STAFF (7 quyền), SALE (4 quyền). Với seed V5 hiện tại: 11 + 7 + 4 = 22 liên kết; 11/22 không phải hạn mức cố định.
+- `roles` + `role_permissions`: TENANT_ADMIN (toàn bộ danh mục quyền), STAFF (7 quyền), SALE (4 quyền). Với danh mục của seed V5: 11 + 7 + 4 = 22 liên kết; 11/22 không phải hạn mức cố định.
 
 **Bảng bị ghi theo API:**
 
@@ -92,15 +93,19 @@ flowchart LR
 | `AdminRejection` (enum) | Các lý do không thể làm chủ, kèm mã lỗi và thông báo (bảng 3.1) |
 | `ValidatedAdmin` (record lồng trong `TenantAdminService`) | Một chủ đã qua kiểm tra, truyền từ bước kiểm tra sang bước ghi: email đã chuẩn hóa, họ tên, mật khẩu, tài khoản có sẵn hoặc `null` |
 
-**Repository cho bảng của module account:** truy vấn chỉ module tenant dùng trên `roles`, `user_tenants` đặt trong module tenant (`TenantRoleRepository`, `TenantUserTenantRepository`), không thêm vào repository của account đang phát triển song song. Quy tắc tên: entity của module mình `<Entity>Repository`, entity của module khác `Tenant<Entity>Repository` (không trùng tên để tránh trùng bean).
+**Repository cho bảng của module Account:** đặt truy vấn đặc thù Tenant trên `roles`, `user_tenants` trong module Tenant (`TenantRoleRepository`, `TenantUserTenantRepository`). Tái sử dụng các truy vấn chung của Account theo hợp đồng giữa hai module. Quy tắc tên: entity của module mình `<Entity>Repository`, entity của module khác `Tenant<Entity>Repository` (không trùng tên để tránh trùng bean).
+
+`UserTenantRepository` của Account cung cấp truy vấn kiểm tra quan hệ có sẵn. `TenantUserTenantRepository` cung cấp thao tác insert quan hệ mới và danh sách chủ phục vụ Tenant. Hai repository cùng dùng entity `UserTenant` và bảng `user_tenants`; khi được gọi trong cùng service transaction, chúng cùng tham gia giao dịch đó.
 
 **Giao dịch:** hai service gắn `@Transactional` cấp lớp, hàm chỉ đọc dùng `readOnly = true`. API 1 gọi sang `TenantAdminService` trong cùng giao dịch, lỗi ở bất kỳ bước nào thì rollback toàn bộ.
+
+**Cập nhật Tenant:** đặt `@DynamicUpdate` trên entity để Hibernate chỉ đưa các trường thay đổi vào câu UPDATE. Request sửa thông tin không được ghi lại `is_active` nếu trường này không thay đổi, nhằm giữ trạng thái khóa do giao dịch khác commit sau lần đọc. Cơ chế này không thay thế optimistic locking; hai request cùng sửa một trường vẫn có thể ghi đè nhau.
 
 **Tài khoản có sẵn:** chỉ cần gửi `email`. `fullName`/`password` có thể không gửi hoặc `null`; nếu gửi giá trị thì vẫn phải qua validation DTO (tên ≤255, mật khẩu 8–72 ký tự có chữ và số, tối đa 72 byte UTF-8). Sau validation, Service chỉ liên kết, không đổi họ tên/mật khẩu của tài khoản. Chuỗi mật khẩu rỗng, yếu hoặc vượt giới hạn byte vẫn trả 400 `VALIDATION_ERROR`, kể cả email đã tồn tại.
 
 **Validation và log mật khẩu:** `@MaxUtf8Bytes(72)` dùng validator trong `tenant/validation`, đo số byte UTF-8 trước khi gọi Service. `null` được bỏ qua ở validator; điều kiện mật khẩu bắt buộc cho email mới vẫn do Service kiểm tra. DTO dùng `@ToString.Exclude` của Lombok cho `password`, áp dụng cả khi DTO nằm trong `admins` của request tạo nhà xe. Đây là bảo vệ `toString()`, không thay thế việc tránh ghi body thô và dữ liệu validation nhạy cảm vào log. Không thay đổi exception dùng chung.
 
-**Luồng tạo dễ đọc:** `createTenant` gọi `validateAdminsForNewTenant(request.getAdmins())`; helper chuyển sang bước kiểm tra dùng chung với ngữ cảnh tenant/role chưa có. Danh sách đầu ra tên `validatedAdmins`. `createDefaultRoles` trả `void`; lấy `adminRoleId` bằng `findAdminRoleOrThrow` ở bước kế tiếp. Vòng lặp enum dùng tên `defaultRole`.
+**Luồng tạo dễ đọc:** `createTenant` gọi `validateAdminsForNewTenant(request.getAdmins())`; helper chuyển sang bước kiểm tra dùng chung với ngữ cảnh chưa có tenant. Danh sách đầu ra tên `validatedAdmins`. `createDefaultRoles` trả `void`; lấy `adminRoleId` bằng `findAdminRoleOrThrow` ở bước kế tiếp. Vòng lặp enum dùng tên `defaultRole`.
 
 ### 3.1 `AdminRejection`: lý do không thể làm chủ (R5)
 
@@ -111,10 +116,11 @@ Kiểm tra theo thứ tự dưới, gặp lý do đầu tiên thì dừng. API 1
 | 1 | `TENANT_LOCKED` | Có nhà xe và nhà xe bị khóa | 400 | `ERR_400` | Nhà xe đang bị khóa, không thể thêm chủ nhà xe ! |
 | 2 | `ACCOUNT_LOCKED` | Email có tài khoản, tài khoản bị khóa | 400 | `ERR_400` | Tài khoản đang bị khóa ! |
 | 3 | `SUPER_ADMIN` | Tài khoản là Super Admin | 400 | `ERR_400` | Tài khoản Super Admin không thể làm chủ nhà xe |
-| 4 | `ALREADY_ADMIN` | Đã là chủ của nhà xe này | 409 | `TENANT_ADMIN_ALREADY_ASSIGNED` | Người này đã là chủ nhà xe của nhà xe này |
-| 5 | `HAS_OTHER_ROLE` | Đã có vai trò khác TENANT_ADMIN trong nhà xe này (STAFF, SALE hoặc vai trò tự tạo) | 400 | `ERR_400` | Người này đang là nhân viên của nhà xe, chưa hỗ trợ nâng quyền |
+| 4 | `ALREADY_MEMBER` | Đã có quan hệ với nhà xe này, bất kể TENANT_ADMIN, STAFF, SALE hoặc vai trò tự tạo | 409 | `TENANT_MEMBER_ALREADY_EXISTS` | Người dùng đã thuộc nhà xe này |
 
-Lý do 1, 4, 5 chỉ xét khi có nhà xe (API 8, API 9 có `tenantId`). Khi tạo nhà xe mới chỉ xét 2, 3.
+Lý do 1, 4 chỉ xét khi có nhà xe (API 8, API 9 có `tenantId`). Khi tạo nhà xe mới chỉ xét 2, 3. Helper có hợp đồng `findRejection(Tenant tenant, User user) → Optional<AdminRejection>`, không cần role ID để phân biệt thành viên.
+
+API 9 vẫn trả HTTP 200 khi gặp lý do từ chối, với `canBeAdmin=false` và `reason` lấy đúng thông báo trong bảng. API ghi dữ liệu mới ném lỗi theo cột HTTP.
 
 ---
 
@@ -141,7 +147,9 @@ Lý do 1, 4, 5 chỉ xét khi có nhà xe (API 8, API 9 có `tenantId`). Khi t�
 | 403 | `AUTH_FORBIDDEN` | Không phải Super Admin |
 | 404 | `ERR_404` | Không có nhà xe (mọi API có `tenantId`): "Không tìm thấy nhà xe !" |
 
-**Xung đột ghi đồng thời — phụ thuộc module chung:** hai request có thể cùng qua bước kiểm tra rồi va chạm UNIQUE của DB. Giao dịch thất bại được rollback, nhưng hiện lỗi tại bước ghi trả 500 `ERR_500`. Trùng domain hoặc trùng chủ được Service phát hiện trước khi ghi vẫn trả 409 như đặc tả. Không sửa `GlobalExceptionHandler` hoặc `ErrorCode` trong phạm vi Tenant vì thuộc phần của người khác. Việc ánh xạ lỗi DB sang 409 cần phối hợp với người phụ trách module chung trước khi triển khai; không cam kết 409 cho tranh chấp tại bước ghi ở phiên bản hiện tại.
+**Xung đột ghi đồng thời:** kiểm tra trước không giữ chỗ dữ liệu. Với thành viên, `TenantUserTenantRepository.insertMembershipIfNotExists` dùng `ON CONFLICT DO NOTHING`, trả 1 khi thêm được hoặc 0 khi quan hệ đã tồn tại. Service chuyển kết quả 0 thành `AdminRejection.ALREADY_MEMBER.toException()` để trả 409 và rollback; vai trò và thời điểm gia nhập của quan hệ đã có được giữ nguyên. Không dùng `save` để thêm quan hệ này vì thao tác merge có thể ghi đè bản ghi được giao dịch khác tạo sau validation.
+
+**Phụ thuộc module chung:** lỗi UNIQUE domain/email xảy ra sau bước kiểm tra được chuyển tới xử lý exception chung và có thể trả 500 `ERR_500`; giao dịch phải rollback. Domain được Service phát hiện trùng trước khi ghi phải trả 409. Sử dụng mã `TENANT_MEMBER_ALREADY_EXISTS` trong hợp đồng `ErrorCode` cho thành viên tồn tại. Không mở rộng `GlobalExceptionHandler` trong phạm vi Tenant; ánh xạ lỗi DB sang 409 cần được thống nhất với người phụ trách phần chung.
 
 **Kiểu dữ liệu:** `uuid`; `instant` (ISO-8601, UTC); `PlanTier` = `FREE` \| `BASIC` \| `PRO` \| `ENTERPRISE`.
 
@@ -169,14 +177,14 @@ sequenceDiagram
   participant G as TenantService / addTenantAdmin
   participant A as TenantAdminService
   participant R as Repository
-  Note over G,R: BƯỚC KIỂM TRA - validateAdminRequests(requests, tenant, adminRoleId), không ghi gì
+  Note over G,R: BƯỚC KIỂM TRA - validateAdminRequests(requests, tenant), không ghi gì
   loop mỗi chủ
     A->>A: chuẩn hóa email (trim, chữ thường)
     alt email lặp trong danh sách
       A-->>G: 400 ERR_400
     end
     A->>R: UserRepository.findByEmail(email)
-    A->>A: findRejection(tenant, user, adminRoleId)
+    A->>A: findRejection(tenant, user)
     opt có nhà xe và email có tài khoản
       A->>R: UserTenantRepository.findByUserIdAndTenantId
     end
@@ -192,7 +200,11 @@ sequenceDiagram
     opt email mới
       A->>R: UserRepository.save(User, mật khẩu BCrypt, đang hoạt động)
     end
-    A->>R: UserTenantRepository.save(vai trò TENANT_ADMIN, joinedAt)
+    A->>R: TenantUserTenantRepository.insertMembershipIfNotExists(userId, tenantId, adminRoleId, joinedAt)
+    R-->>A: số dòng được thêm: 1 hoặc 0
+    alt 0 dòng, quan hệ đã tồn tại
+      A-->>G: 409 TENANT_MEMBER_ALREADY_EXISTS, rollback giao dịch
+    end
   end
   A-->>G: danh sách AdminAssignmentResponseDTO
 ```
@@ -276,7 +288,7 @@ sequenceDiagram
 | `page` | integer | 0 | Âm thì về 0 |
 | `size` | integer | 10 | Kẹp trong 1–100 |
 
-Sắp xếp `createdAt` giảm dần, cố định.
+Sắp xếp cố định theo `createdAt` giảm dần, rồi `id` giảm dần nếu trùng thời điểm tạo. ID duy nhất xác định thứ tự trong nhóm trùng `createdAt`; ID không đại diện thời gian tạo. Khi dữ liệu không đổi, các trang có thứ tự ổn định. Phân trang bằng offset vẫn có thể dịch khi dữ liệu được thêm/xóa giữa hai lần tải.
 **Đầu ra:** `data.content[]` (Tenant), `data.page` gồm `size`, `number`, `totalElements`, `totalPages`.
 
 ```mermaid
@@ -287,7 +299,7 @@ sequenceDiagram
   participant T as TenantService
   participant R as Repository
   C->>K: GET /api/v1/tenants?keyword&isActive&page&size
-  K->>K: PageRequest(page ≥ 0, size 1–100, createdAt giảm dần)
+  K->>K: PageRequest(page ≥ 0, size 1–100, createdAt DESC rồi id DESC)
   K->>T: listTenants(keyword, isActive, pageable)
   T->>T: keyword trống thì "%", có thì "%từ khóa%" chữ thường
   T->>R: TenantRepository.search(pattern, isActive, pageable)
@@ -389,7 +401,7 @@ sequenceDiagram
 
 **Đầu vào:** `email`, `fullName`, `password`, ràng buộc như `admins[]` của API 1.
 **Đầu ra:** `data.email`, `data.accountCreated`.
-**Lỗi riêng:** lỗi của luồng 5.0, bảng 3.1 (cả 5 lý do); 500 `ERR_500` "Nhà xe chưa có nhóm quyền chủ nhà xe !" nếu dữ liệu nhà xe thiếu vai trò TENANT_ADMIN.
+**Lỗi riêng:** lỗi của luồng 5.0, bảng 3.1 (cả 4 lý do); 500 `ERR_500` "Nhà xe chưa có nhóm quyền chủ nhà xe !" nếu dữ liệu nhà xe thiếu vai trò TENANT_ADMIN.
 
 ```mermaid
 sequenceDiagram
@@ -402,7 +414,7 @@ sequenceDiagram
   K->>A: addTenantAdmin(tenantId, request, actorId)
   A->>R: TenantRepository.findById → 404 nếu không có
   A->>R: TenantRoleRepository.findByTenantIdAndCode(tenantId, TENANT_ADMIN) → 500 nếu không có
-  A->>A: validateAdminRequests(một request, tenant, adminRoleId) - mục 5.0
+  A->>A: validateAdminRequests(một request, tenant) - mục 5.0
   A->>A: addAdminsToTenant(tenantId, adminRoleId, admins) - mục 5.0
   K-->>C: 201 "Thêm chủ nhà xe thành công !"
 ```
@@ -416,7 +428,7 @@ Chỉ đọc. Kết quả phản ánh thời điểm gọi, không giữ chỗ e
 | Trường | Kiểu | Bắt buộc | Ghi chú |
 | :--- | :--- | :-: | :--- |
 | `email` | string | Có | ≤ 255 |
-| `tenantId` | uuid | Không | Có thì xét thêm lý do 1, 4, 5 (bảng 3.1). Không có: dùng khi tạo nhà xe mới |
+| `tenantId` | uuid | Không | Có thì xét thêm lý do 1, 4 (bảng 3.1). Không có: dùng khi tạo nhà xe mới |
 
 | Đầu ra | Kiểu | Ghi chú |
 | :--- | :--- | :--- |
@@ -426,7 +438,7 @@ Chỉ đọc. Kết quả phản ánh thời điểm gọi, không giữ chỗ e
 | `canBeAdmin` | boolean | `true` khi không gặp lý do từ chối ở bảng 3.1; email mới kèm tenant bị khóa vẫn là `false` |
 | `reason` | string \| null | Thông báo theo bảng 3.1 khi `canBeAdmin = false` |
 
-**Lỗi riêng:** 500 `ERR_500` khi có `tenantId` mà nhà xe thiếu vai trò TENANT_ADMIN.
+Không truy vấn role TENANT_ADMIN ở API tra email. Khi thêm chủ, API ghi phải tìm role để lấy ID và báo lỗi nếu role bị thiếu; `canBeAdmin=true` không bảo đảm bước ghi chắc chắn thành công.
 
 ```mermaid
 sequenceDiagram
@@ -439,24 +451,22 @@ sequenceDiagram
   K->>A: checkAdminEmail(email, tenantId)
   opt có tenantId
     A->>R: TenantRepository.findById → 404 nếu không có
-    A->>R: TenantRoleRepository.findByTenantIdAndCode → 500 nếu không có
   end
   A->>R: UserRepository.findByEmail(email đã chuẩn hóa)
-  A->>A: findRejection(tenant, user, adminRoleId) - cùng hàm với API 1, 8
+  A->>A: findRejection(tenant, user) - cùng hàm với API 1, 8
   A-->>K: AdminEmailCheckResponseDTO (reason = lý do nếu có)
   K-->>C: 200 "Kiểm tra email thành công !"
 ```
 
 ---
 
-## 6. GIỚI HẠN ĐÃ BIẾT VÀ VIỆC CẦN QUYẾT ĐỊNH
+## 6. GIỚI HẠN THIẾT KẾ VÀ PHỤ THUỘC
 
-| # | Vấn đề | Hiện trạng | Đề xuất |
+| # | Vấn đề | Giới hạn | Hướng mở rộng hoặc phối hợp |
 | :-: | :--- | :--- | :--- |
-| 1 | Hai yêu cầu đồng thời trùng domain/email/thành viên | UNIQUE chặn dữ liệu trùng, rollback giao dịch; lỗi tại bước ghi hiện trả 500 | Phối hợp người phụ trách module chung về ánh xạ 409; không sửa exception chung trong module Tenant |
-| 2 | Hai người cùng sửa một nhà xe | Người ghi sau ghi đè | Thêm `@Version` (cần migration) |
-| 3 | `settings` | Giao diện đã bỏ ô nhập, backend vẫn nhận | Giữ cho sau này hay bỏ khỏi API? |
+| 1 | Hai yêu cầu đồng thời trùng domain/email | UNIQUE chặn dữ liệu trùng; giao dịch thất bại phải rollback. Lỗi ghi thuộc xử lý exception chung và có thể trả 500. Trùng thành viên phải được xử lý riêng và trả 409 | Thống nhất ánh xạ 409 với người phụ trách phần chung; không sửa handler trong module Tenant |
+| 2 | Hai người cùng sửa một trường của nhà xe | `@DynamicUpdate` chỉ tránh ghi lại trường không thay đổi, không phát hiện xung đột khi cùng sửa một trường | Cân nhắc `@Version` kèm migration và hợp đồng lỗi khi có yêu cầu |
+| 3 | `settings` | Nhận chuỗi JSON và kiểm tra bằng `ObjectMapper.readTree`. Bộ đọc có thể bỏ qua nội dung dư như `"{} {}"`, khiến DB từ chối và trả 500 | Kiểm thử dữ liệu có phần dư; việc bổ sung kiểm tra toàn bộ chuỗi và trả 400 cần được thống nhất khi mở rộng validation |
 | 4 | API 5 (`isActive=false`) và API 6 làm cùng một việc | Giữ cả hai | Giữ `DELETE` cho đúng REST, hay bỏ? |
 | 5 | Đổi Entity sang DTO bằng tay | | Chuyển sang MapStruct (thêm dependency cho cả dự án) |
-| 6 | 4/5 lý do ở bảng 3.1 dùng chung `ERR_400` | Client không phân biệt được nếu không so câu chữ | Mã riêng: `TENANT_LOCKED`, `ACCOUNT_LOCKED`, `INVALID_OPERATION` (Super Admin, có vai trò khác; theo mục 8.1 onboarding). Frontend và test hiện không phụ thuộc `ERR_400` |
-| 7 | Câu thông báo của `HAS_OTHER_ROLE` gọi cả SALE là "nhân viên" | | "Người này đã có vai trò khác trong nhà xe, chưa hỗ trợ đổi vai trò" (đổi câu là đổi API) |
+| 6 | 3/4 lý do ở bảng 3.1 dùng chung `ERR_400` | Nhà xe khóa, tài khoản khóa và Super Admin dùng `ERR_400`; thành viên tồn tại dùng `TENANT_MEMBER_ALREADY_EXISTS` | Nếu cần phân biệt bằng mã, thống nhất với người phụ trách phần chung và cập nhật hợp đồng API |

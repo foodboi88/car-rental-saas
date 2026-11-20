@@ -56,6 +56,26 @@ describe('TenantForm', () => {
       await fixture.whenStable();
     });
 
+    it('should_not_create_from_an_old_check_after_the_admin_email_changes_and_should_allow_retry', () => {
+      fillValidCreateForm();
+      submit();
+      const oldCheck = http.expectOne(EMAIL_CHECK_URL);
+      const admin = component().admins.at(0);
+      admin.patchValue({ email: 'moi@binhan.vn' });
+      component().onAdminEmailInput(admin);
+      oldCheck.flush(apiOk(adminEmailCheck({ accountExists: true })));
+
+      http.expectNone(TENANTS_API);
+      expect(component().submitting()).toBe(false);
+
+      component().checkAdmin(admin);
+      answerEmailCheck({ accountExists: true });
+      submit();
+      const created = http.expectOne(TENANTS_API);
+      expect(created.request.body.admins).toEqual([{ email: 'moi@binhan.vn' }]);
+      created.flush(apiOk({ tenant: tenant(), admins: [] }));
+    });
+
     it('should_not_call_the_backend_and_should_show_errors_when_required_fields_are_empty', async () => {
       submit();
       await fixture.whenStable();

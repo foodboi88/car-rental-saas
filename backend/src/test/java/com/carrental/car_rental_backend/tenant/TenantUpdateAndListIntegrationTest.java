@@ -2,15 +2,66 @@ package com.carrental.car_rental_backend.tenant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import com.carrental.car_rental_backend.common.enums.plan_tier.PlanTierTenant;
 import com.carrental.car_rental_backend.support.ApiIntegrationTestSupport;
+import com.carrental.car_rental_backend.tenant.dto.request.UpdateTenantRequestDTO;
+import com.carrental.car_rental_backend.tenant.entity.Tenant;
+import com.carrental.car_rental_backend.tenant.repository.TenantRepository;
+import com.carrental.car_rental_backend.tenant.service.TenantService;
 
 /** Sửa nhà xe (PUT) và danh sách có tìm kiếm, lọc, phân trang. */
 class TenantUpdateAndListIntegrationTest extends ApiIntegrationTestSupport {
+  @Autowired private TenantRepository tenantRepository;
+  @Autowired private TenantService tenantService;
+  @Autowired private PlatformTransactionManager transactionManager;
+
+  @Test
+  void should_keep_tenant_locked_when_an_older_edit_is_saved_after_lock() throws Exception {
+    String suffix = this.newSuffix();
+    UUID tenantId = UUID.fromString(this.createTenantAndGetId(this.superAdminToken(), suffix));
+    UUID actorId = this.jdbcTemplate.queryForObject(
+      "SELECT id FROM users WHERE email = ?", UUID.class, SUPER_ADMIN_EMAIL);
+    String updatedName = "Nhà xe đã sửa " + suffix;
+    UpdateTenantRequestDTO request = UpdateTenantRequestDTO.builder()
+      .name(updatedName).domain(this.domainOf(suffix)).planTier(PlanTierTenant.BASIC).build();
+
+    TransactionTemplate editTransaction = new TransactionTemplate(this.transactionManager);
+    TransactionTemplate lockTransaction = new TransactionTemplate(this.transactionManager);
+    lockTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+
+    // Hai giao dịch độc lập chạy xen kẽ, không cần sleep hoặc thay đổi bean dùng chung của bộ test.
+    editTransaction.executeWithoutResult(editStatus -> {
+      Tenant staleTenant = this.tenantRepository.findById(tenantId).orElseThrow();
+      assertThat(staleTenant.isActive()).isTrue();
+
+      // Khóa và commit trước khi giao dịch sửa tiếp tục lưu dữ liệu đã đọc từ trước.
+      lockTransaction.executeWithoutResult(lockStatus ->
+        this.tenantService.updateTenantStatus(tenantId, false, actorId));
+
+      assertThat(staleTenant.isActive()).isTrue(); // Persistence Context cũ chưa được refresh.
+      this.tenantService.updateTenant(tenantId, request, actorId);
+    });
+
+    assertThat(this.jdbcTemplate.queryForObject(
+      "SELECT is_active FROM tenants WHERE id = ?", Boolean.class, tenantId)).isFalse();
+    assertThat(this.jdbcTemplate.queryForObject(
+      "SELECT name FROM tenants WHERE id = ?", String.class, tenantId)).isEqualTo(updatedName);
+  }
 
   @Test
   void should_reject_contact_email_longer_than_column_and_keep_existing_value() throws Exception {
@@ -129,6 +180,41 @@ class TenantUpdateAndListIntegrationTest extends ApiIntegrationTestSupport {
 
     assertThat(active.json().at("/data/page/totalElements").asInt()).isZero();
     assertThat(locked.json().at("/data/page/totalElements").asInt()).isEqualTo(1);
+  }
+
+  @Test
+  void should_keep_pages_in_stable_order_when_tenants_have_the_same_created_at() throws Exception {
+    String token = this.superAdminToken();
+    String keyword = "same-time-" + this.newSuffix();
+    Timestamp createdAt = Timestamp.from(Instant.parse("2026-10-01T00:00:00Z"));
+    List<String> expectedIds = new ArrayList<>();
+    for (int index = 1; index <= 25; index++) {
+      UUID tenantId = new UUID(0, index);
+      this.jdbcTemplate.update(
+        "INSERT INTO tenants (id, name, domain, created_at) VALUES (?, ?, ?, ?)",
+        tenantId, keyword, keyword + "-" + index, createdAt);
+      expectedIds.add(tenantId.toString());
+    }
+    Collections.reverse(expectedIds);
+
+    // ID lớn hơn nhưng tạo sớm hơn: phải đứng sau nhóm trên vì createdAt vẫn là tiêu chí chính.
+    UUID olderTenantId = new UUID(0, 100);
+    this.jdbcTemplate.update(
+      "INSERT INTO tenants (id, name, domain, created_at) VALUES (?, ?, ?, ?)",
+      olderTenantId, keyword, keyword + "-older", Timestamp.from(createdAt.toInstant().minusSeconds(1)));
+    expectedIds.add(olderTenantId.toString());
+
+    List<String> actualIds = new ArrayList<>();
+    for (int page = 0; page < 3; page++) {
+      ApiResult result = this.send("GET",
+        "/api/v1/tenants?keyword=" + keyword + "&page=" + page + "&size=10", token, null);
+      assertThat(result.status()).isEqualTo(200);
+      assertThat(result.json().at("/data/page/totalElements").asInt()).isEqualTo(26);
+      result.json().at("/data/content").forEach(tenant -> actualIds.add(tenant.get("id").asText()));
+    }
+
+    assertThat(actualIds).containsExactlyElementsOf(expectedIds);
+    assertThat(actualIds).doesNotHaveDuplicates();
   }
 
   @Test
