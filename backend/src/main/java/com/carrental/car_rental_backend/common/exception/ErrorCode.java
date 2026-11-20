@@ -18,7 +18,9 @@ public enum ErrorCode {
   // Business Custom Errors
   TENANT_ACCESS_DENIED("TENANT_ACCESS_DENIED", "Bạn không thuộc Tenant này", HttpStatus.FORBIDDEN),
   VEHICLE_NOT_AVAILABLE("VEHICLE_NOT_AVAILABLE", "Xe đã có lịch đặt hoặc đang bảo dưỡng", HttpStatus.CONFLICT),
-  BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST);
+  BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST),
+  METHOD_NOT_ALLOWED("ERR_405", "Phương thức HTTP không được hỗ trợ cho tài nguyên này", HttpStatus.METHOD_NOT_ALLOWED),
+  UNSUPPORTED_MEDIA_TYPE("ERR_415", "Định dạng dữ liệu gửi lên (Content-Type) không được hỗ trợ", HttpStatus.UNSUPPORTED_MEDIA_TYPE);
 
   private final String code;
   private final String message;

@@ -9,10 +9,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.carrental.car_rental_backend.common.dto.ApiResponse;
 
@@ -92,6 +95,30 @@ public class GlobalExceptionHandler {
       // Trả về HTTP 409 CONFLICT
       return ResponseEntity.status(HttpStatus.CONFLICT).body(
           ApiResponse.error("DATA_INTEGRITY_CONFLICT", "Dữ liệu gửi lên không hợp lệ hoặc xảy ra xung đột...")
+      );
+  }
+
+  @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+  public ResponseEntity<ApiResponse<Void>> handleHttpRequestMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
+      log.warn("Http request method not supported: ", ex);
+      return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(
+          ApiResponse.error(ErrorCode.METHOD_NOT_ALLOWED.getCode(), ErrorCode.METHOD_NOT_ALLOWED.getMessage())
+      );
+  }
+
+  @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+  public ResponseEntity<ApiResponse<Void>> handleHttpMediaTypeNotSupportedException(HttpMediaTypeNotSupportedException ex) {
+      log.warn("Http media type not supported exception: ", ex);
+      return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(
+          ApiResponse.error(ErrorCode.UNSUPPORTED_MEDIA_TYPE.getCode(), ErrorCode.UNSUPPORTED_MEDIA_TYPE.getMessage())
+      );
+  }
+
+  @ExceptionHandler(NoResourceFoundException.class)
+  public ResponseEntity<ApiResponse<Void>> handleNoResourceFoundException(NoResourceFoundException ex) {
+      log.warn("No resource found exception: ", ex);
+      return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+          ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND.getCode(), ErrorCode.RESOURCE_NOT_FOUND.getMessage())
       );
   }
 }
