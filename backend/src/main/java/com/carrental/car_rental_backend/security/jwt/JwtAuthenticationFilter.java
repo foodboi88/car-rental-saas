@@ -84,8 +84,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
           UUID tenantUUID = null;
           UUID activeBranchUUID = null;
           UUID userUUID = null;
+          boolean isSelectTenantRequest = "/api/v1/auth/select-tenant".equals(request.getServletPath());
 
-          if (tenantIdStr != null) {
+          if (tenantIdStr != null && !isSelectTenantRequest) {
             tenantUUID = UUID.fromString(tenantIdStr);
             TenantContext.setTenantId(tenantUUID);
           }
@@ -107,7 +108,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
           UsernamePasswordAuthenticationToken authentication = null;
           UserPrincipal userPrincipal = null;
 
-          if (StringUtils.hasText(userIdStr) && StringUtils.hasText(tenantIdStr)) {
+
+          if (
+            StringUtils.hasText(userIdStr) && 
+            StringUtils.hasText(tenantIdStr) &&
+            !isSelectTenantRequest // fix lỗi request chọn tenant nhưng trong accessToken vẫn chứa id tenant cũ (có thể đã bị khóa) 
+          ) {
             userPrincipal = this.customUserDetailsService.loadUserByIdAndTenantId(userUUID, tenantUUID);
           } else if (RoleConstant.SUPER_ADMIN.equals(role)){
             userPrincipal = this.customUserDetailsService.loadSuperAdminById(userUUID);
