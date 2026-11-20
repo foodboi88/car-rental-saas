@@ -98,18 +98,21 @@ public class AuthServiceImpl implements AuthService{
     }
 
     List<UserTenant> listUserTenant = this.userTenantRepository.findByUserId(userInfo.getId());
+    Map<UUID, UUID> tenantIdToRoleIdMapper = new HashMap<>();
+    listUserTenant.stream().forEach(userTenant -> {
+      tenantIdToRoleIdMapper.put(userTenant.getTenantId(), userTenant.getRoleId());
+    });
+    List<UUID> listTenantUUIDOfUser = listUserTenant.stream().map(userTenant -> userTenant.getTenantId()).toList();
+    List<Tenant> listTenantOfUser = this.tenantRepository.findAllById(listTenantUUIDOfUser);
+    List<Tenant> listOfActiveTenant = listTenantOfUser.stream().filter(tenant -> tenant.isActive()).toList();
 
-    if(listUserTenant.size() == 1){ // Trường hợp user chỉ được phân công 1 nhà xe -> Trả list branch -> Vào màn chọn branch luôn
-      UserTenant userTenant = listUserTenant.get(0);
-      Optional<Role> role = this.roleRepository.findById(userTenant.getRoleId());
+    if(listOfActiveTenant.size() == 1){ // Trường hợp user chỉ được phân công 1 nhà xe -> Trả list branch -> Vào màn chọn branch luôn
+      Tenant tenantInfo = listOfActiveTenant.get(0);
+      Optional<Role> role = this.roleRepository.findById(tenantIdToRoleIdMapper.get(tenantInfo.getId()));
       if (role.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn chưa được phân công vào Nhà xe nào !");
       Role roleInfo = role.get();
-      String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), roleInfo.getCode(), userTenant.getTenantId(), null, currentSessionId);
-      String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId(), currentSessionId, userTenant.getTenantId(), null);
-      Optional<Tenant> tenant = this.tenantRepository.findById(userTenant.getTenantId());
-      if (tenant.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, String.format("Nhà xe có Id %s của User không tồn tại !", userTenant.getTenantId()));
-      Tenant tenantInfo = tenant.get();
-      if (!tenantInfo.isActive()) throw new AppException(ErrorCode.FORBIDDEN, String.format("Nhà xe %s của User hiện đang tạm ngưng hoạt động hoặc bị khóa", tenantInfo.getName()));
+      String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), roleInfo.getCode(), tenantInfo.getId(), null, currentSessionId);
+      String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId(), currentSessionId, tenantInfo.getId(), null);
       TenantSummaryDTO tenantSummaryDTO = TenantSummaryDTO.builder()
         .domain(tenantInfo.getDomain())
         .isActive(tenantInfo.isActive())
@@ -135,13 +138,13 @@ public class AuthServiceImpl implements AuthService{
             .permissions(listPermission)
             .phone(userInfo.getPhone())
             .roleCode(roleInfo.getCode())
-            .tenantId(userTenant.getTenantId())
-            .tenantName(tenant.get().getName())
+            .tenantId(tenantInfo.getId())
+            .tenantName(tenantInfo.getName())
             .build()
         )
         .build();
 
-    }else if(listUserTenant.size() > 1){ // Trường hợp user thuọc nhiều nhà xe -> Trả list tenant cho user chọn
+    }else if(listOfActiveTenant.size() > 1){ // Trường hợp user thuọc nhiều nhà xe -> Trả list tenant cho user chọn
       String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), null, null, null, currentSessionId);
       String refreshToken = this.jwtProvider.generateRefreshToken(userInfo.getId(), currentSessionId, null, null);
       List<TenantSummaryDTO> tenantSummaryDTOList = this.getTenantSummaryDTOListFromUserId(userInfo);
