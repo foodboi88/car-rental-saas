@@ -1,6 +1,7 @@
 package com.carrental.car_rental_backend.security.jwt;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -8,6 +9,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.servlet.HandlerExceptionResolver;
@@ -39,7 +41,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
   private final CustomUserDetailsService customUserDetailsService;
   private final HandlerExceptionResolver handlerExceptionResolver;
   private final UserRepository userRepository;
-
+  private final AntPathMatcher pathMatcher = new AntPathMatcher();
+  private static final List<String> PUBLIC_ENDPOINTS = List.of(
+    "/api/v1/auth/login", 
+    "/api/v1/auth/refresh-token", 
+    "/v3/api-docs/**", 
+    "/swagger-ui/**", 
+    "/swagger-ui.html"
+  );
+  
   @Override
   protected void doFilterInternal(
     HttpServletRequest request,
@@ -119,6 +129,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
     } finally {
       TenantContext.clear();
     }
+  }
+
+  @Override
+  protected boolean shouldNotFilter(HttpServletRequest request) throws ServletException {
+    String endpointOfRequest = request.getServletPath();
+    return JwtAuthenticationFilter.PUBLIC_ENDPOINTS.stream().anyMatch(path -> this.pathMatcher.match(path, endpointOfRequest));
   }
 
   private String parseBearerToken(HttpServletRequest request) {
