@@ -16,6 +16,7 @@ import com.carrental.car_rental_backend.account.entity.User;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.ToString;
 
 @Data
 @Builder
@@ -24,6 +25,7 @@ public class UserPrincipal implements UserDetails{
   private UUID id;
   private UUID tenantId;
   private String email;
+  @ToString.Exclude
   private String password;
   private String roleCode;
   private Collection<? extends GrantedAuthority> authorities;

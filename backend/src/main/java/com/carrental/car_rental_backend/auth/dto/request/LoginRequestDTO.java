@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 @Data
 @Builder
@@ -16,6 +17,7 @@ public class LoginRequestDTO {
   @Email(message = "Email không đúng định dạng")
   private String email;
 
+  @ToString.Exclude
   @NotBlank(message = "Vui lòng nhập mật khẩu")
   private String password;
 }
