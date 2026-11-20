@@ -76,8 +76,9 @@ docker run --name postgres-car-rental `
 ### 3. Khởi chạy Ứng dụng Backend
 Di chuyển vào thư mục `backend` và chạy ứng dụng Spring Boot:
 ```powershell
+$env:JWT_SECRET="secret_bat_ky_de_phuc_vu_phat_trien_o_moi_truong_local"
 cd backend
-mvn spring-boot:run
+./mvnw spring-boot:run
 ```
 > Khi khởi động, Flyway sẽ tự động chạy các script migration từ `V1` đến `V6` để tạo bảng và nạp dữ liệu mẫu vào PostgreSQL.
 

@@ -8,6 +8,7 @@ import javax.crypto.SecretKey;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import com.carrental.car_rental_backend.common.constant.ClaimKey;
 import com.carrental.car_rental_backend.common.constant.TokenType;
@@ -35,6 +36,11 @@ public class JwtProvider {
     @Value("${jwt.access-token-expiration-ms}") long accessTokenExpirationMs,
     @Value("${jwt.refresh-token-expiration-ms}") long refreshTokenExpirationMs
   ){
+    if (
+      !StringUtils.hasText(secret) || 
+      secret.getBytes(StandardCharsets.UTF_8).length < 32 ||
+      secret.matches("404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970") // secret đã bị lộ
+    ) throw new IllegalStateException("CRITICAL SECURITY ERROR: JWT_SECRET environment variable is missing, insecure, or using the default key!");
     this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     this.accessTokenExpirationMs = accessTokenExpirationMs;
     this.refreshTokenExpirationMs = refreshTokenExpirationMs;
