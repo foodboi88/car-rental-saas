@@ -1,5 +1,6 @@
 package com.carrental.car_rental_backend.auth.service.impl;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -69,8 +70,8 @@ public class AuthServiceImpl implements AuthService{
     if (!userInfo.getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
 
     UUID currentSessionId = UUID.randomUUID();
-    userInfo.setCurrentSessionId(currentSessionId);
-    this.userRepository.save(userInfo);
+    int totalUpdatedRow = this.userRepository.updateNewSessionId(currentSessionId, Instant.now(), userInfo.getId());
+    if (totalUpdatedRow <= 0) throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản của bạn đã bị khóa hoặc không còn tồn tại trong hệ thống !");
 
     if(Boolean.TRUE.equals(userInfo.getIsSuperAdmin())){
       String accessToken = this.jwtProvider.generateAccessToken(userInfo.getId(), userInfo.getEmail(), RoleConstant.SUPER_ADMIN, null, null, currentSessionId);
