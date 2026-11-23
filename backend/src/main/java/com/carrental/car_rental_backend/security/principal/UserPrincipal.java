@@ -12,11 +12,13 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.util.StringUtils;
 
 import com.carrental.car_rental_backend.account.entity.User;
+import com.carrental.car_rental_backend.common.constant.RoleConstant;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.ToString;
+import lombok.Builder.Default;
 
 @Data
 @Builder
@@ -28,6 +30,8 @@ public class UserPrincipal implements UserDetails{
   @ToString.Exclude
   private String password;
   private String roleCode;
+  @Default
+  private boolean isSuperAdmin = false;
   private Collection<? extends GrantedAuthority> authorities;
   private boolean isActive;
 
@@ -69,13 +73,19 @@ public class UserPrincipal implements UserDetails{
   public static UserPrincipal create(User user, UUID tenantId, String roleCode, List<String> permissions) {
     Collection<SimpleGrantedAuthority> formatedListPermission = new ArrayList<>();
     
-    if(permissions != null && !permissions.isEmpty()){
+    if (permissions != null && !permissions.isEmpty()) {
       for(String item : permissions){
         formatedListPermission.add(new SimpleGrantedAuthority(item));
       }
     }
 
-    if(roleCode != null && StringUtils.hasText(roleCode)){
+    if (
+      roleCode != null && StringUtils.hasText(roleCode) &&
+      (
+        (RoleConstant.SUPER_ADMIN.equals(roleCode) && Boolean.TRUE.equals(user.getIsSuperAdmin())) ||
+        !RoleConstant.SUPER_ADMIN.equals(roleCode)
+      )
+    ) {
       formatedListPermission.add(new SimpleGrantedAuthority("ROLE_" + roleCode));
     }
 
@@ -87,6 +97,7 @@ public class UserPrincipal implements UserDetails{
       .password(user.getPasswordHash())
       .roleCode(roleCode)
       .tenantId(tenantId)
+      .isSuperAdmin(Boolean.TRUE.equals(user.getIsSuperAdmin()))
       .build();
   }
   
