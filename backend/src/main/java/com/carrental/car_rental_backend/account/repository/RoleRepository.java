@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.carrental.car_rental_backend.account.entity.Role;
+import com.carrental.car_rental_backend.branch.entity.Branch;
 
 public interface RoleRepository extends JpaRepository<Role, UUID> {
   Optional<Role> findByCode(String roleCode);
@@ -18,4 +19,6 @@ public interface RoleRepository extends JpaRepository<Role, UUID> {
     WHERE user_tenants.user_id = :userId and user_tenants.tenant_id = :tenantId
   """, nativeQuery = true)
   Optional<Role> findRoleByUserIdAndTenantId(@Param("userId") UUID userId, @Param("tenantId") UUID tenantId);
+
+  Optional<Role> findByIdAndTenantId(UUID userId, UUID tenantId);
 }

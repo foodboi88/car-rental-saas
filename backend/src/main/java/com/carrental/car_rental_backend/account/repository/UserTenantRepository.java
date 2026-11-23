@@ -11,4 +11,8 @@ import com.carrental.car_rental_backend.account.entity.UserTenantId;
 public interface UserTenantRepository extends JpaRepository<UserTenant, UserTenantId>{
   Optional<UserTenant> findByUserIdAndTenantId(UUID userId, UUID tenantId);
   List<UserTenant> findByUserId(UUID userId);
+
+  boolean existsByUserIdAndTenantId(UUID userId, UUID tenantId);
+
+  void deleteByUserIdAndTenantId(UUID userId, UUID tenantId);
 }
