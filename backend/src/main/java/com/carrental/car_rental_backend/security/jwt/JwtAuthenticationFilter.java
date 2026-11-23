@@ -75,7 +75,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter{
           Optional<User> user = this.userRepository.findById(UUID.fromString(userIdStr));
           if (user.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED);
           if (user.get().getCurrentSessionId() == null) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản này đã đăng xuất, vui lòng đăng nhập lại !");
-          if (!UUID.fromString(currentSessionId).equals(user.get().getCurrentSessionId())) throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản này hiện đang có người sử dụng. Vui lòng đăng nhập lại !");
+          if (!UUID.fromString(currentSessionId).equals(user.get().getCurrentSessionId())) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản này hiện đang có người sử dụng. Vui lòng đăng nhập lại !");
 
           String tenantIdStr = claims.get(ClaimKey.TENANT_ID, String.class);
           String activeBranchIdStr = claims.get(ClaimKey.ACTIVE_BRANCH_ID, String.class);

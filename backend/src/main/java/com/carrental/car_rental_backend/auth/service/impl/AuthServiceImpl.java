@@ -302,12 +302,12 @@ public class AuthServiceImpl implements AuthService{
     String activeBranchId = claims.get(ClaimKey.ACTIVE_BRANCH_ID, String.class);
   
     Optional<User> user = this.userRepository.findById(userUUID);
-    if (user.isEmpty()) throw new AppException(ErrorCode.BAD_REQUEST, "Không tìm thấy thông tin User !");
+    if (user.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Không tìm thấy thông tin User !");
     if (!user.get().getIsActive()) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !");
     if (user.get().getCurrentSessionId() == null) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản này đã đăng xuất, vui lòng đăng nhập lại !");
 
     String currentSessionId = claims.get(ClaimKey.CURRENT_SESSION_ID, String.class);
-    if (!StringUtils.hasText(currentSessionId) || !UUID.fromString(currentSessionId).equals(user.get().getCurrentSessionId())) throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản của bạn đang được đăng nhập ở nơi khác. Vui lòng đăng nhập lại !");
+    if (!StringUtils.hasText(currentSessionId) || !UUID.fromString(currentSessionId).equals(user.get().getCurrentSessionId())) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đang được đăng nhập ở nơi khác. Vui lòng đăng nhập lại !");
 
     User userInfo = user.get();
 

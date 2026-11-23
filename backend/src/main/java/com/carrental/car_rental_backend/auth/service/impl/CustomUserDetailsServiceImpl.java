@@ -39,7 +39,7 @@ public class CustomUserDetailsServiceImpl implements CustomUserDetailsService {
   public UserPrincipal loadUserByIdAndTenantId(UUID userId, UUID tenantId) {
 
     Optional<User> user = this.userRepository.findById(userId);
-    if (user.isEmpty() || !Boolean.TRUE.equals(user.get().getIsActive())) throw new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy người dùng hoặc tài khoản đã bị khóa");
+    if (user.isEmpty() || !Boolean.TRUE.equals(user.get().getIsActive())) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản không tồn tại hoặc đã bị khóa!");
 
     Optional<UserTenant> userInfoInTenant = this.userTenantRepository.findByUserIdAndTenantId(userId, tenantId);
     if (userInfoInTenant.isEmpty()) throw new AppException(ErrorCode.UNAUTHORIZED, "Người dùng không thuộc tenant này");
@@ -62,7 +62,7 @@ public class CustomUserDetailsServiceImpl implements CustomUserDetailsService {
   @Override
   public UserPrincipal loadSuperAdminById(UUID userId) {
     Optional<User> user = this.userRepository.findById(userId);
-    if(user.isEmpty() || !Boolean.TRUE.equals(user.get().getIsActive())) throw new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy người dùng hoặc tài khoản đã bị khóa");
+    if(user.isEmpty() || !Boolean.TRUE.equals(user.get().getIsActive())) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản không tồn tại hoặc đã bị khóa!");
 
     if(!Boolean.TRUE.equals(user.get().getIsSuperAdmin())) throw new AppException(ErrorCode.FORBIDDEN, "User không phải SUPER ADMIN");
     
@@ -72,7 +72,7 @@ public class CustomUserDetailsServiceImpl implements CustomUserDetailsService {
   @Override
   public UserPrincipal loadUserById(UUID userId) {
     Optional<User> user = this.userRepository.findById(userId);
-    if(user.isEmpty() || !Boolean.TRUE.equals(user.get().getIsActive())) throw new AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy người dùng hoặc tài khoản đã bị khóa");    
+    if(user.isEmpty() || !Boolean.TRUE.equals(user.get().getIsActive())) throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản không tồn tại hoặc đã bị khóa!");    
     return UserPrincipal.create(user.get(), null, null, null);
   }
 
