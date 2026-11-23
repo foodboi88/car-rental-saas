@@ -31,6 +31,7 @@ erDiagram
     permissions ||--o{ role_permissions : "granted_in"
     tenants ||--o{ user_tenants : "has_members"
     users ||--o{ user_tenants : "belongs_to"
+    users ||--o{ user_sessions : "has_sessions"
     roles ||--o{ user_tenants : "assigned_role"
     user_tenants ||--o{ user_branches : "assigned_branch"
     branches ||--o{ user_branches : "has_staff"
@@ -114,9 +115,20 @@ erDiagram
         boolean is_active "Trang thai kich hoat"
         boolean is_super_admin "Co Super Admin SaaS"
         timestamptz last_login_at "Dang nhap gan nhat"
-        uuid current_session_id "Ma phien dang nhap hien tai (Single Session)"
+        uuid current_session_id "Ma phien (DEPRECATED - Chuyen sang user_sessions)"
         timestamptz created_at "Thoi diem tao"
         timestamptz updated_at "Thoi diem cap nhat"
+    }
+
+    user_sessions {
+        uuid id PK "Ma ID phien dang nhap (Session ID mang trong JWT)"
+        uuid user_id FK "Ma ID nguoi dung (FK users)"
+        string device_name "Ten thiet bi va trinh duyet (Parse tu User-Agent)"
+        string ip_address "Dia chi IP thiet bi dang nhap"
+        boolean is_revoked "Trang thai thu hoi phien (true: Da dang xuat/bi da)"
+        timestamptz last_active_at "Thoi diem tuong tac gan nhat (Phuc vu thuat toan LRU)"
+        timestamptz expires_at "Thoi diem het han phien"
+        timestamptz created_at "Thoi diem tao phien"
     }
 
     user_tenants {
@@ -341,7 +353,7 @@ CREATE TABLE users (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,                              -- Trạng thái kích hoạt tài khoản
     is_super_admin BOOLEAN DEFAULT FALSE,                        -- Cờ đánh dấu Super Admin toàn hệ thống SaaS (Bypasses RLS)
     last_login_at TIMESTAMP WITH TIME ZONE,                      -- Thời điểm đăng nhập thành công gần nhất
-    current_session_id UUID,                                     -- Mã phiên đăng nhập hiện tại (Single Session - Chống đăng nhập đồng thời)
+    current_session_id UUID,                                     -- [DEPRECATED] Giữ nguyên để tương thích ngược khi merge nhánh, chuyển sang quản lý đa thiết bị qua bảng user_sessions
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tạo tài khoản
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Thời điểm cập nhật thông tin gần nhất
 );
@@ -550,6 +562,29 @@ CREATE UNIQUE INDEX idx_bookings_tenant_code ON bookings(tenant_id, booking_code
 CREATE INDEX idx_bookings_payment_status ON bookings(tenant_id, payment_status);
 ```
 
+### 2.14 user_sessions (Quản lý Phiên & Thiết bị Đăng nhập)
+
+> **Mục tiêu:** Cho phép 1 tài khoản đăng nhập đồng thời trên nhiều thiết bị (Multi-Session: vừa dùng máy tính quầy, vừa cầm điện thoại ra bãi xe). Quản lý tối đa 5 thiết bị hoạt động qua thuật toán đào thải LRU (Least Recently Used), hỗ trợ người dùng xem danh sách thiết bị và chủ động đăng xuất thiết bị lạ từ xa.
+
+```sql
+CREATE TABLE user_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã phiên đăng nhập (Session ID) được đính kèm vào Claim của JWT
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,-- Khóa ngoại tham chiếu người dùng sở hữu phiên
+    device_name VARCHAR(255),                                    -- Tên thiết bị và trình duyệt (Backend tự bóc tách từ Header User-Agent)
+    ip_address VARCHAR(45),                                      -- Địa chỉ IP của thiết bị khi đăng nhập (IPv4 hoặc IPv6)
+    is_revoked BOOLEAN NOT NULL DEFAULT FALSE,                   -- Công tắc thu hồi: FALSE (đang active), TRUE (đã đăng xuất / bị đào thải)
+    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm gọi API gần nhất (Căn cứ chạy thuật toán đào thải LRU)
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,                -- Thời điểm hết hạn phiên (tính theo thời hạn sống của Refresh Token)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP-- Thời điểm phiên được khởi tạo lúc đăng nhập
+);
+
+-- Chỉ mục tối ưu tìm kiếm phiên của User
+CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
+
+-- Composite Index phục vụ truy vấn đếm và đào thải thiết bị cũ nhất theo thuật toán LRU
+CREATE INDEX idx_user_sessions_lru ON user_sessions(user_id, is_revoked, last_active_at);
+```
+
 ---
 
 ## 3. Indexes Summary
@@ -564,6 +599,8 @@ CREATE INDEX idx_bookings_payment_status ON bookings(tenant_id, payment_status);
 | permissions | idx_permissions_code | code | UNIQUE | Tra cứu quyền nguyên tử theo mã định danh |
 | role_permissions | idx_role_permissions_permission_id | permission_id | Normal | Tối ưu kiểm tra quan hệ quyền |
 | users | idx_users_email | email | UNIQUE | Đăng nhập tập trung hệ thống |
+| user_sessions | idx_user_sessions_user_id | user_id | Normal | Lấy danh sách thiết bị/phiên hoạt động của User |
+| user_sessions | idx_user_sessions_lru | user_id, is_revoked, last_active_at | Composite | Truy vấn đếm phiên active và tìm phiên cũ nhất để đào thải LRU |
 | user_tenants | idx_user_tenants_tenant_id | tenant_id | Normal | Quét thành viên thuộc tenant |
 | user_tenants | idx_user_tenants_role_id | role_id | Normal | Quét người dùng theo role |
 | user_branches | idx_user_branches_branch_id | branch_id | Normal | Quét nhân viên trực tại chi nhánh |
@@ -849,3 +886,140 @@ WHERE tenant_id = :tenantId
 Thu thêm phụ phí trả khác điểm (Drop-off Fee) để bù chi phí điều xe.
 Tự động điều chuyển vị trí xe vehicles.branch_id = return_branch_id khi đơn hàng chuyển sang trạng thái RETURNED.
 Xây dựng luồng Điều phối xe liên chi nhánh (vehicles.status = 4: TRANSFERRED).
+
+---
+
+### 4.7 CHIẾN LƯỢC QUẢN LÝ PHIÊN ĐA THIẾT BỊ (MULTI-SESSION) & MA TRẬN KHÓA ĐỒNG THỜI (CONCURRENCY LOCKING MATRIX)
+
+> **Cập nhật:** 23/11/2026 — Chuyển dịch toàn diện từ Single Session sang Multi-Session có quản lý thiết bị, giải quyết triệt để vấn đề nhân viên/sếp bị đá văng khi đang nhập dở form, đồng thời chuẩn hóa ma trận áp dụng Concurrency Lock trên toàn hệ thống.
+
+---
+
+#### 1. "Thực tế vận hành nhà xe: Vì sao cơ chế Single Session cũ (`current_session_id`) bị người dùng tẩy chay?"
+
+* **Hành vi thực tế của Chủ xe (`TENANT_ADMIN`):** 
+  Sếp nhà xe thường xuyên dùng song song 2 thiết bị: Buổi sáng ngồi làm việc trên Laptop/PC ở trụ sở, trưa đi cafe hoặc thị sát bãi xe cầm iPhone mở xem doanh thu. Với cơ chế cũ, sếp vừa mở app điện thoại $\rightarrow$ máy tính ở trụ sở bị đá văng $\rightarrow$ sếp quay về máy tính đăng nhập lại $\rightarrow$ điện thoại lại bị đá văng!
+* **Hành vi thực tế của Nhân viên bãi xe (`STAFF`):**
+  Khi khách tới nhận xe, nhân viên ngồi trong phòng điều hành dùng **PC để bàn** mở form tạo đơn và gõ thông tin hợp đồng. Sau đó, nhân viên cầm **điện thoại/tablet** chạy ra bãi xe dưới trời nắng để chụp ảnh vết xước xe, ODO, vạch xăng (`booking:handover`). 
+  - Nếu cơ chế cũ đá văng phiên trước: Nhân viên vừa đăng nhập điện thoại ngoài bãi $\rightarrow$ máy tính trong quầy bị văng $\rightarrow$ toàn bộ form hợp đồng đang gõ dở bị mất trắng!
+* **Văn hóa "Tài khoản quầy" (Kiosk Account):**
+  Nhiều chi nhánh bãi xe dùng 1 tài khoản chung cho ca trực (ví dụ: `staff_caugiay@rentcar.vn`). Nếu 2 nhân viên cùng trực 1 ca mà đăng nhập đá nhau thì công việc bàn giao xe bị tê liệt.
+
+---
+
+#### 2. "Bảng `user_sessions`: Từng trường để làm gì và tương tác với cái gì?"
+
+| Cột | Kiểu dữ liệu | Ý nghĩa nghiệp vụ | Tương tác & Luồng xử lý |
+| :--- | :--- | :--- | :--- |
+| **`id`** | `UUID PK` | **Chính là `sessionId`** | Được đính kèm trực tiếp vào Claim của Access Token & Refresh Token. |
+| **`user_id`** | `UUID FK` | Chủ sở hữu phiên | Liên kết tới `users(id)`, phục vụ đếm số thiết bị và cascade khi xóa tài khoản. |
+| **`device_name`** | `VARCHAR` | Nhận diện thiết bị | Backend tự parse từ Header `User-Agent` (VD: *"Chrome 120 on Windows 11"*). Hiển thị trên màn hình Cài đặt cho người dùng nhận biết. |
+| **`ip_address`** | `VARCHAR` | Địa chỉ IP đăng nhập | Lấy từ `getRemoteAddr()` / `X-Forwarded-For`, giúp cảnh báo đăng nhập bất thường. |
+| **`is_revoked`** | `BOOLEAN` | Công tắc thu hồi | Mặc định `FALSE`. Chuyển sang `TRUE` khi: người dùng bấm Đăng xuất, bị đá từ xa, hoặc bị đào thải bởi thuật toán LRU. Ở Filter, nếu `is_revoked == true` $\rightarrow$ Ném lỗi `401 Unauthorized` chặn request ngay! |
+| **`last_active_at`** | `TIMESTAMPTZ` | Tương tác gần nhất | Cập nhật thời điểm gọi API gần nhất $\rightarrow$ **Là thước đo để thuật toán LRU tìm thiết bị cũ nhất** đào thải khi đăng nhập thiết bị thứ 6. |
+| **`expires_at`** | `TIMESTAMPTZ` | Hạn sống của phiên | Bằng thời hạn của Refresh Token (VD: `now() + 7 days`). Cronjob hàng đêm chạy `DELETE WHERE expires_at < NOW() OR is_revoked = TRUE` để dọn sạch rác DB. |
+
+---
+
+#### 3. "Vì sao chúng ta LOẠI BỎ trường `refresh_token_hash` mà không lo mất an toàn?"
+
+* **Lý do người ta dùng `refresh_token_hash` trong các hệ thống ngân hàng:** Để chống tấn công dùng lại token cũ (Token Replay Attack). Nếu hacker trộm được Refresh Token cũ mang đi xin token mới, hệ thống so sánh hash không khớp sẽ báo động đỏ.
+* **Tại sao dự án Car Rental SaaS quyết định loại bỏ (Triết lý YAGNI & KISS)?**
+  1. Bản thân **JWT là một tấm vé tự chứng thực (Self-contained)** có chữ ký mật mã an toàn qua `jwt.verifyWith(secretKey)`.
+  2. Bên trong Refresh Token đã mang sẵn `sessionId`. Khi gọi `/refresh-token`, Backend chỉ cần giải mã token, kiểm tra chữ ký bí mật và tra cứu `user_sessions` thấy `is_revoked == false` và chưa hết hạn là đủ xác thực 100%.
+  3. Bỏ trường này giúp loại bỏ hoàn toàn các bước băm SHA-256 phức tạp, không phải update DB liên tục mỗi lần refresh, giúp code nhẹ nhàng, dễ bảo trì và hiệu năng cao hơn gấp nhiều lần.
+
+---
+
+#### 4. "Tại sao BẮT BUỘC phải giới hạn tối đa 5 thiết bị bằng thuật toán LRU?"
+
+Nếu không giới hạn số lượng thiết bị trên 1 tài khoản, hệ thống sẽ dính 2 vấn nạn:
+1. **Gian lận bản quyền SaaS (Account Sharing Abuse):** Nhà xe mua 1 gói tài khoản duy nhất nhưng chia sẻ mật khẩu cho 20 nhân viên dùng chung $\rightarrow$ Doanh nghiệp SaaS thất thu.
+2. **Zombie Sessions làm rác Database:** Người dùng đăng nhập ẩn danh, đổi máy, xóa app nhưng không đăng xuất $\rightarrow$ Sau vài tháng tích tụ hàng nghìn dòng rác trong DB làm chậm câu lệnh tra cứu phiên.
+
+* **Thuật toán đào thải LRU (Least Recently Used - Tối đa 5 thiết bị):**
+  - Khi đăng nhập: Đếm số phiên active (`is_revoked = false AND expires_at > now()`).
+  - Nếu `count >= 5`: Tìm phiên có `last_active_at` **nhỏ nhất (cũ nhất, lâu nhất không dùng)** và cập nhật `is_revoked = true`.
+  - Thiết bị thứ 6 vào êm ru, thiết bị cũ nhất tự động hết quyền mà không cần làm phiền người dùng!
+
+---
+
+#### 5. "Ma trận Khóa đồng thời (Concurrency Locking Matrix): Khi nào dùng Optimistic Lock, khi nào dùng Pessimistic Lock?"
+
+| Bảng Entity | Loại Concurrency Control | Lý do cốt lõi & Cơ chế hoạt động |
+| :--- | :--- | :--- |
+| **`vehicles`** | **Optimistic Lock (`@Version`)** | Tránh Sale (văn phòng) sửa giá thuê ghi đè lên trạng thái Bảo dưỡng do Kỹ thuật (bãi xe) cập nhật. |
+| **`bookings`** | **Optimistic Lock (`@Version`)** | Tránh Nhân viên bãi xác nhận nhận cọc ghi đè lên thao tác tự động hủy đơn của Scheduler. |
+| **`customers`** | **Optimistic Lock (`@Version`)** | Bảo vệ cờ cảnh báo nợ xấu/rủi ro `is_risk` và thông tin CCCD/GPLX không bị sửa đè. |
+| **Tạo Booking giữ xe (Hold Engine)** | **Pessimistic Lock (`SELECT ... FOR UPDATE`)** | **BẮT BUỘC!** Chống Double Booking tức thời trong **2 - 5 mili-giây** tại thời điểm bấm nút chốt giữ xe (vì là thao tác `INSERT` đơn mới, `@Version` hoàn toàn bất lực). |
+| **`user_sessions`, `payment_logs`** | **KHÔNG DÙNG LOCK** | Bảng lịch sử (Append-only), chỉ thêm mới (`INSERT`) và đánh dấu thu hồi, không có nghiệp vụ sửa đè dữ liệu quá khứ. |
+| **Bảng danh mục tĩnh (`permissions`, `vehicle_types`)** | **KHÔNG DÙNG LOCK** | 99.99% chỉ đọc (`READ-ONLY`), không bao giờ có 2 người cùng sửa danh mục xe cùng lúc. |
+| **Bảng liên kết N-N (`user_tenants`, `role_permissions`)** | **KHÔNG DÙNG LOCK** | Chỉ gồm các khóa ngoại làm PK, chỉ có thao tác `INSERT/DELETE`, không có thao tác `UPDATE`. |
+
+---
+
+#### 6. "Tử huyệt: Vì sao CẤM KỴ dùng Pessimistic Lock khi người dùng đang mở form gõ gõ?"
+
+> **Sếp hỏi:** *"Tại sao em không lock luôn chiếc xe khi nhân viên mở form, đợi họ gõ xong bấm Lưu rồi mới nhả ra?"*
+
+**Câu trả lời chuẩn Tech Lead:**
+* **Bản chất CSDL:** Pessimistic Lock (`FOR UPDATE`) bắt buộc phải **giữ chặt 1 kết nối (Connection) từ HikariCP** và bật transaction mở (`setAutoCommit(false)`).
+* **Kịch bản sập nguồn:** Nhân viên mở form bàn giao xe, sau đó quay sang uống trà sữa, đi vệ sinh 10 phút, hoặc quên tắt tab máy tính.
+  - Bể kết nối HikariCP (chỉ có 10 - 20 connection) bị chiếm dụng cạn kiệt! Toàn bộ khách hàng bên ngoài vào xem danh sách xe đều bị xoay tít và văng lỗi `ConnectionTimeoutException`.
+  - Chiếc xe bị khóa cứng ở CSDL, không một câu query nào (kể cả xem xe) chạm vào được!
+* 🍜 **Ẩn dụ đời sống:** Như vào quán phở, vừa tới cửa chưa biết ăn gì đã lấy xích **khóa cứng luôn cái bàn ăn**, rồi ngồi lướt TikTok 45 phút không cho ai ngồi, quán phở tê liệt!
+* **Quy tắc vàng:** Pessimistic Lock **chỉ được sống trong vài mili-giây** khi máy tính xử lý giao dịch. Còn suốt thời gian người dùng mở form suy nghĩ và gõ phím, **bắt buộc phải dùng Optimistic Lock (`@Version`)**!
+
+---
+
+#### 7. "Cạm bẫy sống còn khi lập trình Optimistic Lock với Frontend"
+
+Nhiều dev gắn `@Version` vào Entity nhưng hệ thống vẫn bị ghi đè mất dữ liệu (Lost Update)! Vì sao?
+* **Lỗi sai kinh điển:** Service Backend tự gọi `findById(id)` ngay khi nhận request `PUT /vehicles/{id}`. Khi đó, Hibernate luôn đọc được version mới nhất hiện tại của DB, nên lúc `save()` nó thấy version khớp và lưu thành công $\rightarrow$ Optimistic Lock bị vô hiệu hóa hoàn toàn!
+* **Cách triển khai CHUẨN:**
+  1. API `GET` trả về dữ liệu xe kèm theo trường `"version": 1`. Frontend phải lưu giá trị này vào Form State.
+  2. Khi người dùng bấm Lưu (`PUT /vehicles/{id}`), Request DTO của Frontend **bắt buộc phải gửi kèm `"version": 1`**.
+  3. Ở Service: Kiểm tra nếu `request.getVersion() != entity.getVersion()` $\rightarrow$ Ném ngay `AppException(ErrorCode.CONFLICT, "Dữ liệu xe này vừa được cập nhật bởi người khác. Vui lòng tải lại trang!")`.
+
+---
+
+#### 8. "Song kiếm hợp bích": Cùng 1 nghiệp vụ Booking kết hợp cả 2 loại Lock như thế nào?
+
+Hai loại khóa này không bài xích nhau, mà là hai người lính gác ở hai giai đoạn hoàn toàn khác nhau trong vòng đời của đơn đặt xe:
+```
+[ GIAI ĐOẠN 1: TẠO ĐƠN MỚI (INSERT) ]
+👉 DÙNG PESSIMISTIC LOCK TRÊN XE (2 mili-giây)
+- Khóa chiếc xe cha: SELECT * FROM vehicles WHERE id = :id FOR UPDATE;
+- Check xem khung giờ có bị ai chiếm chưa -> Insert booking mới.
+- Nhả khóa xe ngay! Chống Double Booking tuyệt đối 100%.
+
+                     │
+                     ▼
+[ GIAI ĐOẠN 2: TÁC NGHIỆP TRÊN ĐƠN ĐÃ CÓ (UPDATE) ]
+👉 DÙNG OPTIMISTIC LOCK TRÊN BOOKING (@Version)
+- Đơn đã nằm trong DB (version = 1).
+- Thao tác xác nhận cọc, bàn giao, trả xe đều kiểm tra @Version.
+- Ai bấm trước thành công (version lên 2), người bấm sau bị ném lỗi Conflict:
+  "Đơn này đã được cập nhật trước đó!". Chống Double Payment triệt để!
+```
+
+---
+
+#### 9. "Khóa tài khoản nhân viên: Cơ chế Một phát chết toàn bộ (Atomic Lockout)"
+
+Khi sếp phát hiện nhân viên gian lận và bấm Khóa tài khoản:
+* **Hành động Backend:**
+  1. Đổi `users.is_active = false`.
+  2. Đồng thời đánh dấu `user_sessions.is_revoked = true` cho **toàn bộ phiên trên mọi thiết bị** của nhân viên đó.
+* **Tác động an ninh:** `JwtAuthenticationFilter` kiểm tra `is_revoked == false` ở mỗi request $\rightarrow$ Toàn bộ máy tính, điện thoại, máy tính bảng của nhân viên này bị đá văng ngay lập tức trong 0.001 giây, triệt tiêu hoàn toàn "cửa sổ 15 phút zombie token".
+
+---
+
+#### 10. "Đa Tab trên cùng trình duyệt vs Đa Thiết bị trong mô hình Multi-Tenant"
+
+* **Bản chất Cookie:** Cookie `refreshToken` được trình duyệt quản lý theo Origin (`domain:port`). Mọi tab trên cùng 1 trình duyệt chia sẻ chung Cookie này.
+* **Quy chuẩn vận hành:** Trên cùng một trình duyệt thường, người dùng phải làm việc đồng nhất trên 1 Nhà xe. Muốn làm việc trên 2 Nhà xe độc lập cùng lúc:
+  - Hoặc dùng 2 thiết bị khác nhau (PC mở Nhà xe Hà Nội, Điện thoại mở Nhà xe Sài Gòn $\rightarrow$ 2 Session ID khác nhau, chạy độc lập).
+  - Hoặc dùng 2 Profile Chrome khác nhau (hoặc Tab ẩn danh).
+* **Kiểm tra ràng buộc chéo (Cross-Tenant Validation):** Mọi câu query cập nhật/truy vấn đều phải kiểm tra chéo với `tenant_id` từ Token (`findByIdAndTenantId`) để ngăn chặn hoàn toàn rò rỉ dữ liệu hoặc tấn công IDOR giữa các nhà xe.
+

@@ -234,16 +234,21 @@ sequenceDiagram
 
     Note over Client, DB: 1. LUỒNG ĐĂNG NHẬP (POST /api/v1/auth/login)
     Client ->> Ctrl: POST /login { email, password }
-    Ctrl ->> Svc: login(requestDto)
-    Svc ->> DB: Query User by email, verify password (BCrypt) & update currentSessionId
+    Ctrl ->> Svc: login(requestDto, userAgent, ipAddress)
+    Svc ->> DB: Query User by email, verify password (BCrypt)
+    Svc ->> Svc: Kiểm tra số phiên active của User (LRU: tối đa 5 thiết bị)
+    opt Số phiên active >= 5
+        Svc ->> DB: Thu hồi phiên cũ nhất (UPDATE user_sessions SET is_revoked = true WHERE last_active_at cũ nhất)
+    end
+    Svc ->> DB: Tạo phiên mới trong user_sessions (sessionId, device_name, ip_address, expires_at)
     alt Là Super Admin
-        Svc -->> Ctrl: Cấp JWT { role: "SUPER_ADMIN", tenant_id: null }
+        Svc -->> Ctrl: Cấp JWT { role: "SUPER_ADMIN", tenant_id: null, session_id }
     else User thuộc đúng 1 Tenant
         Svc ->> DB: Lấy vai trò, permissions & danh sách chi nhánh
-        Svc -->> Ctrl: Cấp JWT { role: roleCode, tenant_id: tenantId } + assignedBranches
+        Svc -->> Ctrl: Cấp JWT { role: roleCode, tenant_id: tenantId, session_id } + assignedBranches
     else User thuộc nhiều Tenant (>1)
         Svc ->> DB: Lấy danh sách Tenant đang active
-        Svc -->> Ctrl: Cấp Pre-tenant JWT { role: null, tenant_id: null } + availableTenants
+        Svc -->> Ctrl: Cấp Pre-tenant JWT { role: null, tenant_id: null, session_id } + availableTenants
     end
     Ctrl -->> Client: 200 OK + Body: accessToken + Set-Cookie: refreshToken (HttpOnly, SameSite=Strict)
 
@@ -277,15 +282,27 @@ sequenceDiagram
     Client ->> Filter: POST /refresh-token + Cookie: refreshToken (withCredentials: true)
     Filter ->> Ctrl: Bỏ qua kiểm tra AccessToken (Endpoint permitAll)
     Ctrl ->> Svc: refreshToken(cookieRefreshToken)
-    Svc ->> DB: Validate user, currentSessionId, tenant & bóc tách context (tenantId, activeBranchId)
+    Svc ->> DB: Validate user, verify session trong user_sessions (is_revoked == false & expires_at > now())
+    Svc ->> DB: Cập nhật last_active_at = now() trên user_sessions
     opt Token có activeBranchId
         Svc ->> DB: Xác thực lại branch (findByIdAndTenantId, active) & user_branches (status = ACTIVE)
     end
-    Svc -->> Ctrl: Cấp cặp AccessToken & RefreshToken mới bảo tồn nguyên vẹn context
+    Svc -->> Ctrl: Cấp cặp AccessToken & RefreshToken mới bảo tồn nguyên vẹn context & sessionId
     Ctrl -->> Client: 200 OK + accessToken mới + Set-Cookie: refreshToken mới
     Note over Client: HTTP Interceptor lấy token mới retry submit form ngay lập tức!
 
-    Note over Client, DB: 5. DỌN DẸP NGỮ CẢNH (FILTER FINALLY)
+    Note over Client, DB: 5. LUỒNG QUẢN LÝ THIẾT BỊ & ĐĂNG XUẤT TỪ XA (ACTIVE SESSIONS)
+    Client ->> Ctrl: GET /api/v1/auth/sessions
+    Ctrl ->> Svc: getActiveSessions(userPrincipal.id)
+    Svc ->> DB: Query user_sessions WHERE user_id = :id AND is_revoked = false
+    Svc -->> Client: 200 OK [ { id, deviceName, ipAddress, lastActiveAt, isCurrent } ]
+
+    Client ->> Ctrl: DELETE /api/v1/auth/sessions/{sessionId}
+    Ctrl ->> Svc: revokeSession(userPrincipal.id, sessionId)
+    Svc ->> DB: UPDATE user_sessions SET is_revoked = true WHERE id = :sessionId
+    Svc -->> Client: 200 OK (Thu hồi thiết bị thành công)
+
+    Note over Client, DB: 6. DỌN DẸP NGỮ CẢNH (FILTER FINALLY)
     Filter ->> Ctx: TenantContext.clear() (Chống rò rỉ dữ liệu giữa các luồng Tomcat)
 ```
 
@@ -321,6 +338,35 @@ Incoming Request
                                        └──────────────────────────────┘
 ```
 
+### 6.3 Kiến trúc Quản lý Phiên (Session Management) & Thiết kế Sẵn sàng cho Redis
+
+Nhằm đảm bảo hệ thống hiện tại chạy đơn giản trên PostgreSQL nhưng **sẵn sàng chuyển sang Redis trong tương lai mà không phải sửa đổi code nghiệp vụ**, phân hệ Auth áp dụng nguyên lý **Dependency Inversion (Chữ D trong SOLID)**:
+
+```
+                      ┌──────────────────────────────────────┐
+                      │    AuthService / SecurityFilter      │
+                      └──────────────────┬───────────────────┘
+                                         │ (Chỉ phụ thuộc Interface trừu tượng)
+                                         ▼
+                      ┌──────────────────────────────────────┐
+                      │     <<Interface>> SessionManager     │
+                      │  - createSession(userId, ...)        │
+                      │  - isSessionActive(sessionId)        │
+                      │  - revokeSession(sessionId)          │
+                      │  - revokeAllOtherSessions(userId)    │
+                      │  - getActiveSessions(userId)         │
+                      └──────────────────┬───────────────────┘
+                                         │
+               ┌─────────────────────────┴─────────────────────────┐
+               │                                                   │
+               ▼                                                   ▼
+   ┌───────────────────────────────┐                   ┌───────────────────────────────┐
+   │ DatabaseSessionManager (JPA)  │                   │ RedisSessionManager (Roadmap) │
+   │ 👉 Giai đoạn hiện tại:        │                   │ 👉 Khi scale lớn trong tương  │
+   │    Thao tác bảng user_sessions│                   │    lai: Đọc/ghi Redis Hash    │
+   │    trong PostgreSQL           │                   │    và TTL cực nhanh trên RAM  │
+   └───────────────────────────────┘                   └───────────────────────────────┘
+```
 
 ---
 
