@@ -16,4 +16,6 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID>{
     WHERE user_tenants.user_id = :userId
   """, nativeQuery = true)
   List<Tenant> findAllAssignedTenantsByUserId(@Param("userId") UUID userId);
+
+  boolean existsByDomain(String domain);
 }

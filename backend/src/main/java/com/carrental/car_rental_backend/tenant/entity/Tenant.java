@@ -3,7 +3,9 @@ package com.carrental.car_rental_backend.tenant.entity;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
 import com.carrental.car_rental_backend.common.enums.plan_tier.PlanTierTenant;
@@ -55,9 +57,11 @@ public class Tenant {
   @Column(name = "is_active")
   private boolean isActive;
 
+  @CreationTimestamp
   @Column(name = "created_at")
   private Instant createdAt;
 
+  @UpdateTimestamp
   @Column(name = "updated_at")
   private Instant updatedAt;
 }

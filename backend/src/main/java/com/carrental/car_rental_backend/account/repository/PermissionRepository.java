@@ -16,4 +16,6 @@ public interface PermissionRepository extends JpaRepository<Permission, UUID>{
     WHERE role_permissions.role_id = :roleId
   """, nativeQuery = true)
   List<String> findAllPermissionCodeByRoleId(@Param("roleId") UUID roleId);
+
+  List<Permission> findAllByCodeIn(List<String> codes);
 }

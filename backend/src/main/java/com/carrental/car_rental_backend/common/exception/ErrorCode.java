@@ -18,7 +18,16 @@ public enum ErrorCode {
   // Business Custom Errors
   TENANT_ACCESS_DENIED("TENANT_ACCESS_DENIED", "Bạn không thuộc Tenant này", HttpStatus.FORBIDDEN),
   VEHICLE_NOT_AVAILABLE("VEHICLE_NOT_AVAILABLE", "Xe đã có lịch đặt hoặc đang bảo dưỡng", HttpStatus.CONFLICT),
-  BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST);
+  BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST),
+  TENANT_DOMAIN_ALREADY_EXISTS("TENANT_DOMAIN_ALREADY_EXISTS", "Domain của nhà xe đã được sử dụng",
+      HttpStatus.CONFLICT),
+  TENANT_ADMIN_NOT_FOUND("TENANT_ADMIN_NOT_FOUND", "Không tìm thấy tài khoản được chọn làm chủ nhà xe",
+      HttpStatus.NOT_FOUND),
+  TENANT_ADMIN_INACTIVE("TENANT_ADMIN_INACTIVE", "Tài khoản chủ nhà xe đang bị khóa", HttpStatus.BAD_REQUEST),
+  TENANT_DEFAULT_PERMISSION_MISSING("TENANT_DEFAULT_PERMISSION_MISSING",
+      "Không thể tạo nhà xe vì cấu hình quyền mặc định chưa đầy đủ", HttpStatus.INTERNAL_SERVER_ERROR),
+  TENANT_ADMIN_IDS_DUPLICATED("TENANT_ADMIN_IDS_DUPLICATED", "Danh sách chủ nhà xe có tài khoản bị trùng.",
+      HttpStatus.BAD_REQUEST);
 
   private final String code;
   private final String message;
