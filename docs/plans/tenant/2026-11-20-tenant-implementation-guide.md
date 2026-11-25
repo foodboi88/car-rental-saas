@@ -1,17 +1,35 @@
-# 📘 CẨM NANG HƯỚNG DẪN TỰ CODE TỪNG BƯỚC: MODULE NHÀ XE (TENANT / TẠO NHÀ XE / GÁN CHỦ)
+# Hướng dẫn triển khai module Tenant
 
-> **Dự án:** Car Rental SaaS  
-> **Module:** `tenant`, phối hợp dữ liệu với `account`  
-> **Ngày:** 20/11/2026  
-> **Phương pháp tiếp cận:** Giải thích bằng ví dụ thực tế, hướng dẫn từng file, hợp đồng dữ liệu và thuật toán để người học tự viết code, tự kiểm thử và giải thích được cơ chế.
+Khởi tạo ngày 20/11/2026, cập nhật ngày 25/11/2026. Module Tenant quản lý hồ sơ nhà xe trên Car Rental SaaS. Mục tiêu là tự triển khai từng API và giải thích được luồng HTTP → Service → Repository, phạm vi quyền, dữ liệu được ghi và cách kiểm chứng.
 
-Hướng dẫn này tập trung vào **tạo nhà xe và gán các tài khoản có sẵn làm chủ**. Các chức năng xem danh sách, cập nhật, khóa nhà xe, nâng cấp gói và quản lý role/permission được triển khai theo luồng riêng.
+## Tiến độ và lộ trình
 
-Đọc nghiệp vụ chung tại [onboarding](../../overviews/onboarding.md), cấu trúc dữ liệu tại [Database Schema](../../overviews/Database-Schema.md). Các quyết định tạo Tenant dưới đây được thống nhất trong buổi trao đổi 20/11; cần bổ sung phần nghiệp vụ đã chốt vào onboarding để giữ nguồn đặc tả tập trung. Những mục ghi **cần chốt** hoặc **đề xuất** không được coi là yêu cầu đã duyệt.
+| Chức năng | Trạng thái và phạm vi |
+|---|---|
+| `POST /api/v1/tenants` | Đã triển khai ở commit `fe5f153` trên `feature/huynq7`. Super Admin tạo nhà xe, bộ cấu hình, role, quyền và gán chủ từ các tài khoản có sẵn. |
+| `GET /api/v1/tenants` | Đã chọn cách làm, đang ở bước chuẩn bị. Dùng lại `TenantResponseDTO`, Service trả `Page`, Controller chuyển sang `PageResponse`. Bắt đầu bằng `common/dto/PageResponse.java`. |
+| `GET /api/v1/tenants/{id}` | Đề xuất cho bước tiếp theo. Trả hồ sơ và `tenantAdmins` gồm `userId`, `fullName`, `email`, `isActive`. Tra chủ theo `user_tenants` của nhà xe đang xem và role `TENANT_ADMIN` thuộc nhà xe đó. |
+| `PATCH /api/v1/tenants/{id}` | Đề xuất cập nhật hồ sơ. Cần chốt trường nào được sửa, quy tắc cho giá trị rỗng và cách xử lý domain. |
+| `PATCH /api/v1/tenants/{id}/status` | Đề xuất khóa hoặc mở khóa. Cần chốt tác động lên người đang làm việc trong nhà xe và ca kiểm thử với Auth. |
+| Gói cước, cấu hình vận hành, role và permission | Cần đặc tả riêng cho từng luồng và quyền gọi. |
 
----
+Car Rental SaaS là modular monolith cho nhiều nhà xe và chi nhánh. `SUPER_ADMIN` quản trị toàn hệ thống. `TENANT_ADMIN`, `STAFF` và `SALE` có vai trò theo từng nhà xe. Auth phụ trách phiên và Tenant Picker, còn Account phụ trách tài khoản. Luồng Tenant Picker đọc các nhà xe được gán cho người đăng nhập. API danh sách quản trị phục vụ Super Admin trên toàn hệ thống. [Kiến trúc](../../overviews/Architecture-Diagram.md) · [Phân quyền theo tenant và chi nhánh](../../overviews/Multi-Tenant-Multi-Branch.md)
 
-## 🏛️ BỨC TRANH TOÀN CẢNH (MỞ NHÀ XE VÀ CẤP QUYỀN QUẢN LÝ)
+Bản build tại mốc đối chiếu dùng Java 17 và Spring Boot 4.0.7. Flyway quản lý schema và Hibernate dùng `ddl-auto: validate` để kiểm tra mapping khi khởi động. [POM](../../../backend/pom.xml) · [Cấu hình backend](../../../backend/src/main/resources/application.yaml) · [Hướng dẫn chạy và Swagger](../../../README.md)
+
+## Thứ tự đọc và cách học
+
+1. Đọc quy tắc học và review của repo, rồi xem phần quy chuẩn Controller, Service, Repository, DTO, phân trang và transaction. [AGENTS.md](../../../AGENTS.md) · [CLAUDE.md](../../../CLAUDE.md) · [Quy chuẩn Java/Spring](../../tutorials/JAVA_SPRING_CODE_CONVENTIONS.md)
+2. Đọc nghiệp vụ từ onboarding, đối chiếu ràng buộc với schema và migration đang dùng. Xem phần transaction, Hibernate write-behind và `Pageable` trong ghi chú kỹ thuật ngày 22/10. [Onboarding](../../overviews/onboarding.md) · [Schema](../../overviews/Database-Schema.md) · [Ghi chú kỹ thuật](../../meeting-note/22-10-2026.md)
+3. Đọc phần API đang làm trong guide này, sau đó xem source ở mục review. Nếu có sổ tay cá nhân trong workspace, mục B1.0 của `docs/local/so-tay-du-an.md` ghi tiến độ lần làm lại, mục A3 ghi các bài học Java, debugging và phân trang.
+
+Mỗi lần chọn một bước nhỏ để tự viết, giải thích lý do rồi kiểm chứng. Khi review chéo, giữ review ở chế độ chỉ đọc và để người học tự sửa. Với mỗi phát hiện, nêu `file:dòng`, tình huống cụ thể, hành vi hiện tại, hành vi mong đợi và cách kiểm chứng. Phân biệt kết quả đọc source với giả thiết về chức năng còn ở mức thiết kế.
+
+## Tạo nhà xe
+
+**Bằng chứng hiện có.** Lần thử Swagger ngày 24/11 trả `201`, `planTier` là `FREE` và có hai timestamp. Response khi đó dùng `active`. Thử riêng với Jackson đã xác nhận annotation trên getter cho ra `isActive`. Các ca cần xác nhận trên endpoint sau commit gồm JSON `isActive`, ID lặp `400`, domain trùng `409` và phân quyền `401/403`. Rollback và hai request cùng domain cần kiểm tra với PostgreSQL. Thư mục test hiện chỉ có `CarRentalBackendApplicationTests.java`.
+
+### 🏛️ BỨC TRANH TOÀN CẢNH (MỞ NHÀ XE VÀ CẤP QUYỀN QUẢN LÝ)
 
 Hình dung Super Admin là bộ phận tiếp nhận doanh nghiệp mới vào nền tảng:
 
@@ -42,7 +60,7 @@ TenantResponseDTO → ApiResponse → Frontend
 
 **Liên hệ frontend:** Request DTO giống hợp đồng dữ liệu của form; Service là nơi thực hiện quy tắc nghiệp vụ phía server. Validation trên form không thay thế kiểm tra backend.
 
-### Các quyết định nghiệp vụ đã chốt
+#### Các quyết định nghiệp vụ đã chốt
 
 | Nội dung | Quy tắc |
 |---|---|
@@ -62,7 +80,7 @@ Nếu API Account đã tạo tài khoản thành công trước đó nhưng API 
 
 ---
 
-## 🗺️ MỤC LỤC LỘ TRÌNH 5 GIAI ĐOẠN
+### 🗺️ MỤC LỤC LỘ TRÌNH 5 GIAI ĐOẠN
 
 1. **DTO Request & Response:** xác định dữ liệu nhận vào và trả ra.
 2. **Entity & Repository:** ánh xạ đúng schema, dùng lại dữ liệu phục vụ Auth.
@@ -74,9 +92,9 @@ Sau đó kiểm tra phối hợp frontend/Account và checklist nghiệm thu. Đ
 
 ---
 
-## 📦 GIAI ĐOẠN 1: XÂY DỰNG CÁC DTO NHẬN & TRẢ DỮ LIỆU (`tenant/dto/`)
+### 📦 GIAI ĐOẠN 1: XÂY DỰNG CÁC DTO NHẬN & TRẢ DỮ LIỆU (`tenant/dto/`)
 
-### 1. File `CreateTenantRequestDTO.java`
+#### 1. File `CreateTenantRequestDTO.java`
 
 - **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/tenant/dto/request/CreateTenantRequestDTO.java`.
 - **💡 Vai trò thực tế:** Tờ phiếu tạo nhà xe; chứa dữ liệu client được phép cung cấp.
@@ -96,17 +114,17 @@ Sau đó kiểm tra phối hợp frontend/Account và checklist nghiệm thu. Đ
 - Các giới hạn độ dài theo schema. Không tự áp giới hạn 10 chủ của bản cũ khi chưa có yêu cầu.
 - Dùng thông báo validation tiếng Việt. Client không cần biết tên bảng hoặc câu SQL để sửa lỗi.
 - Với danh sách UUID, ràng buộc phần tử là `@NotNull` ở kiểu phần tử; đây không phải danh sách DTO con cần cascade validation. `@Valid` trên request ở Controller kích hoạt Bean Validation.
-- **Đề xuất:** từ chối danh sách lặp userId bằng 400, không âm thầm bỏ bớt phần tử. Kiểm tra trùng trước khi so sánh số tài khoản tìm thấy vì truy vấn theo ID có thể trả mỗi tài khoản một lần.
+- Service từ chối danh sách lặp userId bằng HTTP 400 trước khi tra tài khoản. So kích thước danh sách với tập UUID duy nhất để phát hiện lặp.
 - **Cần chốt:** định dạng/chuẩn hóa domain trước khi thêm regex hoặc tự chuyển chữ thường. Onboarding dùng Single Domain + Tenant Picker, không yêu cầu tạo routing subdomain. Không tự đổi dữ liệu tenant có sẵn.
 
 **Từ khóa tra cứu:** `Jakarta Bean Validation container element constraints`, `Spring MVC request body validation`.
 
-### 2. File `TenantResponseDTO.java`
+#### 2. File `TenantResponseDTO.java`
 
 - **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/tenant/dto/response/TenantResponseDTO.java`.
 - **💡 Vai trò thực tế:** Bì thư kết quả tạo nhà xe; không trả Entity ra client.
 - **Annotations cho class:** `@Data`, `@NoArgsConstructor`, `@AllArgsConstructor`, `@Builder`.
-- **Hợp đồng đề xuất:**
+- **Hợp đồng hiện tại:**
 
 | Thuộc tính | Kiểu Java |
 |---|---|
@@ -116,15 +134,15 @@ Sau đó kiểm tra phối hợp frontend/Account và checklist nghiệm thu. Đ
 | `isActive` | `boolean` |
 | `createdAt`, `updatedAt` | `Instant` |
 
-Map thủ công qua builder hoặc hàm chuyển đổi nhỏ, đúng conventions. Kiểu biểu diễn enum/timestamp trong JSON phải theo cấu hình Jackson của dự án; không tự đổi cách biểu diễn riêng cho Tenant.
+Map thủ công qua builder hoặc hàm chuyển đổi nhỏ theo quy chuẩn. Jackson dùng `@JsonProperty("isActive")` trên getter để trả đúng tên JSON `isActive`. Enum và timestamp theo cấu hình Jackson của dự án.
 
 **Từ khóa tra cứu:** `Java DTO manual mapping builder`, `Jackson enum serialization`.
 
 ---
 
-## 🗄️ GIAI ĐOẠN 2: ENTITY & REPOSITORY (SỔ SÁCH DỮ LIỆU)
+### 🗄️ GIAI ĐOẠN 2: ENTITY & REPOSITORY (SỔ SÁCH DỮ LIỆU)
 
-### 1. Entity `Tenant.java` và `TenantRepository.java`
+#### 1. Entity `Tenant.java` và `TenantRepository.java`
 
 - **Đường dẫn Entity:** `backend/src/main/java/com/carrental/car_rental_backend/tenant/entity/Tenant.java`.
 - **Đường dẫn Repository:** `backend/src/main/java/com/carrental/car_rental_backend/tenant/repository/TenantRepository.java`.
@@ -138,7 +156,7 @@ Map thủ công qua builder hoặc hàm chuyển đổi nhỏ, đúng convention
 
 **Từ khóa tra cứu:** `Spring Data JPA derived query existsBy`, `Hibernate CreationTimestamp UpdateTimestamp`, `JPA flush vs commit`.
 
-### 2. Entity `TenantConfig.java`
+#### 2. Entity `TenantConfig.java`
 
 - **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/tenant/entity/TenantConfig.java`.
 - **💡 Vai trò thực tế:** Nội quy vận hành riêng của nhà xe.
@@ -158,7 +176,7 @@ Map thủ công qua builder hoặc hàm chuyển đổi nhỏ, đúng convention
 
 **Từ khóa tra cứu:** `JPA shared primary key UUID column`, `Java BigDecimal monetary values`.
 
-### 3. Dùng lại dữ liệu `account`
+#### 3. Dùng lại dữ liệu `account`
 
 - `UserRepository`: dùng `findAllById(...)` để đọc nhóm tài khoản; không đọc từng chủ bằng một query nếu không cần.
 - `RoleRepository`: lưu ba role của nhà xe mới. Giữ các đối tượng/ID vừa tạo để gán membership và permission.
@@ -166,13 +184,13 @@ Map thủ công qua builder hoặc hàm chuyển đổi nhỏ, đúng convention
 - `UserTenantRepository`: lưu membership với `tenantId`, `userId`, `roleId`, `joinedAt`. Dùng lại Entity `UserTenant` và khóa `UserTenantId` hiện có.
 - Không tạo thêm Entity User hoặc bộ repository thứ hai cho cùng bảng chỉ để mang tên Tenant. Việc bổ sung hợp đồng dùng chung cần phối hợp người phụ trách Account.
 - Không dùng `RoleRepository.findByCode("TENANT_ADMIN")` để lấy role của nhà xe mới: nhiều tenant có cùng code. Dùng role vừa tạo, hoặc truy vấn có cả tenantId và code.
-- **Điểm mapping cần phối hợp:** `Role.code` hiện khai báo `unique=true` ở Entity, còn DB dùng UNIQUE theo `(tenant_id, code)`. Không suy ra code phải duy nhất toàn hệ thống; chỉnh metadata đúng schema khi thống nhất với Account.
+- **Phạm vi mã role.** DB ràng buộc duy nhất theo `(tenant_id, code)`. Entity hiện phản ánh phạm vi này bằng cách bỏ `unique=true` ở cột `code`.
 
 `UserTenant` dùng `@IdClass`: JPA ghép `userId` và `tenantId` thành định danh. Một người có thể thuộc nhiều nhà xe nhưng mỗi cặp người–nhà xe chỉ có một membership, giữ một role tại một thời điểm. FK `(role_id, tenant_id)` buộc role thuộc đúng nhà xe.
 
-### 4. Ánh xạ `role_permissions`
+#### 4. Ánh xạ `role_permissions`
 
-Phối hợp Account để bổ sung mapping và repository nếu chưa có:
+Mapping và repository hiện có trong Account gồm các file sau.
 
 - `account/entity/RolePermissionId.java`: hai trường UUID `roleId`, `permissionId`; khóa phải có constructor phù hợp, `equals/hashCode` và đáp ứng yêu cầu khóa ghép của JPA, tương tự `UserTenantId`.
 - `account/entity/RolePermission.java`: ánh xạ bảng `role_permissions`, dùng `@IdClass`, hai trường `@Id` tương ứng. Không sinh một ID thứ ba.
@@ -184,9 +202,9 @@ Chọn cách ánh xạ tường minh để thấy rõ dữ liệu cần ghi, ch�
 
 ---
 
-## 🛡️ GIAI ĐOẠN 3: PHÂN QUYỀN & HỢP ĐỒNG LỖI
+### 🛡️ GIAI ĐOẠN 3: PHÂN QUYỀN & HỢP ĐỒNG LỖI
 
-### 1. Dùng hạ tầng Security hiện có
+#### 1. Dùng hạ tầng Security hiện có
 
 - JWT filter xác thực và nạp `UserPrincipal`/authorities vào SecurityContext.
 - Dùng `@PreAuthorize` để yêu cầu role `SUPER_ADMIN` tại điểm vào nghiệp vụ phù hợp, nhất quán với conventions.
@@ -196,9 +214,9 @@ Chọn cách ánh xạ tường minh để thấy rõ dữ liệu cần ghi, ch�
 
 **Từ khóa tra cứu:** `Spring Security method security PreAuthorize hasRole`.
 
-### 2. Các lỗi cần thể hiện
+#### 2. Các lỗi cần thể hiện
 
-| Tình huống | HTTP | Mã lỗi nghiệp vụ đề xuất |
+| Tình huống | HTTP | Mã lỗi nghiệp vụ |
 |---|---|---|
 | Chưa xác thực | 401 | Dùng `UNAUTHORIZED` hiện có |
 | Không phải Super Admin | 403 | Dùng `FORBIDDEN` hiện có |
@@ -209,15 +227,15 @@ Chọn cách ánh xạ tường minh để thấy rõ dữ liệu cần ghi, ch�
 | Domain đã tồn tại | 409 | `TENANT_DOMAIN_ALREADY_EXISTS` |
 | Thiếu permission để khởi tạo | 500 | `TENANT_DEFAULT_PERMISSION_MISSING` |
 
-Tên các mã Tenant và status cho userId lặp/không tồn tại/bị khóa là đề xuất để chốt trước khi viết test. Bổ sung mã cần thiết vào ErrorCode theo quy ước chung, dùng AppException để diễn đạt lỗi nghiệp vụ; không tạo một bộ exception song song.
+Các mã lỗi nghiệp vụ trong bảng đã được khai báo trong ErrorCode. Trạng thái HTTP được GlobalExceptionHandler lấy từ AppException.
 
 Không sửa GlobalExceptionHandler trong phạm vi này. Handler hiện có xử lý DataIntegrityViolationException bằng 409 và thông báo chung; lỗi UNIQUE khi hai request cùng domain có thể đi qua nhánh đó. Không cam kết mọi lỗi 409 đều có mã Tenant riêng nếu chưa thiết kế việc chuyển đổi lỗi cụ thể.
 
 ---
 
-## 💼 GIAI ĐOẠN 4: LOGIC NGHIỆP VỤ (`tenant/service/`)
+### 💼 GIAI ĐOẠN 4: LOGIC NGHIỆP VỤ (`tenant/service/`)
 
-### 1. File `TenantService.java` & `TenantServiceImpl.java`
+#### 1. File `TenantService.java` & `TenantServiceImpl.java`
 
 - **Đường dẫn Interface:** `backend/src/main/java/com/carrental/car_rental_backend/tenant/service/TenantService.java`.
 - **Đường dẫn Implementation:** `backend/src/main/java/com/carrental/car_rental_backend/tenant/service/impl/TenantServiceImpl.java`.
@@ -227,13 +245,13 @@ Không sửa GlobalExceptionHandler trong phạm vi này. Handler hiện có x�
 - Khai báo dependency `private final`; Lombok sinh constructor, Spring cung cấp bean qua constructor. `final` giữ tham chiếu không bị gán lại, không tự làm đối tượng được tham chiếu bất biến.
 - Chỉ dùng biến cục bộ cho dữ liệu của một request; không giữ danh sách chủ hoặc tenant đang tạo trong field của Service.
 
-### 2. Quy trình xử lý `createTenant`
+#### 2. Quy trình xử lý `createTenant`
 
-1. **Kiểm tra danh sách chủ:** xác định các userId không lặp; nếu áp dụng quy tắc từ chối trùng thì báo lỗi, không âm thầm đổi yêu cầu.
+1. **Kiểm tra danh sách chủ:** So kích thước danh sách với tập UUID duy nhất. Nếu có ID lặp, trả lỗi TENANT_ADMIN_IDS_DUPLICATED.
 2. **Kiểm tra domain:** gọi truy vấn kiểm tra trùng để trả thông báo dễ hiểu. UNIQUE của DB vẫn là lớp bảo vệ cuối cùng.
 3. **Kiểm tra tài khoản:** lấy nhóm User theo ID; xác định ID không tìm thấy và tài khoản không hoạt động. Có bất kỳ tài khoản không hợp lệ thì dừng cả thao tác.
 4. **Kiểm tra bộ permission khởi tạo:** tra permission từ danh mục chung; thiếu mã cần thiết thì báo lỗi hệ thống, không tạo role với bộ quyền thiếu.
-5. **Tạo Tenant:** gán sáu trường request được phép nhận và các mặc định FREE/true/JSON rỗng; lưu để có ID dùng cho dữ liệu phụ thuộc.
+5. **Tạo Tenant:** gán `name`, `domain`, `logoUrl`, `contactEmail`, `contactPhone` và các mặc định `FREE`, `true`, JSON `{}`. Lưu để lấy ID dùng cho dữ liệu phụ thuộc. `adminUserIds` được dùng ở bước gán chủ.
 6. **Tạo TenantConfig:** dùng đúng ID đó, gán 30 phút, 100.000 đồng và 5%.
 7. **Tạo ba role:** cùng tenantId mới, code TENANT_ADMIN/STAFF/SALE; đánh dấu role mặc định theo thiết kế, giữ lại ID từng role.
 8. **Tạo role_permissions:** ghép ID role mới với ID permission đã có theo bộ quyền tương ứng.
@@ -244,7 +262,7 @@ Hai request cùng domain có thể cùng vượt qua bước 2; một request ph
 
 Không cần logic “đã thuộc nhà xe thì đổi role” trong luồng này: tenant là bản ghi mới, danh sách chủ phải hợp lệ và không lặp. Lưu membership tường minh trước khi cân nhắc native SQL/ON CONFLICT cho một bài toán khác.
 
-### 3. Transaction và Persistence Context cần hiểu
+#### 3. Transaction và Persistence Context cần hiểu
 
 - Đặt `@Transactional` trên method ghi cụ thể của Service Impl theo conventions, không đặt ở Controller.
 - Khi gọi qua bean được Spring quản lý, transaction interceptor/proxy mở hoặc tham gia giao dịch, gọi method, rồi commit/rollback theo kết quả. Các repository tham gia cùng giao dịch khi dùng chung transaction manager.
@@ -259,7 +277,7 @@ Không cần logic “đã thuộc nhà xe thì đổi role” trong luồng nà
 
 **Từ khóa tra cứu:** `Spring transaction proxy self invocation`, `Hibernate persistence context flush commit`, `Spring transaction rollback RuntimeException`.
 
-### 4. Bộ permission khởi tạo đề xuất
+#### 4. Bộ permission khởi tạo
 
 Dùng bộ quyền trong V2 làm mẫu nghiệp vụ, không copy role đã được tenant khác tùy chỉnh:
 
@@ -271,22 +289,22 @@ Không hardcode UUID role/permission của dữ liệu demo. Mã quyền ban đ�
 
 ---
 
-## 🌐 GIAI ĐOẠN 5: REST API CONTROLLER (`tenant/controller/`)
+### 🌐 GIAI ĐOẠN 5: REST API CONTROLLER (`tenant/controller/`)
 
-### File `TenantController.java`
+#### File `TenantController.java`
 
 - **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/tenant/controller/TenantController.java`.
 - **Annotations:** `@RestController`, `@RequestMapping`, `@RequiredArgsConstructor`; endpoint dùng `@PostMapping`, `@RequestBody`, `@Valid` và kiểm tra quyền đã xác định.
-- **Endpoint đề xuất:** `POST /api/v1/tenants`.
+- **Endpoint:** `POST /api/v1/tenants`.
 - **Đầu vào:** CreateTenantRequestDTO.
-- **Đầu ra đề xuất:** `201 Created`, dữ liệu bọc trong ApiResponse<TenantResponseDTO>.
+- **Đầu ra:** `201 Created`, dữ liệu bọc trong `ApiResponse<TenantResponseDTO>`.
 - Controller chỉ nhận request, kích hoạt validation, gọi Service và bọc response. Không inject repository, không viết vòng lặp tạo role/gán chủ tại Controller.
 
 `@RestController` giúp Spring MVC đăng ký handler HTTP và chuyển kết quả thành response body. `@RequestBody` dùng bộ chuyển đổi JSON để đọc request; `@Valid` kích hoạt Bean Validation. Sai UUID có thể bị từ chối khi đọc JSON trước khi Service được gọi.
 
 ---
 
-## 📱 PHỐI HỢP FRONTEND VÀ MODULE ACCOUNT
+### 📱 PHỐI HỢP FRONTEND VÀ MODULE ACCOUNT
 
 1. Nhập thông tin nhà xe và tìm/chọn các tài khoản làm chủ.
 2. Nếu chưa có tài khoản, tạo qua API do Account cung cấp, nhận userId rồi bổ sung vào danh sách chọn.
@@ -297,9 +315,9 @@ Không hardcode UUID role/permission của dữ liệu demo. Mã quyền ban đ�
 
 ---
 
-## ✅ CHECKLIST KIỂM THỬ & LƯU Ý KHI TRÌNH BÀY
+### Kiểm thử API tạo nhà xe
 
-### 1. Kiểm thử theo từng hành vi
+#### 1. Kiểm thử theo từng hành vi
 
 Viết test mong đợi trước phần code tương ứng. Dùng Arrange–Act–Assert: chuẩn bị dữ liệu, thực hiện thao tác, kiểm tra kết quả. Không đánh dấu đã đạt chỉ vì code biên dịch thành công.
 
@@ -308,7 +326,7 @@ Viết test mong đợi trước phần code tương ứng. Dùng Arrange–Act�
 | Một hoặc nhiều chủ hợp lệ | 201; một Tenant, một config, ba role, đúng quyền và membership |
 | Thiếu tên/domain/danh sách chủ; phần tử chủ null; chuỗi quá dài; email sai | 400; không tạo dữ liệu |
 | userId sai định dạng UUID | 400; không chạy nghiệp vụ tạo |
-| userId lặp | Theo quy tắc từ chối trùng đã duyệt; không ghi membership lặp |
+| userId lặp | 400 TENANT_ADMIN_IDS_DUPLICATED; không ghi dữ liệu |
 | Một userId không tồn tại hoặc đang bị khóa | Từ chối toàn bộ; phản hồi xác định được tài khoản gặp vấn đề |
 | Domain đã tồn tại | 409; không thêm nhà xe |
 | Không có xác thực hoặc sai quyền | 401/403; không có dữ liệu mới |
@@ -322,7 +340,7 @@ Viết test mong đợi trước phần code tương ứng. Dùng Arrange–Act�
 
 Mock không chứng minh transaction hoặc FK/UNIQUE thật. Integration test rollback cần kiểm tra dữ liệu sau khi giao dịch nghiệp vụ đã kết thúc, không chỉ dựa vào việc transaction của test tự rollback. Không dùng tài khoản hay DB thật ngoài môi trường kiểm thử để thử lỗi ghi.
 
-### 2. Tự giải thích trước khi báo cáo
+#### 2. Tự giải thích trước khi báo cáo
 
 - Vì sao Tenant chỉ nhận userId, không nhận mật khẩu?
 - Vì sao tạo role và gán role_permissions là hai việc khác nhau?
@@ -333,17 +351,15 @@ Mock không chứng minh transaction hoặc FK/UNIQUE thật. Integration test r
 - Khi gán một chủ thất bại, dữ liệu nào rollback và dữ liệu nào phải giữ?
 - Unit test và integration test chứng minh được những điều gì khác nhau?
 
-### 3. Các điểm cần chốt trước phần code liên quan
+#### 3. Các điểm cần chốt khi mở rộng
 
 - Định dạng/chuẩn hóa domain, cách xử lý chuỗi tùy chọn rỗng.
-- Quy tắc userId lặp, status và tên các mã lỗi nghiệp vụ đề xuất.
-- Response, cách biểu diễn enum và thời điểm có timestamp.
-- Bộ permission ban đầu, hợp đồng bổ sung mapping/repository dùng chung với Account.
+- Cách cập nhật permission mặc định cho các nhà xe đã tồn tại nếu danh mục quyền thay đổi.
 - API Account phục vụ Super Admin chuẩn bị/chọn tài khoản chủ.
 
 ---
 
-## 📚 TÀI LIỆU ĐỐI CHIẾU
+### 📚 TÀI LIỆU ĐỐI CHIẾU
 
 - [AGENTS.md](../../../AGENTS.md), [CLAUDE.md](../../../CLAUDE.md) và [quy chuẩn Java/Spring](../../tutorials/JAVA_SPRING_CODE_CONVENTIONS.md).
 - [Onboarding](../../overviews/onboarding.md): nghiệp vụ tập trung, TDD, phân quyền, Account và Single Domain/Tenant Picker.
@@ -351,3 +367,102 @@ Mock không chứng minh transaction hoặc FK/UNIQUE thật. Integration test r
 - [Multi-Tenant / Multi-Branch](../../overviews/Multi-Tenant-Multi-Branch.md): User dùng chung và role theo tenant.
 - [V1 — schema](../../../backend/src/main/resources/db/migration/V1__init_schema.sql), [V2 — seed](../../../backend/src/main/resources/db/migration/V2__seed_system_data.sql).
 - [Guide Auth làm mẫu trình bày](../auth-login/2026-08-28-auth-jwt-implementation-guide.md).
+
+## Danh sách nhà xe
+
+Phương án đã chọn là dùng lại `TenantResponseDTO`, giữ `Page` ở Service và chuyển sang `PageResponse` tại Controller. Các giá trị mặc định và hành vi phân trang trong phần này là đề xuất cho bản đầu.
+
+### Chốt màn hình và hợp đồng HTTP
+
+Hình dung bảng quản trị giống màn hình xem sổ đăng ký nhà xe. Mỗi lần mở, lễ tân xem một trang, thấy tên, domain, gói và trạng thái, rồi dùng ID để mở hồ sơ chi tiết. Cả nhà xe đang hoạt động và nhà xe đã khóa đều có mặt trong sổ.
+
+| Nội dung | Đề xuất cho bản đầu |
+|---|---|
+| Quyền truy cập | `SUPER_ADMIN`, xem nhà xe toàn hệ thống |
+| Query params | `page` mặc định `0`, `size` mặc định `20` |
+| Giới hạn | `page >= 0`, `1 <= size <= 100`. Sai kiểu hoặc ngoài giới hạn trả `400` |
+| Thứ tự | `createdAt` giảm dần, sau đó `id` giảm dần để thứ tự ổn định khi thời điểm tạo giống nhau |
+| Dữ liệu mỗi dòng | Dùng `TenantResponseDTO` hiện có. Bảng hiển thị `id`, `name`, `domain`, `planTier`, `isActive`. API cũng trả các trường logo, liên hệ và thời điểm tạo/cập nhật của DTO |
+| Thành công | `200 OK`, dữ liệu nằm trong `ApiResponse<PageResponse<TenantResponseDTO>>` |
+| Trang không có bản ghi | `200 OK`, `data.items` là mảng rỗng, metadata vẫn phản ánh tổng theo truy vấn |
+| Lỗi quyền | `401` khi chưa xác thực, `403` khi tài khoản đã xác thực thiếu quyền Super Admin |
+
+Ví dụ `GET /api/v1/tenants?page=1&size=10` lấy trang thứ hai. Với 25 nhà xe, trang đó có 10 dòng, `totalElements` là 25 và `totalPages` là 3. Trang có chỉ số 2 có 5 dòng, `pageSize` vẫn là 10, `isLast` là `true`.
+
+Luồng chi tiết `GET /api/v1/tenants/{id}` là nơi có thể đưa thêm danh sách `tenantAdmins` theo đề xuất đã thảo luận. Mỗi dòng của trang danh sách dùng dữ liệu từ `tenants`.
+
+### Tự viết theo thứ tự file
+
+#### Bước 1. `common/dto/PageResponse.java`
+
+Tạo lớp generic dùng chung theo mục 6.1 của quy chuẩn. `T` là kiểu của từng phần tử trong `items`. Ở API này, dùng lại [TenantResponseDTO](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/dto/response/TenantResponseDTO.java), gồm cả cách cố định tên JSON `isActive` trên getter.
+
+| Thuộc tính | Kiểu | Lấy từ `Page<T>` |
+|---|---|---|
+| `items` | `List<T>` | `getContent()` |
+| `pageNumber` | `int` | `getNumber()` |
+| `pageSize` | `int` | `getSize()` |
+| `totalElements` | `long` | `getTotalElements()` |
+| `totalPages` | `int` | `getTotalPages()` |
+| `isLast` | `boolean` | `isLast()` |
+
+Method `from` nhận `Page<T>` và tạo `PageResponse<T>` từ sáu giá trị trên. Có thể hình dung `PageResponse<T>` giống kiểu generic của frontend chứa một mảng dữ liệu và metadata cho nút chuyển trang. Kiểm tra tên JSON của `isLast` giống bài học về `isActive` và khai báo tên tường minh trên getter nếu cần giữ đúng hợp đồng.
+
+#### Bước 2. `TenantService` và `TenantServiceImpl`
+
+Khai báo method `listTenants` nhận `page` và `size` kiểu `int`, trả `Page<TenantResponseDTO>`. Trong implementation, tự triển khai theo thứ tự sau.
+
+1. Kiểm tra giới hạn `page` và `size`. Nếu sai, dùng `AppException` và `ErrorCode.BAD_REQUEST` có sẵn, kèm thông báo chỉ rõ tham số cần sửa. Kiểm tra trước khi tạo `PageRequest` để API dùng hợp đồng lỗi `400` của dự án.
+2. Tạo `PageRequest` từ `page`, `size` và `Sort` theo hai thuộc tính Java `createdAt`, `id`. `PageRequest` là một implementation của `Pageable`, mang số trang, kích thước và thứ tự cho Spring Data.
+3. Gọi `tenantRepository.findAll(pageable)`, nhận `Page<Tenant>`. `TenantRepository` đã kế thừa method này từ `JpaRepository`. Spring Data truyền phần sắp xếp và giới hạn trang xuống DB. Khi cần tính tổng, nó thực hiện thêm truy vấn đếm.
+4. Dùng `Page.map` để chuyển từng `Tenant` thành `TenantResponseDTO`, rồi trả trang DTO. Cách nghĩ giống `Array.map` trong TypeScript, đồng thời `Page.map` giữ metadata của trang. Có thể đưa phần mapping builder hiện có vào một method `toTenantResponse` để `createTenant` và `listTenants` dùng chung.
+
+Đặt `@Transactional(readOnly = true)` trực tiếp trên method đọc của `TenantServiceImpl`. File hiện import bản Jakarta. Để dùng thuộc tính `readOnly`, chuyển import sang `org.springframework.transaction.annotation.Transactional`. Annotation được Spring đọc để thiết lập interceptor quanh lời gọi qua bean, tạo ranh giới giao dịch và cung cấp gợi ý read-only cho tầng JPA/Hibernate. Method `createTenant` tiếp tục dùng giao dịch ghi mặc định.
+
+#### Bước 3. `TenantController.java`
+
+Thêm một method GET vào Controller đang có base path `/api/v1/tenants`.
+
+1. Dùng `@GetMapping` để Spring MVC đăng ký method cho HTTP GET tại base path.
+2. Dùng `@RequestParam` để Spring MVC đọc `page`, `size` từ query string, áp dụng giá trị mặc định và chuyển sang `int`. Lỗi chuyển kiểu đi qua handler `MethodArgumentTypeMismatchException` hiện có.
+3. Áp dụng `@PreAuthorize` với điều kiện Super Admin như `createTenant`. Spring Security dùng method interceptor để kiểm tra quyền trước khi gọi method. Phạm vi toàn hệ thống đến từ quyền của người gọi đã xác thực.
+4. Gọi Service để nhận `Page<TenantResponseDTO>`, chuyển trang sang `PageResponse<TenantResponseDTO>` bằng `PageResponse.from`, rồi bọc bằng `ApiResponse.success` và trả `200 OK`. Bước chuyển đổi này đặt danh sách tại `data.items` theo hợp đồng JSON của dự án.
+
+Nguồn đối chiếu gồm [TenantController](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/controller/TenantController.java), [TenantRepository](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/repository/TenantRepository.java) và [GlobalExceptionHandler](../../../backend/src/main/java/com/carrental/car_rental_backend/common/exception/GlobalExceptionHandler.java).
+
+### Tự kiểm chứng
+
+| Ca thử | Kết quả cần kiểm tra |
+|---|---|
+| Super Admin gọi GET thiếu query params | `200`, `pageNumber=0`, `pageSize=20`, tên JSON là `isActive` và `isLast` |
+| Có ít nhất hai nhà xe, gọi trang 0 và trang 1 với `size=1` | Mỗi trang có một nhà xe, ID khác nhau, tổng bản ghi giống nhau khi dữ liệu đứng yên |
+| Trang cuối chỉ có một phần dữ liệu | `pageSize` bằng kích thước yêu cầu, `items` có số dòng thực tế, `isLast=true` |
+| Trang nằm ngoài dữ liệu | `200`, `items=[]`, giữ tổng bản ghi và tổng trang của truy vấn |
+| `page=-1`, `size=0`, `size=101` hoặc `page=abc` | `400`, lỗi chỉ ra tham số cần sửa |
+| Chưa xác thực hoặc dùng tài khoản `TENANT_ADMIN` | `401` hoặc `403` tương ứng |
+
+Ca test đầu theo Arrange–Act–Assert có thể chuẩn bị hai nhà xe trong một `Page` với metadata đã biết, gọi Service, rồi kiểm tra trường của từng DTO cùng số trang và tổng bản ghi. Ca phân quyền thực hiện ở lớp kiểm thử HTTP hoặc qua Swagger.
+
+**Câu tự kiểm tra:** Vì sao trang cuối có thể chỉ có 5 `items` mà `pageSize` vẫn bằng 10? Khi frontend cần biết có bao nhiêu trang, con số nào cho biết tổng số dòng trong DB?
+
+Từ khóa tra cứu gồm `Spring Data JpaRepository findAll Pageable`, `Spring Data Page map preserve pagination`, `Spring MVC RequestParam defaultValue` và `Spring transactional readOnly`.
+
+## Review chéo với Claude Code
+
+### Điểm vào source
+
+| Nhóm | File và mục đích |
+|---|---|
+| HTTP và hợp đồng | [TenantController](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/controller/TenantController.java), [CreateTenantRequestDTO](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/dto/request/CreateTenantRequestDTO.java), [TenantResponseDTO](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/dto/response/TenantResponseDTO.java) |
+| Service và dữ liệu | [TenantService](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/service/TenantService.java), [TenantServiceImpl](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/service/impl/TenantServiceImpl.java), [TenantRepository](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/repository/TenantRepository.java), [DefaultRole](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/constant/DefaultRole.java) |
+| Quyền và ngữ cảnh | [SecurityConfig](../../../backend/src/main/java/com/carrental/car_rental_backend/security/config/SecurityConfig.java), [JwtAuthenticationFilter](../../../backend/src/main/java/com/carrental/car_rental_backend/security/jwt/JwtAuthenticationFilter.java), [CustomUserDetailsServiceImpl](../../../backend/src/main/java/com/carrental/car_rental_backend/auth/service/impl/CustomUserDetailsServiceImpl.java), [UserPrincipal](../../../backend/src/main/java/com/carrental/car_rental_backend/security/principal/UserPrincipal.java), [AuthController](../../../backend/src/main/java/com/carrental/car_rental_backend/auth/controller/AuthController.java) |
+| JSON và lỗi | [ApiResponse](../../../backend/src/main/java/com/carrental/car_rental_backend/common/dto/ApiResponse.java), [ErrorCode](../../../backend/src/main/java/com/carrental/car_rental_backend/common/exception/ErrorCode.java), [GlobalExceptionHandler](../../../backend/src/main/java/com/carrental/car_rental_backend/common/exception/GlobalExceptionHandler.java) |
+
+`TenantRepository` cũng phục vụ Auth bằng truy vấn lấy nhà xe mà người dùng được phân công. Lúc review, kiểm tra mỗi luồng giữ đúng phạm vi. Tenant Picker lấy danh sách theo membership của người đăng nhập. Màn quản trị Super Admin lấy danh sách toàn hệ thống. [TenantRepository](../../../backend/src/main/java/com/carrental/car_rental_backend/tenant/repository/TenantRepository.java) · [AuthServiceImpl](../../../backend/src/main/java/com/carrental/car_rental_backend/auth/service/impl/AuthServiceImpl.java)
+
+### Câu hỏi review
+
+1. `createTenant` hiện có lỗi thực tế nào trong xác thực quyền, validation, ghi đủ năm bảng hoặc xử lý lỗi DB không? Phát hiện nào có thể xác nhận bằng test nhỏ nhất?
+2. Thiết kế GET có trả đúng JSON và thực thi phân trang ở repository không? Việc chuẩn hóa định dạng ở Controller có giữ `Page` làm kiểu nội bộ của Service không?
+3. Việc dùng chung `TenantResponseDTO` có giữ hợp đồng POST và chỉ trả các trường được phép cho Super Admin không? Có ca nào cần kiểm tra riêng khi tách đoạn mapping dùng chung?
+4. Sau khi review, đề xuất thứ tự ưu tiên và một việc nhỏ để tôi tự làm tiếp. Nếu code vẫn ở trạng thái ghi trên, việc đó là khai báo `PageResponse<T>` và tự giải thích `pageSize` khác số phần tử thực tế ở trang cuối như thế nào.
