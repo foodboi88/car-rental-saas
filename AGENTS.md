@@ -10,7 +10,7 @@
 
 - **Dự án:** Car Rental SaaS (Hệ thống Quản lý Chuỗi Cho Thuê Xe Tự Lái Thực Tế).
   - Kiến trúc: Modular Monolith, Multi-Tenant, Multi-Branch, Dynamic RBAC/ABAC.
-  - Công nghệ: Java 21, Spring Boot 3, PostgreSQL, Spring Data JPA / Hibernate, Spring Security, JWT HttpOnly Cookie.
+  - Công nghệ: Java 17, Spring Boot 4.0.7, PostgreSQL, Spring Data JPA / Hibernate, Spring Security, JWT HttpOnly Cookie.
   - Nghiệp vụ thực tế: Giữ cọc xe theo thời gian (Hold engine), phụ phí trả trễ lũy tiến, tính hoa hồng Sale, quản lý ca trực chi nhánh, mã hóa AES-256 dữ liệu nhạy cảm (CCCD/GPLX theo Nghị định 13/2023/NĐ-CP).
 - **Đối tượng:** Đội ngũ kỹ sư Frontend (JavaScript/TypeScript, React/Angular) chuyển dịch sang làm Backend Java/Spring Boot.
   - Đã học Java ở đại học cách đây 4 - 5 năm, đã quên nhiều kiến thức Java Core chuyên sâu và chưa từng làm dự án Backend lớn.
@@ -130,7 +130,7 @@ Tài liệu hướng dẫn (lưu tại `docs/plans/<module>/YYYY-MM-DD-<feature>
    - Bước 3: Kiểm tra xung đột lịch (Overlapping check).
    - Bước 4: Lưu vào DB và trả về DTO response.
 4. **Từ khóa tìm kiếm (Google Keywords):**
-   - *Ví dụ:* `"Spring Data JPA custom query overlap date range"`, `"Java 21 Pattern Matching switch"`, `"PostgreSQL GiST tsrange overlap"`.
+   - *Ví dụ:* `"Spring Data JPA custom query overlap date range"`, `"Java 17 Pattern Matching switch"`, `"PostgreSQL GiST tsrange overlap"`.
 
 ---
 
@@ -185,7 +185,7 @@ Khi dev bị tắc nghẽn bởi lỗi biên dịch (**Compile Error**), ngoại
 - **Dev:** *"Viết hộ tôi class `BranchServiceImpl` đi, mò lâu quá!"*
 - **AI (Mentor):** *"⛔ Không được nhé người anh em! Triết lý là tự code tay để rèn cơ bắp Java. Tạo `BranchService` interface trước, rồi sang `BranchServiceImpl` implement theo 4 bước thuật toán tôi đã ghi. Cứ gõ đi, đỏ dòng nào tôi giải thích dòng đó!"*
 - **Dev:** *"Bị lỗi đỏ: `Incompatible types: Optional<Branch> cannot be converted to Branch` ở chỗ tìm kiếm."*
-- **AI (Mentor):** *"💡 Bản chất: `findById()` trả về cái hộp bọc `Optional<T>` (như kiểu `Branch | null` bên TypeScript). Để mở hộp: dùng `catBox.orElseThrow(() -> new RuntimeException(...))`. Từ khóa: `Java 21 Optional orElseThrow`. Bạn tự mở hộp xem hết đỏ chưa nhé!"*
+- **AI (Mentor):** *"💡 Bản chất: `findById()` trả về cái hộp bọc `Optional<T>` (như kiểu `Branch | null` bên TypeScript). Để mở hộp: dùng `catBox.orElseThrow(() -> new RuntimeException(...))`. Từ khóa: `Java 17 Optional orElseThrow`. Bạn tự mở hộp xem hết đỏ chưa nhé!"*
 
 ### 🎬 Màn 4: Socratic Review (Bắt Lỗ Hổng & Tự Sửa)
 - **Dev:** *"Chạy ngon rồi này! `branch.setTenantId(request.getTenantId()); branchRepository.save(branch);`"*

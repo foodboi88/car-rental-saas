@@ -1,3 +1,6 @@
+> [!WARNING]
+> **[ARCHIVED / SUPERSEDED]** Tài liệu này thuộc giai đoạn thiết kế **Single Session (`users.current_session_id`)** ban đầu (28/08/2026) và có một số đường dẫn/DTO cũ không còn khớp codebase mới nhất. Kiến trúc xác thực hiện hành đã chuyển sang **Multi-Session & Device Management** — vui lòng tham chiếu [2026-11-23-multi-session-device-management-spec.md](./2026-11-23-multi-session-device-management-spec.md) và [Architecture-Diagram.md](../../overviews/Architecture-Diagram.md).
+
 # 📘 CẨM NANG HƯỚNG DẪN TỰ CODE TỪNG BƯỚC: MODULE XÁC THỰC & PHÂN QUYỀN (AUTH / JWT / DYNAMIC RBAC / MULTI-TENANT)
 
 > **Dự án:** Car Rental SaaS  

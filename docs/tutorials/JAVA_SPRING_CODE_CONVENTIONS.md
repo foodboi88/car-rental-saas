@@ -1,5 +1,5 @@
 # 🏛️ QUY CHUẨN CẤU TRÚC, CÚ PHÁP & DESIGN PATTERN (CODE CONVENTIONS)
-## Dự án: Car Rental SaaS (Backend Java 21 / Spring Boot 3)
+## Dự án: Car Rental SaaS (Backend Java 17 / Spring Boot 4.0.7)
 
 > **Mục tiêu:** Đồng bộ hóa 100% phong cách lập trình cho toàn bộ đội ngũ kỹ sư Frontend chuyển dịch sang làm Backend.  
 > **Nguyên tắc cốt lõi:** **Tường minh, Trong sáng, Bám sát Java Core, Tránh Trừu tượng hóa Phức tạp (YAGNI & KISS).**
@@ -7,15 +7,28 @@
 ---
 
 ## 🧭 MỤC LỤC
-1. [Kiến trúc Gói (Package-by-Feature / Modular Monolith)](#1-kiến-trúc-gói-package-by-feature)
-2. [Phân tầng Trách nhiệm (Controller - Service - Repository - Entity - DTO)](#2-phân-tầng-trách-nhiệm)
-3. [Quy chuẩn Cú pháp & Đặt tên (Naming Conventions)](#3-quy-chuẩn-cú-pháp--đặt-tên)
-4. [Design Patterns: Được Phép Dùng vs BỊ CẤM](#4-design-patterns-được-phép-dùng-vs-bị-cấm)
-5. [Quy chuẩn Chuyển đổi Dữ liệu (Object Mapping qua Builder)](#5-quy-chuẩn-chuyển-đổi-dữ-liệu-object-mapping)
-6. [Chuẩn hóa Phân trang (PageResponse) & API Response](#6-chuẩn-hóa-phân-trang--api-response)
-7. [Ba Thiết luật Giao dịch (@Transactional) & Tối ưu HikariCP](#7-ba-thiết-luật-giao-dịch-transactional)
-8. [Quy chuẩn Validation & Bắt lỗi (Exception Handling)](#8-quy-chuẩn-validation--bắt-lỗi)
-9. [An toàn Đa luồng & Quản lý Bộ nhớ (Thread-Safety & Memory)](#9-an-toàn-đa-luồng--quản-lý-bộ-nhớ)
+- [🏛️ QUY CHUẨN CẤU TRÚC, CÚ PHÁP \& DESIGN PATTERN (CODE CONVENTIONS)](#️-quy-chuẩn-cấu-trúc-cú-pháp--design-pattern-code-conventions)
+  - [Dự án: Car Rental SaaS (Backend Java 17 / Spring Boot 4.0.7)](#dự-án-car-rental-saas-backend-java-17--spring-boot-407)
+  - [🧭 MỤC LỤC](#-mục-lục)
+  - [1. KIẾN TRÚC GÓI (PACKAGE-BY-FEATURE)](#1-kiến-trúc-gói-package-by-feature)
+  - [2. PHÂN TẦNG TRÁCH NHIỆM](#2-phân-tầng-trách-nhiệm)
+    - [2.1 Controller (Lễ tân tòa nhà)](#21-controller-lễ-tân-tòa-nhà)
+    - [2.2 Service (Bộ não nghiệp vụ)](#22-service-bộ-não-nghiệp-vụ)
+    - [2.3 Repository (Thủ kho CSDL)](#23-repository-thủ-kho-csdl)
+    - [2.4 Entity vs DTO](#24-entity-vs-dto)
+  - [3. QUY CHUẨN CÚ PHÁP \& ĐẶT TÊN](#3-quy-chuẩn-cú-pháp--đặt-tên)
+  - [4. DESIGN PATTERNS: ĐƯỢC PHÉP DÙNG VS BỊ CẤM](#4-design-patterns-được-phép-dùng-vs-bị-cấm)
+    - [✅ CÁC PATTERN BẮT BUỘC \& KHUYÊN DÙNG](#-các-pattern-bắt-buộc--khuyên-dùng)
+    - [⛔ CÁC ANTI-PATTERNS BỊ CẤM HOÀN TOÀN](#-các-anti-patterns-bị-cấm-hoàn-toàn)
+  - [5. QUY CHUẨN CHUYỂN ĐỔI DỮ LIỆU (OBJECT MAPPING)](#5-quy-chuẩn-chuyển-đổi-dữ-liệu-object-mapping)
+  - [6. CHUẨN HÓA PHÂN TRANG \& API RESPONSE](#6-chuẩn-hóa-phân-trang--api-response)
+    - [6.1 DTO Phân trang Chuẩn SaaS: `PageResponse<T>`](#61-dto-phân-trang-chuẩn-saas-pageresponset)
+  - [7. BA THIẾT LUẬT GIAO DỊCH (@TRANSACTIONAL)](#7-ba-thiết-luật-giao-dịch-transactional)
+    - [📌 THIẾT LUẬT 1: Đặt đúng tầng](#-thiết-luật-1-đặt-đúng-tầng)
+    - [📌 THIẾT LUẬT 2: Phân định Read-Only](#-thiết-luật-2-phân-định-read-only)
+    - [📌 THIẾT LUẬT 3: Cấm ôm Connection "buôn chuyện"](#-thiết-luật-3-cấm-ôm-connection-buôn-chuyện)
+  - [8. QUY CHUẨN VALIDATION \& BẮT LỖI](#8-quy-chuẩn-validation--bắt-lỗi)
+  - [9. AN TOÀN ĐA LUỒNG \& QUẢN LÝ BỘ NHỚ](#9-an-toàn-đa-luồng--quản-lý-bộ-nhớ)
 
 ---
 

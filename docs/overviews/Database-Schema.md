@@ -173,6 +173,7 @@ erDiagram
         date insurance_expiry_date "Han bao hiem"
         text description "Mo ta tinh trang"
         smallint status "Trang thai xe (1:AVAILABLE, 2:RENTED, 3:MAINTENANCE, 4:TRANSFERRED, 5:INACTIVE)"
+        bigint version "Optimistic Lock (@Version)"
         timestamptz created_at "Thoi diem tao"
         timestamptz updated_at "Thoi diem cap nhat"
     }
@@ -191,6 +192,7 @@ erDiagram
         boolean is_risk "Co rui ro / Canh bao"
         text risk_reason "Ly do rui ro / canh bao"
         text notes "Ghi chu thoi quen"
+        bigint version "Optimistic Lock (@Version)"
         timestamptz created_at "Thoi diem tao"
         timestamptz updated_at "Thoi diem cap nhat"
     }
@@ -231,6 +233,7 @@ erDiagram
         uuid handover_by FK "ID Nhan vien giao xe"
         uuid returned_by FK "ID Nhan vien nhan xe"
         decimal commission_amount "Hoa hong Sale/CTV"
+        bigint version "Optimistic Lock (@Version)"
         timestamptz created_at "Thoi diem tao"
         timestamptz updated_at "Thoi diem cap nhat"
     }
@@ -437,6 +440,7 @@ CREATE TABLE vehicles (
     status SMALLINT NOT NULL DEFAULT 1                           -- Trạng thái xe: 1: Sẵn sàng (AVAILABLE), 2: Đang thuê (RENTED), 3: Bảo dưỡng (MAINTENANCE), 4: Điều phối (TRANSFERRED), 5: Tạm ngưng (INACTIVE)
         CHECK (status IN (1, 2, 3, 4, 5)),
     images JSONB DEFAULT '[]',                                   -- Danh sách ảnh thực tế của xe (JSONB)
+    version BIGINT NOT NULL DEFAULT 0,                           -- Phiên bản Optimistic Lock (@Version) — bổ sung bằng migration riêng (không sửa V1)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm thêm xe vào hệ thống
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm cập nhật thông tin xe gần nhất
     CONSTRAINT fk_vehicle_branch_tenant FOREIGN KEY (branch_id, tenant_id)
@@ -466,6 +470,7 @@ CREATE TABLE customers (
     is_risk BOOLEAN NOT NULL DEFAULT FALSE,                      -- Cờ đánh dấu khách hàng có rủi ro (TRUE: Có rủi ro/Cảnh báo, FALSE: An toàn)
     risk_reason TEXT,                                            -- Mô tả chi tiết lý do rủi ro / cảnh báo (nợ tiền, làm hỏng xe, chậm trả...)
     notes TEXT,                                                  -- Ghi chú thói quen/lịch sử thuê của khách
+    version BIGINT NOT NULL DEFAULT 0,                           -- Phiên bản Optimistic Lock (@Version) — bổ sung bằng migration riêng (không sửa V1)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm khởi tạo hồ sơ
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm cập nhật hồ sơ gần nhất
     CONSTRAINT unique_customer_tenant UNIQUE (id, tenant_id)
@@ -528,6 +533,7 @@ CREATE TABLE bookings (
     handover_by UUID,                                            -- ID nhân viên bãi làm thủ tục giao xe
     returned_by UUID,                                            -- ID nhân viên bãi nhận lại xe
     commission_amount DECIMAL(12, 2) DEFAULT 0,               -- Số tiền hoa hồng chi trả cho Sale/CTV chốt đơn (VNĐ)
+    version BIGINT NOT NULL DEFAULT 0,                           -- Phiên bản Optimistic Lock (@Version) — bổ sung bằng migration riêng (không sửa V1)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tạo đơn hàng
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm cập nhật đơn hàng gần nhất
     
@@ -568,21 +574,21 @@ CREATE INDEX idx_bookings_payment_status ON bookings(tenant_id, payment_status);
 
 ```sql
 CREATE TABLE user_sessions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã phiên đăng nhập (Session ID) được đính kèm vào Claim của JWT
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã phiên đăng nhập (Session ID) được đính kèm vào Claim current_session_id của JWT
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,-- Khóa ngoại tham chiếu người dùng sở hữu phiên
-    device_name VARCHAR(255),                                    -- Tên thiết bị và trình duyệt (Backend tự bóc tách từ Header User-Agent)
+    device_name VARCHAR(255) NOT NULL DEFAULT 'Unknown Device',  -- Tên thiết bị và trình duyệt (Backend tự bóc tách từ Header User-Agent)
     ip_address VARCHAR(45),                                      -- Địa chỉ IP của thiết bị khi đăng nhập (IPv4 hoặc IPv6)
     is_revoked BOOLEAN NOT NULL DEFAULT FALSE,                   -- Công tắc thu hồi: FALSE (đang active), TRUE (đã đăng xuất / bị đào thải)
-    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm gọi API gần nhất (Căn cứ chạy thuật toán đào thải LRU)
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,                -- Thời điểm hết hạn phiên (tính theo thời hạn sống của Refresh Token)
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP-- Thời điểm phiên được khởi tạo lúc đăng nhập
+    last_active_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tương tác gần nhất (Throttle 5 phút, căn cứ chạy LRU)
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,                -- Thời điểm hết hạn phiên (Sliding Expiration: now + refresh-token-expiration-ms)
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP        -- Thời điểm phiên được khởi tạo lúc đăng nhập
 );
 
--- Chỉ mục tối ưu tìm kiếm phiên của User
-CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
-
--- Composite Index phục vụ truy vấn đếm và đào thải thiết bị cũ nhất theo thuật toán LRU
+-- Composite Index phục vụ tra cứu phiên theo user_id (left-most prefix), đếm phiên active và đào thải LRU
 CREATE INDEX idx_user_sessions_lru ON user_sessions(user_id, is_revoked, last_active_at);
+
+-- Index phục vụ Scheduled Cleanup Job quét bản ghi hết hạn hoặc đã thu hồi quá hạn audit
+CREATE INDEX idx_user_sessions_cleanup ON user_sessions(expires_at, is_revoked);
 ```
 
 ---
@@ -599,8 +605,8 @@ CREATE INDEX idx_user_sessions_lru ON user_sessions(user_id, is_revoked, last_ac
 | permissions | idx_permissions_code | code | UNIQUE | Tra cứu quyền nguyên tử theo mã định danh |
 | role_permissions | idx_role_permissions_permission_id | permission_id | Normal | Tối ưu kiểm tra quan hệ quyền |
 | users | idx_users_email | email | UNIQUE | Đăng nhập tập trung hệ thống |
-| user_sessions | idx_user_sessions_user_id | user_id | Normal | Lấy danh sách thiết bị/phiên hoạt động của User |
-| user_sessions | idx_user_sessions_lru | user_id, is_revoked, last_active_at | Composite | Truy vấn đếm phiên active và tìm phiên cũ nhất để đào thải LRU |
+| user_sessions | idx_user_sessions_lru | user_id, is_revoked, last_active_at | Composite | Tra cứu phiên theo user (left-most prefix), đếm phiên active và tìm phiên cũ nhất để đào thải LRU |
+| user_sessions | idx_user_sessions_cleanup | expires_at, is_revoked | Composite | Phục vụ Scheduled Cleanup Job dọn phiên hết hạn & phiên thu hồi quá hạn audit |
 | user_tenants | idx_user_tenants_tenant_id | tenant_id | Normal | Quét thành viên thuộc tenant |
 | user_tenants | idx_user_tenants_role_id | role_id | Normal | Quét người dùng theo role |
 | user_branches | idx_user_branches_branch_id | branch_id | Normal | Quét nhân viên trực tại chi nhánh |
@@ -952,7 +958,8 @@ Nếu không giới hạn số lượng thiết bị trên 1 tài khoản, hệ 
 | **`bookings`** | **Optimistic Lock (`@Version`)** | Tránh Nhân viên bãi xác nhận nhận cọc ghi đè lên thao tác tự động hủy đơn của Scheduler. |
 | **`customers`** | **Optimistic Lock (`@Version`)** | Bảo vệ cờ cảnh báo nợ xấu/rủi ro `is_risk` và thông tin CCCD/GPLX không bị sửa đè. |
 | **Tạo Booking giữ xe (Hold Engine)** | **Pessimistic Lock (`SELECT ... FOR UPDATE`)** | **BẮT BUỘC!** Chống Double Booking tức thời trong **2 - 5 mili-giây** tại thời điểm bấm nút chốt giữ xe (vì là thao tác `INSERT` đơn mới, `@Version` hoàn toàn bất lực). |
-| **`user_sessions`, `payment_logs`** | **KHÔNG DÙNG LOCK** | Bảng lịch sử (Append-only), chỉ thêm mới (`INSERT`) và đánh dấu thu hồi, không có nghiệp vụ sửa đè dữ liệu quá khứ. |
+| **Login Multi-Session (LRU 5 thiết bị) & Atomic Lockout trên `users`** | **Pessimistic Lock (`SELECT ... FOR UPDATE` trên dòng `users`)** | **BẮT BUỘC (2–5ms, đặt SAU khi verify BCrypt)!** Chống TOCTOU vượt trần 5 thiết bị khi 2 máy login cùng mili-giây và bảo vệ bản vá R04 chống lọt phiên khi Admin khóa tài khoản đồng thời (do tạo phiên là `INSERT` bản ghi mới vào `user_sessions`, dùng dòng cha `users` làm Mutex giống `vehicles` ở Booking). |
+| **`user_sessions`** | **KHÔNG DÙNG LOCK** | Bảng lịch sử phiên đăng nhập (Append-only), chỉ thêm mới (`INSERT`) và đánh dấu thu hồi, không có nghiệp vụ sửa đè dữ liệu quá khứ. |
 | **Bảng danh mục tĩnh (`permissions`, `vehicle_types`)** | **KHÔNG DÙNG LOCK** | 99.99% chỉ đọc (`READ-ONLY`), không bao giờ có 2 người cùng sửa danh mục xe cùng lúc. |
 | **Bảng liên kết N-N (`user_tenants`, `role_permissions`)** | **KHÔNG DÙNG LOCK** | Chỉ gồm các khóa ngoại làm PK, chỉ có thao tác `INSERT/DELETE`, không có thao tác `UPDATE`. |
 
@@ -1005,13 +1012,31 @@ Hai loại khóa này không bài xích nhau, mà là hai người lính gác �
 
 ---
 
-#### 9. "Khóa tài khoản nhân viên: Cơ chế Một phát chết toàn bộ (Atomic Lockout)"
+#### 9. "Khóa tài khoản nhân viên: Cơ chế Một phát chết toàn bộ (Atomic Lockout) & Tại sao Login Multi-Session phải dùng Pessimistic Lock trên dòng `users`?"
 
 Khi sếp phát hiện nhân viên gian lận và bấm Khóa tài khoản:
 * **Hành động Backend:**
-  1. Đổi `users.is_active = false`.
-  2. Đồng thời đánh dấu `user_sessions.is_revoked = true` cho **toàn bộ phiên trên mọi thiết bị** của nhân viên đó.
+  1. Khóa cấp dòng bản ghi `users` (`SELECT * FROM users WHERE id = :userId FOR UPDATE`).
+  2. Đổi `users.is_active = false`.
+  3. Đồng thời đánh dấu `user_sessions.is_revoked = true` cho **toàn bộ phiên trên mọi thiết bị** của nhân viên đó.
 * **Tác động an ninh:** `JwtAuthenticationFilter` kiểm tra `is_revoked == false` ở mỗi request $\rightarrow$ Toàn bộ máy tính, điện thoại, máy tính bảng của nhân viên này bị đá văng ngay lập tức trong 0.001 giây, triệt tiêu hoàn toàn "cửa sổ 15 phút zombie token".
+
+> **Sếp / Tech Lead hỏi:** *"Trước đây ở Single Session chỉ cần 1 câu `UPDATE users ... WHERE is_active = true` (Atomic Conditional Update) là xong, tại sao sang Multi-Session lại phải chuyển sang Pessimistic Lock (`SELECT * FROM users WHERE id = :userId FOR UPDATE`) ở luồng Login?"*
+
+**Câu trả lời chuẩn Tech Lead:**
+* **Khác biệt bản chất giữa Single Session và Multi-Session:**
+  - Ở **Single Session cũ**, toàn bộ thao tác chỉ là **1 câu `UPDATE` duy nhất trên 1 dòng của bảng `users`**, nên PostgreSQL tự động khóa ngầm dòng đó trong 1 bước nguyên tử.
+  - Ở **Multi-Session mới**, mỗi lần đăng nhập là một **chuỗi nhiều thao tác nối tiếp trên 2 bảng** (`users` và `user_sessions`): đọc `is_active` $\rightarrow$ đếm & sắp xếp `user_sessions` $\rightarrow$ `UPDATE` thu hồi phiên cũ nếu `>= 5` $\rightarrow$ **`INSERT` dòng mới tinh vào `user_sessions`** $\rightarrow$ `UPDATE users.last_login_at`. Vì tạo phiên là lệnh **`INSERT` dòng mới**, Optimistic Lock (`@Version`) hoàn toàn bất lực (chưa có dòng cũ để so sánh).
+* **Hai kịch bản lỗi chắc chắn xảy ra nếu KHÔNG khóa dòng `users`:**
+  1. **Lỗi 1 — Vượt trần 5 thiết bị (TOCTOU Race Condition):** User đang có 4 thiết bị active. Thiết bị 5 và 6 bấm Login cùng 1 mili-giây $\rightarrow$ cả 2 luồng cùng `SELECT` thấy `count = 4` $\rightarrow$ cả 2 đều bỏ qua bước đào thải LRU $\rightarrow$ cả 2 cùng `INSERT` $\rightarrow$ DB lọt lên **6 thiết bị active**! *(Nếu đang có 5 thiết bị, cả 2 luồng cùng chọn thu hồi đúng thiết bị #1 rồi cả 2 cùng `INSERT` $\rightarrow$ vẫn lòi ra **6 thiết bị active**!)*
+  2. **Lỗi 2 — Mất bản vá R04 khi Admin khóa tài khoản đồng thời:**
+     - `t = 1ms`: Luồng Login đọc thấy `users.is_active = true`.
+     - `t = 2ms`: Admin bấm Khóa tài khoản (`is_active = false` + `revokeAllByUserId`) và `COMMIT`.
+     - `t = 3ms`: Luồng Login chạy tiếp `INSERT INTO user_sessions (..., is_revoked = false)` $\rightarrow$ DB sinh ra trạng thái rác mâu thuẫn: tài khoản đã bị khóa nhưng lại có 1 phiên mới đang `is_revoked = false`!
+* **Tại sao khóa dòng `users` KHÔNG gây nghẽn HikariCP?**
+  - Dùng dòng cha `users` làm ổ khóa gác cổng (**Mutex**) — cùng mẫu thiết kế với việc khóa dòng cha `vehicles` khi `INSERT` vào `bookings`.
+  - Chỉ khóa **đúng 1 dòng của riêng user đang đăng nhập** (1.000 user khác login song song không chờ nhau).
+  - Bắt buộc đặt lệnh khóa **SAU KHI đã verify mật khẩu BCrypt xong** (BCrypt tốn 50–100ms CPU nằm hoàn toàn ngoài vùng lock; bên trong lock chỉ đếm/insert `user_sessions` mất **2–5ms** rồi commit nhả khóa ngay!).
 
 ---
 

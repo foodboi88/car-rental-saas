@@ -282,8 +282,8 @@ sequenceDiagram
     Client ->> Filter: POST /refresh-token + Cookie: refreshToken (withCredentials: true)
     Filter ->> Ctrl: Bỏ qua kiểm tra AccessToken (Endpoint permitAll)
     Ctrl ->> Svc: refreshToken(cookieRefreshToken)
-    Svc ->> DB: Validate user, verify session trong user_sessions (is_revoked == false & expires_at > now())
-    Svc ->> DB: Cập nhật last_active_at = now() trên user_sessions
+    Svc ->> DB: Validate user, verify session trong user_sessions (id + user_id, is_revoked == false & expires_at > now())
+    Svc ->> DB: Sliding Expiration: cập nhật last_active_at = now() & expires_at = now() + refreshTokenTtl trên user_sessions
     opt Token có activeBranchId
         Svc ->> DB: Xác thực lại branch (findByIdAndTenantId, active) & user_branches (status = ACTIVE)
     end
@@ -348,14 +348,17 @@ Nhằm đảm bảo hệ thống hiện tại chạy đơn giản trên PostgreS
                       └──────────────────┬───────────────────┘
                                          │ (Chỉ phụ thuộc Interface trừu tượng)
                                          ▼
-                      ┌──────────────────────────────────────┐
-                      │     <<Interface>> SessionManager     │
-                      │  - createSession(userId, ...)        │
-                      │  - isSessionActive(sessionId)        │
-                      │  - revokeSession(sessionId)          │
-                      │  - revokeAllOtherSessions(userId)    │
-                      │  - getActiveSessions(userId)         │
-                      └──────────────────┬───────────────────┘
+                      ┌──────────────────────────────────────────────┐
+                      │         <<Interface>> SessionManager         │
+                      │  - createSessionWithLru(userId, device, ip)  │
+                      │  - validateAndTouchSession(sessionId, userId)│
+                      │  - touchAndExtendSession(sessionId, userId)  │
+                      │  - revokeSession(userId, sessionId)          │
+                      │  - revokeAllOtherSessions(userId, currentId) │
+                      │  - revokeAllByUserId(userId)                 │
+                      │  - getActiveSessions(userId, currentId)      │
+                      │  - cleanupExpiredAndOldRevokedSessions()     │
+                      └──────────────────────┬───────────────────────┘
                                          │
                ┌─────────────────────────┴─────────────────────────┐
                │                                                   │

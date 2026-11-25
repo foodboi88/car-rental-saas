@@ -33,6 +33,7 @@ Kiến trúc phân quyền của dự án là sự kết hợp giữa **Dynamic 
 ```mermaid
 erDiagram
     users ||--o{ user_tenants : "N-N (Central to Tenant)"
+    users ||--o{ user_sessions : "1-N (Multi-Session)"
     tenants ||--o{ user_tenants : "1-N"
     tenants ||--o{ roles : "1-N (Tenant-defined Roles)"
     roles ||--o{ user_tenants : "1-N (Dynamic Role Assignment)"
@@ -46,7 +47,17 @@ erDiagram
         string email UK
         string password_hash
         boolean is_super_admin
-        UUID current_session_id
+        UUID current_session_id "DEPRECATED - Chuyen sang user_sessions"
+    }
+
+    user_sessions {
+        UUID id PK
+        UUID user_id FK
+        string device_name
+        string ip_address
+        boolean is_revoked
+        timestamptz last_active_at
+        timestamptz expires_at
     }
     
     tenants {
@@ -130,7 +141,7 @@ Khi có sự cố xảy ra (ví dụ: phạt nguội giao thông, tai nạn, xe 
 1.  **Luồng API gọi dịch vụ OCR:**
     *   Frontend sử dụng Web Camera API để capture ảnh hoặc mở trình tải file chọn ảnh bản cứng.
     *   Gửi yêu cầu tới Backend qua endpoint: `POST /api/v1/customers/ocr` (multipart/form-data).
-    *   Backend nhận file, kiểm tra định dạng và gọi REST API của bên thứ 3 (Ví dụ: FPT AI OCR) kèm mã xác thực được lưu trong biến cấu hình môi trường.
+    *   Backend nhận file, kiểm tra định dạng và gọi REST API nội bộ sang **Self-hosted PaddleOCR Engine (Python FastAPI)** (xem sơ đồ tích hợp tại [Architecture-Diagram.md](./Architecture-Diagram.md)).
     *   Backend nhận kết quả thô từ nhà cung cấp, xử lý định dạng chuẩn (chuẩn hóa tên viết hoa, ngày sinh dạng ISO `yyyy-MM-dd`) và trả về JSON chuẩn cho client.
 2.  **Thông số kỹ thuật Endpoint `/ocr`:**
     *   **Request Body:**
@@ -157,14 +168,15 @@ Khi có sự cố xảy ra (ví dụ: phạt nguội giao thông, tai nạn, xe 
 
 ### 3.4 Quy Trình Giao & Nhận Xe Thực Tế (Handover & Return Workflows)
 
+> [!NOTE]
+> **Phạm vi tinh gọn (đồng bộ với [Database-Schema.md](./Database-Schema.md)):** Hệ thống **KHÔNG** theo dõi số km (Odo), vạch nhiên liệu, phí phụ trội km hay quản lý phạt nguội — tập trung vào ảnh hiện trạng ngoại quan, tài sản thế chấp và phụ phí trễ giờ thực tế.
+
 #### A. Luồng Bàn Giao Xe (Handover Check-in)
 Khi khách hàng tới chi nhánh/bãi xe nhận chìa khóa:
 1. **Kiểm tra & Đối chiếu định danh:** Nhân viên đối chiếu CCCD và Giấy phép lái xe gốc với thông tin đã quét OCR/Autofill.
 2. **Khai báo thông tin Bàn giao (Check-in Form):**
-   - **Số km đồng hồ ban đầu (`initial_km`):** Nhập số km hiển thị trên Odometer.
-   - **Mức nhiên liệu ban đầu (`initial_fuel`):** Ghi nhận mức xăng/điện (ví dụ: `100%`, `4/4`).
-   - **Chụp ảnh hiện trạng xe (`handover_images`):** Chụp các góc xe, lốp xe, vết xước/móp cũ, bảng đồng hồ và lưu mảng đường dẫn ảnh.
-   - **Ghi nhận Tài sản thế chấp (`collateral_type`, `collateral_notes`):** Kiểm tra xe máy + cavet xe chính chủ hoặc tiền mặt thế chấp.
+   - **Chụp ảnh hiện trạng xe (`handover_images`):** Chụp các góc xe, lốp xe, vết xước/móp cũ và lưu mảng đường dẫn ảnh (JSONB).
+   - **Ghi nhận Tài sản thế chấp (`collateral_type`, `collateral_notes`):** Kiểm tra xe máy + cavet xe chính chủ, tiền mặt thế chấp hoặc tài sản khác.
    - **Trạng thái tiền cọc (`is_deposit_paid`):** Xác nhận đã nhận đủ tiền cọc giữ xe.
 3. **Kích hoạt Bàn giao:**
    - Hệ thống ghi nhận thời điểm thực tế giao xe: `actual_handover_at = NOW()`.
@@ -175,19 +187,16 @@ Khi khách hàng tới chi nhánh/bãi xe nhận chìa khóa:
 #### B. Luồng Nhận Lại Xe (Return Check-out)
 Khi khách hàng trả xe về bãi:
 1. **Kiểm tra tình trạng xe khi trả (Check-out Form):**
-   - **Số km đồng hồ khi trả (`final_km`):** Hệ thống tự động so sánh với `initial_km`. Nếu vượt quá hạn mức km/ngày quy định của nhà xe (ví dụ >300km/ngày), hệ thống tự động gợi ý **Phí phụ trội km (`extra_km_fee`)**.
-   - **Mức nhiên liệu khi trả (`final_fuel`):** So sánh với mức nhiên liệu ban đầu `initial_fuel`.
-   - **Chụp ảnh tình trạng xe lúc trả (`return_images`):** Chụp lại ngoại thất và bảng đồng hồ khi nhận xe.
-   - **Kiểm tra hư hỏng / va quẹt mới:** Nếu phát sinh va quẹt/hư hỏng mới, nhân viên nhập **Phí đền bù hư hỏng (`damage_fee`)**.
+   - **Chụp ảnh tình trạng xe lúc trả (`return_images`):** Chụp lại ngoại thất và đối chiếu vết xước mới (nếu có).
+   - **Ghi chú bàn giao (`notes`):** Ghi nhận hiện trạng hoặc lưu ý đặc biệt khi nhận lại xe.
 2. **Tự động tính Phí Trễ Giờ (`late_fee`):**
    - Hệ thống ghi nhận thời điểm thực tế nhận xe: `actual_return_at = NOW()`.
-   - Tự động so sánh `actual_return_at` với lịch hẹn trả `return_date + return_time`. Nếu quá hạn, hệ thống tự động tính số giờ trễ và nhân đơn giá trễ giờ để ra **Phí trễ giờ (`late_fee`)**.
+   - Tự động so sánh `actual_return_at` với lịch hẹn trả `return_time` (`TIMESTAMPTZ`). Nếu quá hạn (1–4 tiếng, không ân hạn, không làm tròn ngày), hệ thống tự động tính số giờ trễ và nhân đơn giá `tenant_configs.late_hourly_price` để ra **Phí trễ giờ (`late_fee`)**.
 3. **Hoàn tất Nhận lại xe & Quyết toán:**
    - Lưu vết nhân viên kiểm tra nhận lại xe: `returned_by = current_user_id`.
-   - Quyết toán tổng tiền: $\text{Số tiền còn lại} = \text{total\_amount} + \text{late\_fee} + \text{extra\_km\_fee} + \text{damage\_fee} - \text{deposit\_amount}$.
+   - Quyết toán tổng tiền: $\text{Số tiền còn lại} = \text{total\_amount} + \text{late\_fee} - \text{deposit\_amount}$.
    - Cập nhật trạng thái đơn `bookings.status = RETURNED` (4).
    - Cập nhật trạng thái xe `vehicles.status = AVAILABLE` (1).
-   - Đồng bộ số km mới nhất sang bảng xe: `vehicles.current_km = final_km`.
    - Trả lại tài sản thế chấp (xe máy/cavet/tiền mặt) cho khách hàng.
 
 ---
@@ -218,12 +227,12 @@ Thay vì sử dụng Redis Distributed Lock, hệ thống sử dụng giải ph�
       │                                                         │
       ▼                                                         ▼
 [Tạo bản ghi Booking ở trạng thái HOLD ]     [Trả về lỗi: VEHICLE_NOT_AVAILABLE]
-[Kích hoạt Hold Timer trên Memory (cấu hình động theo từng nhà xe (mặc định 30 phút trong tenant_configs.hold_timeout_minutes))]
+[Lưu mốc hold_expires_at = NOW() + tenant_configs.hold_timeout_minutes vào DB]
       │
       ├───────────────────────────────────────────────────────────────────┐
       ▼ (Ghi nhận cọc thành công)                                         ▼ (Hết thời gian không cọc)
-[Hủy Hold Timer, chốt giữ xe]                               [Hệ thống tự động hủy booking]
-[Booking tiếp tục ở trạng thái CONFIRMED  (Chờ giao xe)] [Đổi trạng thái booking sang Cancelled]
+[Chốt giữ xe trong DB]                                       [Spring @Scheduled Job quét mỗi 1 phút]
+[Booking chuyển sang trạng thái CONFIRMED (Chờ giao xe)]     [UPDATE status = CANCELLED WHERE hold_expires_at < NOW()]
       |                                                                      
   HANDED_OVER 
       |
@@ -231,9 +240,9 @@ Thay vì sử dụng Redis Distributed Lock, hệ thống sử dụng giải ph�
 
 ```
 
-1.  **SELECT FOR UPDATE:** Khi có yêu cầu kiểm tra và tạo giữ chỗ cho một xe từ ngày A đến ngày B, hệ thống thực hiện truy vấn khóa dòng dữ liệu của xe đó trong Database để đảm bảo tại một thời điểm chỉ có duy nhất một tiến trình được quyền xử lý nghiệp vụ đặt xe cho chiếc xe này.
-2.  **Hold Timer (Giữ chỗ tạm):** Bản ghi booking được tạo ra ở trạng thái chờ bàn giao/chờ cọc (`HOLD `) với thời gian giữ chỗ duoc cau hinh trong tenant_configs.hold_timeout_minutes. 
-3.  **Xác nhận/Hủy tự động:** Nếu trong vòng thời gian hold nhà xe ghi nhận khách đã đóng tiền cọc thành công, hệ thống sẽ hủy Timer tự động hủy và chốt giữ xe cố định ở trạng thái `CONFIRMED `. Nếu quá thời gian hold mà không có thông tin cọc được ghi nhận, hệ thống tự động hủy booking, giải phóng xe về trạng thái `AVAILABLE`.
+1.  **SELECT FOR UPDATE:** Khi có yêu cầu kiểm tra và tạo giữ chỗ cho một xe từ `pickup_time` đến `return_time`, hệ thống thực hiện truy vấn khóa dòng dữ liệu của xe đó trong Database để đảm bảo tại một thời điểm chỉ có duy nhất một tiến trình được quyền xử lý nghiệp vụ đặt xe cho chiếc xe này.
+2.  **DB-Backed Hold (`hold_expires_at`):** Bản ghi booking được tạo ra ở trạng thái chờ bàn giao/chờ cọc (`HOLD`) với cột `hold_expires_at` tính theo cấu hình `tenant_configs.hold_timeout_minutes` (mặc định 30 phút). Không dùng timer trên RAM để đảm bảo an toàn khi restart server.
+3.  **Xác nhận/Hủy tự động (`@Scheduled`):** Nếu trong thời gian hold nhà xe ghi nhận khách đã đóng cọc thành công, đơn chuyển sang trạng thái `CONFIRMED`. Nếu quá `hold_expires_at` mà chưa cọc, Spring Scheduled Task (`HoldReleaseTask` chạy định kỳ mỗi 1 phút) tự động cập nhật đơn sang `CANCELLED` để giải phóng lịch xe.
 
 ---
 
@@ -304,7 +313,7 @@ Hiện tại ở giai đoạn MVP, cơ chế cô lập đang được thực thi
     *   **Module Khách hàng:** CRUD thông tin khách hàng, tích hợp tính năng tự động mã hóa AES-256 các trường nhạy cảm (`id_card`, `driver_license`). Setup SDK S3 lưu trữ ảnh giấy tờ.
     *   **Module Booking:** Xây dựng công cụ đặt xe trực quan (Calendar/Table) cho nhân viên Back Office.
     *   **Hold Engine:** Hiện thực hóa cơ chế lock DB giữ xe theo thời gian cấu hình của nhà xe (mặc định 30 phút trong tenant_configs).
-    *   **Module Giao/Nhận xe:** Form 3 bước ghi nhận km, mức nhiên liệu, ghi chú hư hại lúc giao xe và nhận xe.
+    *   **Module Giao/Nhận xe:** Form check-in/check-out xác nhận cọc, tài sản thế chấp, chụp ảnh hiện trạng ngoại quan lúc giao/nhận xe và tự động tính phí trễ giờ (`late_fee`).
     *   **Module Thanh toán:** Ghi nhận thông tin thanh toán (Số tiền, Phương thức: Tiền mặt/Chuyển khoản, Mã tham chiếu, Ngày thanh toán) được nhân viên nhập thủ công sau khi khách thanh toán ngoại tuyến bên ngoài.
     *   **Module Báo cáo:** 3 báo cáo thiết yếu gồm doanh thu ngày, hiệu suất khai thác đội xe, và danh sách booking cần xử lý trong ngày.
 
@@ -342,27 +351,27 @@ Tất cả giao diện của hệ thống được tối ưu hóa cho **Mobile W
     > *"Design a responsive, mobile-first web page containing a 'Create Booking' form for a car rental SaaS application. At the top, place a prominent dashed-border upload area with a camera icon labeled 'Scan ID/Driver License to Autofill'. Below this, show input fields for Customer Name, Phone, ID Card Number, and Driver License (styled as autofilled fields). Next, add selectors for Branch, Select Vehicle (with small green 'Available' tags), and Datetime Pickers for pickup/return. At the bottom, display a summary card showing 'Total Amount' and a numeric input for 'Deposit Amount' with a payment method toggle. Clean Tailwind CSS, optimized for one-hand mobile input."*
 
 #### MÀN HÌNH 3: Chi Tiết Đơn Hàng & Giao Nhận Xe (Booking Detail & Handover Checklist)
-*   **Mô tả:** Đầu màn hình hiển thị thanh tiến trình 4 bước (HOLD →→ CONFIRMED →→ HANDED_OVER →→ RETURNED (hoặc CANCELLED)). Có nút gọi điện nhanh cho khách (`tel:`). Phần cốt lõi là checklist bàn giao vật lý: Nhập số Km hiện tại, chọn vạch xăng trực quan (1/4, 1/2, 3/4, Full), và upload tối đa 4 ảnh chụp hiện trạng xe. Nút hành động chính đổi động: `Deliver Vehicle` (khi trạng thái là CONFIRMED - Đã chốt cọc / Chờ giao xe) và `Receive Vehicle` (khi trạng thái là HANDED_OVER - Đang thuê / Đã bàn giao xe).
+*   **Mô tả:** Đầu màn hình hiển thị thanh tiến trình 4 bước (HOLD → CONFIRMED → HANDED_OVER → RETURNED hoặc CANCELLED). Có nút gọi điện nhanh cho khách (`tel:`). Phần cốt lõi là checklist bàn giao vật lý: Xác nhận tiền cọc, ghi nhận tài sản thế chấp (`collateral_type`, `collateral_notes`), và upload tối đa 4 ảnh chụp hiện trạng ngoại quan xe (`handover_images` / `return_images`). Khi nhận lại xe, tự động hiển thị phí trễ giờ (`late_fee`) nếu quá `return_time`. Nút hành động chính đổi động: `Deliver Vehicle` (khi trạng thái là CONFIRMED - Đã chốt cọc / Chờ giao xe) và `Receive Vehicle` (khi trạng thái là HANDED_OVER - Đang thuê / Đã bàn giao xe).
 *   **Prompt mẫu cho AI:**
-    > *"Create a mobile-first, responsive web page for a 'Booking Detail & Handover' screen of a SaaS car rental platform. Display a status progress bar at the top (Pending Handover -> In Progress -> Completed) with appropriate status badges. Show customer details with a quick-call link (tel:), and booking details. Include a 'Vehicle Handover Checklist' section where staff can input current Kilometers, Fuel Level (visual progress bar selector), and upload 4 photos of the vehicle's current state. The primary action button at the bottom should change dynamically based on status: 'Deliver Vehicle' (when pending_handover) and 'Receive Vehicle' (when in_progress). Use a clean card layout with high contrast."*
+    > *"Create a mobile-first, responsive web page for a 'Booking Detail & Handover' screen of a SaaS car rental platform. Display a status progress bar at the top (Hold -> Confirmed -> Handed Over -> Returned) with appropriate status badges. Show customer details with a quick-call link (tel:), and booking details. Include a 'Vehicle Handover Checklist' section where staff can confirm deposit payment, record collateral notes, and upload 4 photos of the vehicle's exterior condition. The primary action button at the bottom should change dynamically based on status: 'Deliver Vehicle' (when confirmed) and 'Receive Vehicle' (when handed_over). Use a clean card layout with high contrast."*
 
 #### MÀN HÌNH 4: Quản Lý Đội Xe & Phân Khúc (Fleet Management - Mobile-First)
-*   **Mô tả:** Màn hình quản lý toàn bộ phương tiện và loại xe.
-    *   *App Header:* Nút Hamburger `☰` (trái) mở Sidebar Menu, Tiêu đề đầy đủ **Quản lý fleet** (giữa), Avatar cá nhân (phải). Sub-header hiển thị Quota xe `Xe (12/15)` và Badge `Gói Starter`.
+*   **Mô tả:** Màn hình quản lý toàn bộ phương tiện và tra cứu danh mục phân khúc xe.
+    *   *App Header:* Nút Hamburger `☰` (trái) mở Sidebar Menu, Tiêu đề đầy đủ **Quản lý fleet** (giữa), Avatar cá nhân (phải). Sub-header hiển thị Quota xe `Xe (12/15)` và Badge `Gói BASIC`.
     *   *Cấu trúc 2 Tabs:*
-        *   **Tab 1: Danh sách xe (Vehicles):** Ô tìm kiếm biển số/model, bộ lọc Chips Trạng thái (`Tất cả`, `🟢 Sẵn sàng`, `🔵 Đang thuê`, `🔴 Bảo dưỡng`), dropdown Lọc theo Chi nhánh. Danh sách Card xe bo góc hiển thị ảnh 16:9, biển số nổi bật, model, loại xe, chi nhánh đỗ, odo (`45,200 km`), mức xăng. Icon `⋮` mở Bottom Sheet thao tác (xem lịch xe, cập nhật odo/bảo dưỡng nhanh trong 3 giây, đổi chi nhánh, xóa xe).
-        *   **Tab 2: Loại xe & Giá sàn (Vehicle Types):** Danh sách Card phân khúc xe (Sedan 4 chỗ, SUV 7 chỗ...), mô tả và **Giá thuê cơ bản/ngày (`1,200,000 VNĐ`)**.
-    *   *FAB Button (`+`) nổi tự động chuyển ngữ cảnh:* Ở Tab 1 bấm `+` mở Form Thêm chiếc xe mới (3 khung); ở Tab 2 bấm `+` mở Form Tạo loại xe mới.
+        *   **Tab 1: Danh sách xe (Vehicles):** Ô tìm kiếm biển số/model, bộ lọc Chips Trạng thái (`Tất cả`, `🟢 Sẵn sàng`, `🔵 Đang thuê`, `🔴 Bảo dưỡng`), dropdown Lọc theo Chi nhánh. Danh sách Card xe bo góc hiển thị ảnh 16:9, biển số nổi bật, model, loại xe, đơn giá thuê/ngày (`price_per_day`), chi nhánh đỗ và vị trí đỗ thực tế (`parking_location`). Icon `⋮` mở Bottom Sheet thao tác (xem lịch xe, cập nhật trạng thái bảo dưỡng/vị trí đỗ nhanh, đổi chi nhánh, ngưng khai thác xe `INACTIVE`).
+        *   **Tab 2: Danh mục Loại xe (Vehicle Types — Read-only cho Tenant):** Danh sách Card phân khúc xe System-wide do `SUPER_ADMIN` quản lý (Sedan, SUV, MPV, Pickup, Electric...) kèm mô tả và số lượng xe thuộc phân khúc đó *(không có giá sàn ở loại xe; đơn giá được cấu hình trực tiếp trên từng xe)*.
+    *   *FAB Button (`+`):* Ở Tab 1 bấm `+` mở Form Thêm chiếc xe mới (3 khung). *(Chỉ `SUPER_ADMIN` trên Admin Portal mới có quyền CRUD loại xe).*
 *   **Prompt mẫu cho AI:**
-    > *"Design a mobile-first, responsive web interface for 'Fleet Management' of a SaaS car rental platform. Top app bar features a hamburger menu, title 'Quản lý fleet', and user avatar. Sub-header displays vehicle quota 'Xe (12/15)' and package badge. Provide two tabs: 'Vehicles' and 'Vehicle Types'. Under 'Vehicles' tab, display search bar, status filter chips (Available, Rented, Maintenance), branch filter dropdown, and a list of vehicle cards (photo thumbnail, license plate badge, model, branch, odo, fuel, action menu button). Include a bottom sheet for 'Quick Odo & Maintenance Update'. Under 'Vehicle Types' tab, list categories with daily rental rates. Place a floating action button '+' that dynamically changes context: adding a vehicle under Vehicles tab, or creating a vehicle type under Vehicle Types tab. Sleek modern Tailwind CSS, mobile touch-friendly."*
+    > *"Design a mobile-first, responsive web interface for 'Fleet Management' of a SaaS car rental platform. Top app bar features a hamburger menu, title 'Quản lý fleet', and user avatar. Sub-header displays vehicle quota 'Xe (12/15)' and package badge 'BASIC'. Provide two tabs: 'Vehicles' and 'Vehicle Types (Read-only)'. Under 'Vehicles' tab, display search bar, status filter chips (Available, Rented, Maintenance), branch filter dropdown, and a list of vehicle cards (photo thumbnail, license plate badge, model, daily price, branch, parking location, action menu button). Include a bottom sheet for 'Quick Status & Maintenance Update'. Under 'Vehicle Types' tab, list system-wide categories with vehicle counts. Place a floating action button '+' under Vehicles tab to add a new vehicle. Sleek modern Tailwind CSS, mobile touch-friendly."*
 #### MÀN HÌNH 5: Quản Lý Chi Nhánh & Bãi Xe (Branch Management - Mobile-First)
 *   **Mô tả:** Màn hình quản lý danh sách chi nhánh, điểm giao nhận và văn phòng của nhà xe.
-    *   *App Header:* Nút Hamburger `☰` mở Sidebar Menu, Tiêu đề **Quản lý chi nhánh**, Avatar cá nhân. Sub-header hiển thị Quota `Chi nhánh (2/3)` kèm Badge `Gói Growth`.
-    *   *Khu vực Danh sách & Bộ lọc:* Ô tìm kiếm tên, mã, SĐT chi nhánh; Filter Chips trạng thái (`Tất cả`, `🟢 Hoạt động`, `🔴 Tạm ngưng`).
-    *   *Danh sách Branch Cards:* Thẻ card bo góc hiển thị Mã chi nhánh, Tên, SĐT, Địa chỉ chi tiết, Giờ hoạt động, Số lượng xe đang đỗ (`12 Xe`). Nút `⋮` mở Action Sheet (Xem chi tiết 2 tabs, Chỉnh sửa, Tạm ngưng/Kích hoạt, Xóa chi nhánh).
-    *   *FAB Button (`+`):* Nút nổi ở góc phải dưới mở Form Thêm chi nhánh mới (Slide-up modal gồm 3 khung: Thông tin cơ bản, Địa chỉ hành chính, Thời gian hoạt động).
+    *   *App Header:* Nút Hamburger `☰` mở Sidebar Menu, Tiêu đề **Quản lý chi nhánh**, Avatar cá nhân. Sub-header hiển thị Quota `Chi nhánh (2/3)` kèm Badge `Gói PRO`.
+    *   *Khu vực Danh sách & Bộ lọc:* Ô tìm kiếm tên, SĐT chi nhánh; Filter Chips trạng thái (`Tất cả`, `🟢 Hoạt động`, `🔴 Tạm ngưng`).
+    *   *Danh sách Branch Cards:* Thẻ card bo góc hiển thị Tên chi nhánh, SĐT, Địa chỉ chi tiết, Tọa độ GPS, Số lượng xe đang đỗ (`12 Xe`). Nút `⋮` mở Action Sheet (Xem chi tiết 2 tabs, Chỉnh sửa, Tạm ngưng/Kích hoạt, Xóa chi nhánh).
+    *   *FAB Button (`+`):* Nút nổi ở góc phải dưới mở Form Thêm chi nhánh mới (Slide-up modal gồm 3 khung: Thông tin cơ bản, Địa chỉ & GPS, Trạng thái hoạt động).
 *   **Prompt mẫu cho AI:**
-    > *"Create a mobile-first, responsive web page for 'Branch Management' of a SaaS car rental platform. Top bar has a hamburger menu, screen title 'Quản lý chi nhánh', and user profile avatar. Sub-header displays quota badge 'Chi nhánh (2/3) - Gói Growth'. Include a search input and horizontal filter chips for status (All, Active, Suspended). Display a list of branch cards showing branch code badge, branch name, address, phone number, operating hours, and vehicle count badge. Each card has a three-dot action menu triggering a bottom action sheet. Place a prominent floating action button '+' at the bottom right to trigger a slide-up modal for creating a new branch with a clean 3-section layout. Modern mobile UX, crisp typography."*
+    > *"Create a mobile-first, responsive web page for 'Branch Management' of a SaaS car rental platform. Top bar has a hamburger menu, screen title 'Quản lý chi nhánh', and user profile avatar. Sub-header displays quota badge 'Chi nhánh (2/3) - Gói PRO'. Include a search input and horizontal filter chips for status (All, Active, Suspended). Display a list of branch cards showing branch name, address, phone number, GPS coordinates, and vehicle count badge. Each card has a three-dot action menu triggering a bottom action sheet. Place a prominent floating action button '+' at the bottom right to trigger a slide-up modal for creating a new branch with a clean 3-section layout. Modern mobile UX, crisp typography."*
 
 ### 7.3 Quy chuẩn Trạng thái & Phản hồi (States & Feedback)
 *   **Hiệu ứng tải (Skeleton Loading):** Khi dữ liệu đang tải, hiển thị Skeleton Shimmer (vệt sáng xám chuyển động nhẹ) thay vì vòng xoay spinner truyền thống để tăng trải nghiệm mượt mà.
@@ -391,7 +400,7 @@ Khi API trả về thất bại (`success: false`), client cần dựa vào `err
 
 ## 9. Chi Tiết Các Feature Specs & Nghiệp Vụ Triển Khai (Self-Contained Feature Specs)
 
-Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, Validation Rules, API Contracts, Database Schema, Luồng xử lý nghiệp vụ và Danh mục Mã lỗi** của các tính năng trong hệ thống. File `onboarding.md` này đóng vai trò là **Nguồn Chân Lý Dữ Liệu Duy Nhất (Single Source of Truth)**. Khi tiếp nhận dự án, phát triển tính năng mới hoặc fix bug, AI/Dev **không cần tìm các file spec lẻ mà đọc trực tiếp tại đây**.
+Tài liệu dưới đây tóm tắt nghiệp vụ và UI/UX của các tính năng chính phục vụ onboarding nhanh. Đối với **Schema CSDL chi tiết**, **Sơ đồ Kiến trúc / Auth Multi-Session** và **Quy chuẩn Code Java**, nguồn chân lý gốc (Single Source of Truth) nằm tại [Database-Schema.md](./Database-Schema.md), [Architecture-Diagram.md](./Architecture-Diagram.md) và [JAVA_SPRING_CODE_CONVENTIONS.md](../tutorials/JAVA_SPRING_CODE_CONVENTIONS.md).
 
 ---
 
@@ -401,13 +410,15 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 * **Trạng thái**: **ĐÃ HOÀN THÀNH (Done)**
 * **Mục tiêu**: Khởi tạo base project Spring Boot 4.0.x (Java 17, Spring Security, Spring Data JPA, Flyway, PostgreSQL) và xây dựng hệ thống đăng nhập tập trung, cấp JWT token (Access + Refresh) hỗ trợ người dùng thuộc 1 hoặc nhiều Tenant.
 
-#### B. Phân quyền & Vai trò trong hệ thống
+#### B. Phân quyền & Vai trò trong hệ thống (Dynamic RBAC — `roles.code`)
 * `SUPER_ADMIN`: Quản trị viên toàn hệ thống SaaS (`is_super_admin = true` trong bảng `users`).
-* `TENANT_ADMIN` (Role ID = 1): Chủ nhà xe.
-* `STAFF` (Role ID = 2): Nhân viên nghiệp vụ.
-* `SALE` (Role ID = 3): Cộng tác viên kinh doanh.
+* `TENANT_ADMIN`: Chủ nhà xe (mã vai trò động `roles.code = 'TENANT_ADMIN'`, quản lý bằng `role_id UUID` theo từng Tenant).
+* `STAFF`: Nhân viên nghiệp vụ (`roles.code = 'STAFF'`).
+* `SALE`: Cộng tác viên kinh doanh (`roles.code = 'SALE'`).
 
-#### C. Luồng xử lý Đăng nhập & Phân cấp Ngữ cảnh (`AuthService`)
+#### C. Luồng xử lý Đăng nhập & Phân cấp Ngữ cảnh (`AuthService` — Multi-Session)
+> [!NOTE]
+> **Nâng cấp Multi-Session:** Cơ chế Single Session cũ (`users.current_session_id` — đã `@Deprecated`) đang chuyển sang kiến trúc **Multi-Session & Device Management** (bảng `user_sessions`, tối đa 5 thiết bị theo thuật toán LRU, hỗ trợ xem & đăng xuất thiết bị từ xa). Xem chi tiết tại [Architecture-Diagram.md](./Architecture-Diagram.md) và [2026-11-23-multi-session-device-management-spec.md](../plans/auth-login/2026-11-23-multi-session-device-management-spec.md).
 1. **Đăng nhập tập trung (`POST /api/v1/auth/login`)**:
    * Request Body: `{ "email": "user@example.com", "password": "Password123!" }`
    * Backend kiểm tra Email & Mật khẩu bằng `BCryptPasswordEncoder` (sai ném `401 UNAUTHORIZED`, *"Sai tài khoản hoặc mật khẩu !"*).
@@ -489,20 +500,20 @@ Tài liệu dưới đây chứa **đầy đủ thông tin kỹ thuật, DTOs, V
 * **Mục tiêu**: Cho phép Chủ nhà xe (`TENANT_ADMIN`) tạo và quản lý tài khoản nhân viên (`STAFF` hoặc `SALE`) trong Tenant của mình, thiết lập ràng buộc phân công chi nhánh và hỗ trợ gán tài khoản đã tồn tại trên hệ thống vào nhà xe mà không làm đè mật khẩu.
 
 #### B. Quy tắc Nghiệp vụ & Validation
-1. **Quyền gọi API**: RESTRICTED - Chỉ tài khoản có vai trò `TENANT_ADMIN` (Role ID = 1) trong Tenant hiện tại mới được gọi endpoint `POST /api/v1/accounts`.
-2. **Quy tắc Vai trò được tạo**: Chỉ cho phép tạo tài khoản có `role = 2` (`STAFF`) hoặc `role = 3` (`SALE`). **Nghiêm cấm** tạo tài khoản `TENANT_ADMIN` (role = 1) qua API này.
+1. **Quyền gọi API**: RESTRICTED - Chỉ tài khoản có vai trò `TENANT_ADMIN` (`roles.code = 'TENANT_ADMIN'`) trong Tenant hiện tại mới được gọi endpoint `POST /api/v1/accounts`.
+2. **Quy tắc Vai trò được tạo**: Chỉ cho phép gán vai trò thuộc Tenant (theo `roleId UUID` trong bảng `roles`, VD: `STAFF`, `SALE` hoặc custom role của Tenant). **Nghiêm cấm** tạo/gán vai trò `SUPER_ADMIN` hoặc tự nâng cấp trái phép `TENANT_ADMIN` qua API này.
 3. **Quy tắc Kiểm tra Email trùng (Cross-Tenant Account Assignment)**:
    * Kiểm tra email trong bảng `users`:
      * Nếu email **đã tồn tại** VÀ **đã liên kết với Tenant hiện tại** trong `user_tenants` -> Ném lỗi `BadRequestException` (*"Account with this email already exists in your organization"*).
-     * Nếu email **đã tồn tại** nhưng **chưa thuộc Tenant hiện tại** -> KHÔNG tạo bản ghi `User` mới, KHÔNG mã hóa hay cập nhật lại `password_hash`. Tiến hành tạo liên kết `user_tenants` mới với `tenant_id` hiện tại và vai trò được chọn, sau đó gán chi nhánh tương ứng.
+     * Nếu email **đã tồn tại** nhưng **chưa thuộc Tenant hiện tại** -> KHÔNG tạo bản ghi `User` mới, KHÔNG mã hóa hay cập nhật lại `password_hash`. Tiến hành tạo liên kết `user_tenants` mới với `tenant_id` hiện tại và `role_id` được chọn, sau đó gán chi nhánh tương ứng.
      * Nếu email **chưa tồn tại** trên hệ thống -> Tạo mới bản ghi `User` (bật `is_active = true`, mã hóa password qua `BCryptPasswordEncoder`), tạo liên kết `user_tenants` và `user_branches`.
 4. **Quy tắc Phân công Chi nhánh (`branchIds`)**:
-   * **Đối với vai trò `STAFF` (role = 2)**:
+   * **Đối với vai trò `STAFF` (`roles.code = 'STAFF'`)**:
      * Trên Form FE: **Bắt buộc Admin phải chọn ít nhất 1 chi nhánh** (hiển thị danh sách Checkbox các chi nhánh đang hoạt động của Tenant để chọn).
      * Request gửi lên: Chứa danh sách `branchIds` (được tự động de-duplicate). Nếu rỗng hoặc null -> Báo lỗi `BadRequestException` (*"Staff account must be assigned to at least one branch"*).
      * Xác minh chính chủ: Tất cả các `branchIds` được truyền lên phải thực sự thuộc sở hữu của Tenant hiện tại và đang hoạt động (`branches.is_active = true`). Nếu chứa chi nhánh của Tenant khác, ném lỗi `TenantAccessDeniedException`.
      * Lưu vào bảng `user_branches` với trạng thái `UserBranchStatus.ACTIVE (1)`.
-   * **Đối với vai trò `SALE` (role = 3)**:
+   * **Đối với vai trò `SALE` (`roles.code = 'SALE'`)**:
      * Trên Form FE: **Không cần chọn chi nhánh** (Form tự động ẩn phần chọn chi nhánh khi chọn vai trò SALE).
      * Request gửi lên: `branchIds` có thể để null hoặc rỗng.
      * Backend xử lý: **Tự động truy vấn toàn bộ chi nhánh đang hoạt động (`branches.is_active = true`) của Tenant hiện tại** và lưu tất cả vào `user_branches` cho nhân viên SALE đó với trạng thái `UserBranchStatus.ACTIVE (1)`.
@@ -531,13 +542,12 @@ public class CreateAccountRequestDTO {
     )
     private String phone;
 
-    @NotNull(message = "Role must not be null")
-    @Min(value = 2, message = "Role must be 2 (STAFF) or 3 (SALE)")
-    @Max(value = 3, message = "Role must be 2 (STAFF) or 3 (SALE)")
-    private Integer role;
+    // Dynamic RBAC: UUID của role thuộc Tenant hiện tại (VD: STAFF, SALE) — xác thực qua roles(id, tenant_id)
+    @NotNull(message = "Role ID must not be null")
+    private UUID roleId;
 
-    // Bắt buộc chọn ít nhất 1 chi nhánh đối với STAFF (role = 2). 
-    // Không cần truyền đối với SALE (role = 3) do Backend tự động gán toàn bộ active branches của Tenant.
+    // Bắt buộc chọn ít nhất 1 chi nhánh đối với STAFF.
+    // Không cần truyền đối với SALE do Backend tự động gán toàn bộ active branches của Tenant.
     private List<UUID> branchIds;
 }
 ```
@@ -553,7 +563,7 @@ public class CreateAccountRequestDTO {
      * *Bên phải*: **Avatar Người dùng / Admin** -> Bấm mở Menu thông tin cá nhân & Đăng xuất.
    * **Sub-Header Bar**:
      * *Bên trái*: Text số lượng: `Nhân viên (8)`.
-     * *Bên phải*: Badge thông tin gói cước: `Gói Growth`.
+     * *Bên phải*: Badge thông tin gói cước: `Gói PRO`.
    * **Khu vực Tìm kiếm & Lọc**:
      * Ô Input tìm kiếm: `[🔍 Tìm theo tên, email, SĐT...  [X]]`
      * Filter Chips cuộn ngang: `[Tất cả (8)]` `[Staff (6)]` `[Sale (2)]`
@@ -597,14 +607,15 @@ public class CreateAccountRequestDTO {
 * **Mục tiêu**: Cho phép Chủ nhà xe (`TENANT_ADMIN`) quản lý danh sách các bãi xe, điểm giao nhận và văn phòng chi nhánh. Áp dụng mô hình **Hybrid SaaS Quota** khống chế số lượng chi nhánh theo gói cước để bảo vệ tài nguyên server.
 
 #### B. Quy tắc Phân quyền & Quota Cước
-1. **Phân quyền**:
-   * `TENANT_ADMIN` (Role ID = 1): **Quyền duy nhất** được Thêm mới, Cập nhật, Bật/Tắt hoạt động và Xóa Chi nhánh.
-   * `STAFF` (Role ID = 2): Chỉ có quyền Xem danh sách & Chi tiết các Chi nhánh được phân công (Read-only qua `user_branches`).
-   * `SALE` (Role ID = 3): Có quyền Xem danh sách tất cả các Chi nhánh đang hoạt động của Tenant (`/api/v1/branches/active` hoặc combobox) để tư vấn và tạo đơn booking nhận/trả xe cho khách.
-2. **Mô hình Hybrid SaaS Quota (`max_branches` & `max_vehicles`)**:
-   * Gói **Starter**: Tối đa 1 Chi nhánh, max 15 Xe.
-   * Gói **Growth**: Tối đa 3 Chi nhánh, max 50 Xe.
-   * Gói **Enterprise**: Tối đa 10 Chi nhánh (hoặc tùy chỉnh), max 200 Xe.
+1. **Phân quyền (Dynamic RBAC):**
+   * `TENANT_ADMIN`: **Quyền duy nhất** được Thêm mới, Cập nhật, Bật/Tắt hoạt động và Xóa Chi nhánh.
+   * `STAFF`: Chỉ có quyền Xem danh sách & Chi tiết các Chi nhánh được phân công (Read-only qua `user_branches`).
+   * `SALE`: Có quyền Xem danh sách tất cả các Chi nhánh đang hoạt động của Tenant (`/api/v1/branches/active` hoặc combobox) để tư vấn và tạo đơn booking nhận/trả xe cho khách.
+2. **Mô hình Hybrid SaaS Quota (`plan_tier`: `FREE / BASIC / PRO / ENTERPRISE`):**
+   * Gói **FREE (`1`)**: Tối đa 1 Chi nhánh, max 5 Xe (dùng thử).
+   * Gói **BASIC (`2`)**: Tối đa 1 Chi nhánh, max 15 Xe.
+   * Gói **PRO (`3`)**: Tối đa 3 Chi nhánh, max 50 Xe.
+   * Gói **ENTERPRISE (`4`)**: Tối đa 10 Chi nhánh (hoặc tùy chỉnh), max 200 Xe.
    * **Kiểm tra Quota khi tạo Chi nhánh (`POST /api/v1/branches`)**:
      * Query: `SELECT COUNT(*) FROM branches WHERE tenant_id = :tenantId AND is_active = true`.
      * Nếu `currentBranchCount >= tenantSubscription.max_branches`: Trả về lỗi HTTP `400 Bad Request` / `403 Forbidden` với mã lỗi `BRANCH_QUOTA_EXCEEDED` (*"Bạn đã đạt giới hạn tối đa X chi nhánh của gói cước hiện tại!"*).
@@ -617,7 +628,7 @@ public class CreateAccountRequestDTO {
    * **RÀNG BUỘC AN TOÀN**: **KHÔNG CHO PHÉP XÓA** nếu chi nhánh đang chứa Xe (`vehicles.branch_id = branch.id`) hoặc có Booking/Hợp đồng đang hoạt động. Ném lỗi `BRANCH_HAS_ACTIVE_VEHICLES`.
    * Nếu thỏa mãn điều kiện không có dữ liệu liên kết: Thực hiện xóa bản ghi khỏi hệ thống hoặc vô hiệu hóa (`is_active = false`).
 
-#### D. Schema Bảng `branches` (Đã đồng bộ Migration V6)
+#### D. Schema Bảng `branches`
 ```sql
 CREATE TABLE branches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -662,7 +673,7 @@ CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
      * *Bên phải*: **Avatar Người dùng / Admin** -> Bấm mở Menu thông tin cá nhân, tên Tenant hiện tại, đổi tài khoản & đăng xuất.
    * **Sub-Header Bar (Thanh thông tin Quota & Gói cước)**:
      * *Bên trái*: Text hiển thị thông tin số lượng/Quota: `Chi nhánh (2/3)`.
-     * *Bên phải*: Badge thông tin gói cước: `Gói Growth` (Hoặc nút `Nâng cấp` khi tiệm cận/vượt trần quota).
+     * *Bên phải*: Badge thông tin gói cước: `Gói PRO` (Hoặc nút `Nâng cấp` khi tiệm cận/vượt trần quota).
    * **Khu vực Tìm kiếm & Lọc**: Ô Input `🔍 Tìm theo tên, SĐT, địa chỉ...` và các Filter Chips cuộn ngang (`[Tất cả]`, `[Hoạt động]`, `[Tạm ngưng]`).
    * **Floating Action Button (FAB)**: Nút tròn `+` nổi bay ở góc dưới bên phía phải màn hình (Bottom-Right Floating), cố định khi cuộn danh sách, bấm vào để mở Form Thêm Chi Nhánh.
 
@@ -703,7 +714,7 @@ CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
 #### B. Phân quyền & Quota Cước (`max_vehicles`)
 1. **Phân quyền**:
    * `TENANT_ADMIN`: Full CRUD đối với Xe. Được phép thêm, sửa, đổi trạng thái bảo dưỡng, đổi chi nhánh và xóa xe.
-   * `STAFF`: Quản lý danh sách xe tại chi nhánh được phân công (Read-only Loại xe, cập nhật Odo / Trạng thái bảo dưỡng / đổi vị trí xe đỗ).
+   * `STAFF`: Quản lý danh sách xe tại chi nhánh được phân công (Read-only Loại xe, cập nhật trạng thái bảo dưỡng / đổi vị trí đỗ xe `parking_location`).
    * `SALE`: Read-only danh sách xe trống trên toàn hệ thống để tư vấn booking.
 2. **Kiểm soát Hybrid SaaS Quota (`max_vehicles`)**:
    * Gói **FREE, BASIC, PRO, ENTERPRISE**
@@ -725,37 +736,36 @@ CREATE INDEX idx_branches_tenant_id ON branches(tenant_id);
      * 🚗 **Quản lý Xe** (`/fleet/vehicles`)
      * 🏷️ **Quản lý Loại xe** (`/fleet/vehicle-types`)
 2. **Màn hình Quản lý Xe (`/fleet/vehicles`)**:
-   * **Top Summary Widget**: Hiển thị Quota `Xe (12/15) - Gói Starter` + Badges thống kê tương tác (`8 Sẵn sàng` 🟢 | `3 Đang thuê` 🔵 | `1 Bảo dưỡng` 🔴).
+   * **Top Summary Widget**: Hiển thị Quota `Xe (12/15) - Gói BASIC` + Badges thống kê tương tác (`8 Sẵn sàng` 🟢 | `3 Đang thuê` 🔵 | `1 Bảo dưỡng` 🔴).
    * **Search & Filters**: Input tìm kiếm biển số/model, Horizontal filter chips status, Dropdown lọc theo Chi nhánh.
-   * **Vehicle Cards**: Card xe 16:9 thumbnail, biển số, model, chi nhánh, odo, nhiên liệu. Nút nổi bật `⚡ Cập nhật Odo & Trạng thái` (Mở Bottom Sheet trong 3 giây) + Icon `⋮` mở menu tác vụ đầy đủ.
-   * **Wizard Form 3 Bước (Thêm/Sửa Xe)**: Bước 1: Cơ bản ➔ Bước 2: Thông số vận hành ➔ Bước 3: Upload 1-5 ảnh thực tế.
-3. **Màn hình Quản lý Loại xe (`/fleet/vehicle-types`)**:
-   * **Card Loại xe**: Tên phân khúc, Đơn giá thuê cơ bản/ngày (xanh nổi bật), Số lượng xe thuộc loại, Nút `✏️ Sửa` & `🗑️ Xóa`.
-   * **Smart Safety Delete Modal**: Cảnh báo khi xóa loại xe còn dữ liệu xe liên kết, hỗ trợ điều hướng nhanh sang danh sách xe để chuyển phân khúc.
+   * **Vehicle Cards**: Card xe 16:9 thumbnail, biển số, model, đơn giá thuê/ngày (`price_per_day`), chi nhánh, vị trí đỗ thực tế (`parking_location`). Nút nổi bật `⚡ Cập nhật trạng thái` (Mở Bottom Sheet trong 3 giây) + Icon `⋮` mở menu tác vụ đầy đủ.
+   * **Wizard Form 3 Bước (Thêm/Sửa Xe)**: Bước 1: Cơ bản (biển số, model, loại xe) ➔ Bước 2: Giá thuê (`price_per_day`, `weekend_price_per_day`) & hạn đăng kiểm/bảo hiểm ➔ Bước 3: Upload 1–5 ảnh thực tế.
+3. **Màn hình Danh mục Loại xe (`/fleet/vehicle-types`)**:
+   * **Phạm vi phân quyền:** `vehicle_types` là danh mục dùng chung toàn hệ thống (**System-wide**, không có cột giá sàn) do **`SUPER_ADMIN`** quản lý (CRUD tại Admin Portal).
+   * **Phía Tenant (`TENANT_ADMIN` / `STAFF`):** Chỉ xem Read-only (tên phân khúc, mô tả, số lượng xe thuộc phân khúc đó) và chọn khi thêm mới xe.
+   * **Smart Safety Delete Modal (dành cho `SUPER_ADMIN`):** Cảnh báo khi xóa loại xe còn dữ liệu xe liên kết trên hệ thống.
 
 ---
 
 ## 10. Hướng Dẫn Kiểm Thử Cục Bộ & Dữ Liệu Seed (Local Verification Guide)
 
-### 10.1 Dữ liệu Tài khoản Mẫu Đã Cấu Hình Sẵn (Seed Credentials)
+### 10.1 Dữ liệu Tài khoản Mẫu Đã Cấu Hình Sẵn (Seed Credentials trong `V2__seed_system_data.sql`)
 
-> 🔑 **Mật khẩu dùng chung cho tất cả tài khoản:** `Hieudvt@123`
+> 🔑 **Mật khẩu dùng chung cho tất cả tài khoản:** **`Hieudvt@123`** *(Lưu ý: comment cũ trong `V2__seed_system_data.sql` ghi nhầm `password123`, nhưng hash BCrypt thực tế là `Hieudvt@123`)*
 
 | Email | Vai trò | Phạm vi Nhà xe | Chi nhánh được gán | Mục đích kiểm thử |
 | :--- | :--- | :--- | :--- | :--- |
 | `superadmin@carrental.vn` | `SUPER_ADMIN` | Toàn hệ thống | Không giới hạn | Kiểm tra luồng bypass tenant, quản trị cấp cao nhất |
-| `minh.admin@rentcarhanoi.vn` | `TENANT_ADMIN` | RentCar Hà Nội | Toàn bộ 3 chi nhánh (*Central HN, Cầu Giấy, Đống Đa*) | Kiểm tra luồng chủ xe tự do switch vào bất kỳ chi nhánh nào |
-| `lan.staff@rentcarhanoi.vn` | `STAFF` | RentCar Hà Nội | 2 chi nhánh (*Central HN, Cầu Giấy*) | Kiểm tra luồng nhân viên bị giới hạn (vào Đống Đa bị 403) |
-| `multi.user@carrental.vn` | `STAFF` | Hà Nội & Sài Gòn | Đa nhà xe | Kiểm tra luồng chọn nhà xe (`select-tenant`) trước khi vào chi nhánh |
-| `mai.admin@saigonauto.vn` | `TENANT_ADMIN` | Sài Gòn Auto | Toàn bộ chi nhánh Sài Gòn | Kiểm tra chống tấn công chéo nhà xe (IDOR) |
-| `locked.user@rentcarhanoi.vn` | `STAFF` | RentCar Hà Nội | Đã bị khóa (`is_active = false`) | Kiểm tra chặn đăng nhập tài khoản bị khóa (401) |
+| `admin@rentcarhanoi.vn` | `TENANT_ADMIN` | RentCar Hà Nội | Toàn bộ 2 chi nhánh (*Cầu Giấy, Đống Đa*) | Kiểm tra luồng chủ xe tự do switch vào bất kỳ chi nhánh nào |
+| `staff@rentcarhanoi.vn` | `STAFF` | RentCar Hà Nội | 2 chi nhánh (*Cầu Giấy, Đống Đa*) | Kiểm tra luồng nhân viên bãi xe giao/nhận xe và quản lý đơn |
+| `sale@rentcarhanoi.vn` | `SALE` | RentCar Hà Nội | Toàn bộ chi nhánh active của Tenant | Kiểm tra luồng kinh doanh tạo đơn đặt xe và tính hoa hồng |
 
 ### 10.2 Các Bước Kiểm Thử API Trên Swagger UI (`/swagger-ui/index.html`)
 
 1. **Khởi động server:** Di chuyển vào `backend/` và chạy `mvn spring-boot:run`.
 2. **Mở Swagger:** Truy cập `http://localhost:8080/swagger-ui/index.html`.
 3. **Thực hiện chuỗi kiểm thử:**
-   - **Bước 1:** Gọi `POST /api/v1/auth/login` với `minh.admin@rentcarhanoi.vn` $\rightarrow$ Copy chuỗi `accessToken` nhận được.
+   - **Bước 1:** Gọi `POST /api/v1/auth/login` với `admin@rentcarhanoi.vn` / `Hieudvt@123` $\rightarrow$ Copy chuỗi `accessToken` nhận được.
    - **Bước 2:** Bấm nút **Authorize** ở góc phải Swagger, dán token vào ô `Value` (Swagger sẽ tự thêm tiền tố `Bearer`).
    - **Bước 3:** Gọi tiếp các API cần quyền như `POST /api/v1/auth/switch-branch` hoặc `POST /api/v1/auth/select-tenant`.
 
@@ -773,7 +783,7 @@ backend/src/main/java/com/carrental/car_rental_backend/
 │   ├── dto/                    # Request/Response DTOs (Login, SelectTenant, SwitchBranch...)
 │   └── service/                # AuthService, CustomUserDetailsService & Impl
 ├── branch/                     # Phân hệ Chi nhánh
-│   ├── entity/                 # Branch entity (Chuẩn hóa V6)
+│   ├── entity/                 # Branch entity (Đồng bộ Squash Migration V1)
 │   └── repository/             # BranchRepository
 ├── common/                     # Thư viện dùng chung
 │   ├── constant/               # RoleConstant (SUPER_ADMIN, TENANT_ADMIN, STAFF, SALE)

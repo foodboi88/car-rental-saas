@@ -1,3 +1,6 @@
+> [!NOTE]
+> **[COMPLETED / DONE]** Toàn bộ 11 Task sửa lỗi & tối ưu hóa trong kế hoạch này đã được triển khai hoàn tất trên nhánh `feature/refactor-auth`. Tài liệu được lưu lại để phục vụ đối chiếu lịch sử bảo mật & concurrency.
+
 # 📋 KẾ HOẠCH CHI TIẾT SỬA LỖI & TỐI ƯU HÓA TOÀN DIỆN (SYSTEM FIXES SPECIFICATION)
 > **Dự án:** Car Rental SaaS  
 > **Ngày lập kế hoạch:** 2026-11-19  

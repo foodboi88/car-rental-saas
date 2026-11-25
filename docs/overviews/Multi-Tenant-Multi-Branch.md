@@ -405,11 +405,15 @@ Context: tenant_id = "TN-01", active_branch_id = "BR-HN-01"
 ┌─────────────────────────────────────────────────────────────────┐
 │ BƯỚC 2: RÀNG BUỘC PHẠM VI DỮ LIỆU (ABAC tại Service Layer)     │
 ├─────────────────────────────────────────────────────────────────┤
-│ 1. Đọc tenant_id từ TenantContext (ThreadLocal).                │
-│ 2. Lấy active_branch_id từ Header ("X-Active-Branch-Id").       │
-│ 3. Kiểm tra User có thực sự thuộc active_branch_id này không:   │
-│    userBranchRepository.existsByUserIdAndBranchId(...)          │
-│    -> Nếu không thuộc -> Ném 403 Forbidden.                     │
+│ 1. Đọc tenant_id và active_branch_id từ TenantContext           │
+│    (được JwtAuthenticationFilter bóc từ JWT Claim đã ký).       │
+│ 2. Không dùng Header X-Active-Branch-Id để tránh 2 nguồn sự     │
+│    thật và chống giả mạo phía Client.                           │
+│ 3. Khi chuyển Tenant/Branch (/select-tenant, /switch-branch):   │
+│    ID đích truyền qua Request Body → Backend xác thực quyền     │
+│    (user_branches status = ACTIVE) rồi cấp JWT mới ngay!        │
+│    (TENANT_ADMIN muốn lọc danh sách/báo cáo theo 1 chi nhánh    │
+│     bất kỳ thì truyền Query Param ?branchId=... có check tenant)│
 └────────────────┬────────────────────────────────────────────────┘
                  │
                  ▼

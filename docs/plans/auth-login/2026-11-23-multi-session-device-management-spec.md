@@ -1,393 +1,410 @@
 # 📘 ĐẶC TẢ THIẾT KẾ KỸ THUẬT: PHÂN HỆ AUTH MULTI-SESSION & QUẢN LÝ THIẾT BỊ (DEVICE MANAGEMENT)
 
-> **Dự án:** Car Rental SaaS  
+> **Dự án:** Car Rental SaaS (Java 17 / Spring Boot 4.0.7 / PostgreSQL)  
 > **Module:** `auth` & `security`  
-> **Ngày cập nhật:** 23/11/2026  
+> **Ngày cập nhật:** 25/11/2026  
 > **Tác giả:** Tech Lead & Core Engineering Team  
-> **Trạng thái:** Brainstorming Approved $\rightarrow$ Implementation Specification  
+> **Trạng thái:** ✅ Spec Approved — Sẵn sàng lập kế hoạch & triển khai  
 
 ---
 
 ## 🏛️ 1. BỨC TRANH TOÀN CẢNH & ĐỘNG LỰC THAY ĐỔI (THE "WHY")
 
-### 1.1 Vấn nạn của cơ chế Single Session cũ (`current_session_id`)
-Ở phiên bản trước, hệ thống sử dụng một cột duy nhất `current_session_id UUID` trên bảng `users`. Mỗi khi có một lượt đăng nhập mới, hệ thống ghi đè UUID mới vào cột này. Ở `JwtAuthenticationFilter`, mỗi request gửi lên đều so sánh:
-```java
-// ❌ CƠ CHẾ CŨ: Người sau ghi đè và đá văng người trước
-if (!UUID.fromString(currentSessionId).equals(user.get().getCurrentSessionId())) {
-    throw new AppException(ErrorCode.UNAUTHORIZED, "Tài khoản này hiện đang có người sử dụng. Vui lòng đăng nhập lại !");
-}
-```
+### 1.1 Vấn nạn của cơ chế Single Session cũ (`users.current_session_id`)
+Ở phiên bản trước, hệ thống sử dụng một cột duy nhất `current_session_id UUID` trên bảng `users`. Mỗi khi có một lượt đăng nhập mới, hệ thống ghi đè UUID mới vào cột này, khiến mọi thiết bị đăng nhập trước đó lập tức bị đá văng ở `JwtAuthenticationFilter`.
 
-### 1.2 Thực tế vận hành nhà xe (Domain Reality):
-1. **Sếp / Chủ nhà xe (`TENANT_ADMIN`):** 
-   - Thường xuyên dùng song song 2 thiết bị: Sáng ngồi làm việc trên Laptop/PC văn phòng, trưa đi cafe/gặp khách thì mở **iPhone** check doanh thu.
-   - Với cơ chế cũ: Vừa mở điện thoại $\rightarrow$ PC văn phòng bị đá văng $\rightarrow$ Quay lại PC làm việc $\rightarrow$ Điện thoại lại bị đá văng. Trải nghiệm cực kỳ ức chế!
+### 1.2 Thực tế vận hành nhà xe (Domain Reality)
+1. **Sếp / Chủ nhà xe (`TENANT_ADMIN`):**
+   - Thường xuyên dùng song song 2 thiết bị: Sáng ngồi làm việc trên Laptop/PC văn phòng, trưa đi gặp khách mở **iPhone** xem doanh thu. Với Single Session, mở điện thoại là PC bị đá văng và ngược lại.
 2. **Nhân viên bãi xe (`STAFF`) — *Tử huyệt trải nghiệm người dùng*:**
-   - Khi đón khách tại quầy, nhân viên ngồi trong phòng lạnh dùng **PC để bàn** mở form tạo đơn và gõ hợp đồng thuê xe (`booking:create`).
-   - Ngay sau đó, nhân viên phải cầm **điện thoại/tablet** chạy ra bãi xe dưới trời nắng để chụp ảnh 4 góc xe, đồng hồ xăng, số ODO để làm thủ tục bàn giao xe (`booking:handover`).
-   - Nếu áp dụng Single Session: Vừa đăng nhập điện thoại ngoài bãi $\rightarrow$ PC trong quầy bị văng $\rightarrow$ **Toàn bộ form hợp đồng đang gõ dở 15 phút bị mất trắng!**
+   - Ngồi quầy dùng **PC để bàn** nhập form hợp đồng (`booking:create`), đồng thời cầm **điện thoại/tablet** ra bãi xe chụp ảnh hiện trạng 4 góc xe để bàn giao (`booking:handover`). Nếu đá phiên lẫn nhau, toàn bộ form hợp đồng đang nhập dở trên PC sẽ mất trắng.
 3. **Văn hóa "Tài khoản quầy" (Kiosk Account):**
-   - Các chi nhánh thường dùng chung 1 tài khoản cho cả ca trực (ví dụ: `staff_caugiay@rentcar.vn`). Nếu 2 nhân viên cùng trực 1 ca mà đăng nhập đá nhau thì công việc bàn giao xe hoàn toàn tê liệt.
+   - Nhiều chi nhánh dùng chung 1 tài khoản cho ca trực. Nếu 2 nhân viên cùng trực mà đăng nhập đá nhau thì quy trình bàn giao xe bị tê liệt.
 
-$\implies$ **Mục tiêu nâng cấp:** Chuyển đổi sang kiến trúc **Multi-Session có quản lý thiết bị**, cho phép một tài khoản đăng nhập đồng thời trên nhiều thiết bị (PC, điện thoại, tablet), tối đa 5 thiết bị active theo thuật toán đào thải **LRU (Least Recently Used)**, đồng thời hỗ trợ người dùng xem danh sách thiết bị và chủ động đăng xuất thiết bị lạ từ xa.
-
----
-
-## 🔬 2. GIẢI MÃ CÁC HIỂU LẦM KINH ĐIỂN CỦA DEV (MISTAKES & CLARIFICATIONS)
-
-*Phần này tập trung phân tích bản chất các vấn đề kỹ thuật chuyên sâu mà đội ngũ kỹ sư dễ ngộ nhận khi chuyển dịch từ Frontend sang Backend:*
+$\implies$ **Mục tiêu nâng cấp:** Chuyển đổi sang kiến trúc **Multi-Session có quản lý thiết bị** dựa trên bảng `user_sessions`, cho phép một tài khoản hoạt động đồng thời tối đa **5 thiết bị** theo thuật toán đào thải **LRU (Least Recently Used)**, áp dụng **Sliding Expiration** đồng bộ với Refresh Token TTL, hỗ trợ xem & đăng xuất thiết bị từ xa, chống lệch ngữ cảnh giữa nhiều tab trình duyệt (`X-Tenant-Id`), và dọn dẹp phiên rác định kỳ hàng đêm.
 
 ---
 
-### ❌ Hiểu lầm 1: "Tại sao không dùng Pessimistic Lock khóa luôn bản ghi khi người dùng mở form, đợi họ sửa xong bấm Lưu rồi mới nhả ra?"
+## 🔬 2. CÁC QUYẾT ĐỊNH KIẾN TRÚC CỐT LÕI (ARCHITECTURAL DECISIONS)
 
-* **Bản chất kỹ thuật (Tầng DB & HikariCP Connection Pool):**
-  - Pessimistic Lock (`SELECT ... FOR UPDATE`) bắt buộc phải **giữ chặt 1 Database Connection** từ bể kết nối HikariCP và duy trì transaction mở (`setAutoCommit(false)`).
-  - Cho đến khi transaction `commit()` hoặc `rollback()`, kết nối DB đó **hoàn toàn bị chiếm dụng**, không ai khác được dùng.
-* **Kịch bản thảm họa ngoài đời:**
-  - Nhân viên mở form bàn giao xe, sau đó quay sang uống trà sữa, đi vệ sinh 10 phút, hoặc quên tắt tab máy tính.
-  - Bể kết nối HikariCP (chỉ có 10 - 20 connection) bị chiếm dụng cạn kiệt! Toàn bộ khách hàng bên ngoài vào xem danh sách xe đều bị xoay tít và văng lỗi `ConnectionTimeoutException`.
-  - Chiếc xe bị khóa cứng ở CSDL, không một câu query nào (kể cả xem xe) chạm vào được!
-* 🍜 **Ẩn dụ đời sống Việt Nam:**
-  Như đi vào quán phở, vừa tới cửa chưa biết ăn gì đã lấy xích **khóa cứng luôn cái bàn ăn**, rồi ngồi lướt TikTok 45 phút không cho ai ngồi, quán phở tê liệt!
-* **Quy tắc sống còn:**
-  - **Pessimistic Lock (`FOR UPDATE`):** CHỈ ĐƯỢC PHÉP DÙNG trong **2 đến 5 mili-giây** tại thời điểm bấm nút chốt giao dịch nhạy cảm (như chốt giữ cọc xe - Hold Booking).
-  - **Optimistic Lock (`@Version`):** BẮT BUỘC DÙNG cho suốt thời gian người dùng mở form suy nghĩ và gõ phím!
+> [!NOTE]
+> **Tham chiếu tách biệt phạm vi:** Các phân tích chuyên sâu về **Concurrency Lock (Optimistic Lock `@Version` vs Pessimistic Lock `SELECT ... FOR UPDATE`)** cho các bảng nghiệp vụ `vehicles`, `bookings`, `customers` đã được tài liệu hóa tập trung tại [Database-Schema.md](../../overviews/Database-Schema.md#47-chiến-lược-quản-lý-phiên-đa-thiết-bị-multi-session--ma-trận-khóa-đồng-thời-concurrency-locking-matrix). Tài liệu này tập trung 100% vào đặc tả phân hệ **Auth Multi-Session & Device Management**.
 
----
+### 2.1 Tại sao thời hạn phiên là 7 ngày & Chọn Sliding Expiration?
+- **Nguồn gốc con số 7 ngày:** Lấy động từ cấu hình `jwt.refresh-token-expiration-ms` (`604800000` ms = 7 ngày) trong `application.yaml` — tuyệt đối **không hardcode số `7`** trong mã Java.
+- **Cân bằng UX & Bảo mật cho SaaS B2B:**
+  - *Access Token (15 phút):* Sống ngắn vì đi kèm mọi API request.
+  - *Refresh Token / Session TTL (7 ngày):* Nhân viên nghỉ cuối tuần hoặc nghỉ phép vài ngày quay lại vẫn không phải đăng nhập lại; nhưng nếu bỏ quên thiết bị/điện thoại **không dùng quá 7 ngày liên tiếp**, phiên sẽ tự hết hạn.
+- **Chính sách đã chốt — Sliding Expiration (Gia hạn trượt):**
+  - Mỗi thiết bị giữ một cặp `(Access Token, Refresh Token)` độc lập gắn với 1 dòng `user_sessions`.
+  - Mỗi lần gọi `/api/v1/auth/refresh-token` thành công, Backend **đồng bộ cả 3 nơi** về cùng mốc `now + refreshTokenExpirationMs`:
+    1. `exp` bên trong JWT Refresh Token mới.
+    2. `Max-Age` của HttpOnly Cookie `refreshToken`.
+    3. Cột `expires_at` (và `last_active_at`) trong bảng `user_sessions`.
 
-### ❌ Hiểu lầm 2: "Tại sao phải lưu `refresh_token_hash` vào DB? Chẳng phải gọi `jwt.verifyWith(secretKey)` là đủ biết token đúng rồi sao?"
+### 2.2 Tại sao LOẠI BỎ `refresh_token_hash` (KISS & YAGNI)?
+1. JWT là tấm vé tự chứng thực có chữ ký mật mã HMAC-SHA256 xác minh qua `jwtProvider.validateToken()`.
+2. Refresh Token đã chứa sẵn claim `current_session_id` (UUID). Khi kiểm tra chữ ký hợp lệ và tra `user_sessions` thấy khớp `(id, user_id)`, `is_revoked = false`, `expires_at > now` là đủ thu hồi tức thì và đảm bảo an toàn cho quy mô dự án.
+3. Không cần băm SHA-256 phức tạp và giúp giao diện `SessionManager` gọn nhẹ, sẵn sàng chuyển sang Redis.
 
-* **Gốc rễ ra đời của `refresh_token_hash`:**
-  - Trong các hệ thống ngân hàng/tài chính, người ta lưu chuỗi băm của Refresh Token vào DB để phát hiện tấn công **Token Replay Attack** (khi hacker trộm được chuỗi Refresh Token cũ mang đi xin token mới). Nếu so sánh hash không khớp với hash hiện tại trong DB $\rightarrow$ hệ thống phát hiện token bị đánh cắp và khóa tài khoản.
-* **Tại sao Car Rental SaaS LOẠI BỎ trường này (Triết lý YAGNI & KISS)?**
-  1. Bản thân **JWT là một tấm vé tự chứng thực (Self-contained)** có chữ ký mật mã an toàn qua `jwt.verifyWith(secretKey)`.
-  2. Bên trong Refresh Token đã mang sẵn `sessionId`. Khi gọi `/refresh-token`, Backend chỉ cần giải mã token, kiểm tra chữ ký bí mật và tra cứu `user_sessions` thấy `is_revoked == false` và chưa hết hạn là đủ xác thực 100%.
-  3. Bỏ trường này giúp loại bỏ hoàn toàn các bước băm SHA-256 phức tạp, không phải update DB liên tục mỗi lần refresh, giúp code nhẹ nhàng, dễ bảo trì và hiệu năng cao hơn gấp nhiều lần.
+### 2.3 Chiến lược Expand-and-Contract (Zero Git Conflict với nhánh `tenant`, `branch`, `user`)
+1. **Không xóa cột cũ:** Giữ nguyên cột `current_session_id` trong bảng `users` (không sửa `V1__init_schema.sql`) và gắn `@Deprecated` trên field `currentSessionId` trong `User.java`.
+2. **Không đổi API của `TenantContext`:** Giữ nguyên 100% các hàm `getTenantId()`, `getBranchId()`, `getUserId()`, `getRole()`, `getCurrentSessionId()`.
+3. **Cô lập tuyệt đối trong package `auth/`:** Toàn bộ Entity, Repository, Service, Scheduler mới (`UserSession`, `UserSessionRepository`, `SessionManager`, `DatabaseSessionManager`, `SessionCleanupTask`, `SessionController`) đặt gọn trong package `auth/` — không đụng vào các file nghiệp vụ ở `tenant/`, `branch/` và hạn chế tối đa chạm file ở `account/`.
+4. **Quy tắc Flyway bất biến:** Tuyệt đối không sửa `V1__init_schema.sql` hay `V2__seed_system_data.sql`; tạo mới `V3__create_user_sessions_table.sql` (chốt số `V3` với team để tránh trùng version khi merge).
 
----
-
-### ❌ Hiểu lầm 3: "Có nên đập `@Version` (Optimistic Lock) lên TOÀN BỘ mọi bảng trong CSDL không?"
-
-* **Tuyệt đối KHÔNG!** Phải áp dụng đúng nơi, đúng chỗ:
-  - **Bảng CẤM / KHÔNG CẦN DÙNG:**
-    - Bảng danh mục tĩnh (`permissions`, `vehicle_types`): 99.99% chỉ đọc (`READ-ONLY`), không ai sửa đè.
-    - Bảng liên kết N-N (`user_tenants`, `role_permissions`): Chỉ gồm các Foreign Keys, chỉ có thao tác `INSERT/DELETE`, không có nghiệp vụ `UPDATE`.
-    - Bảng lịch sử/nhật ký (`user_sessions`, `payment_logs`): Append-only, chỉ ghi thêm, không sửa dữ liệu quá khứ.
-  - **Bảng BẮT BUỘC DÙNG Optimistic Lock (`@Version`):**
-    - `vehicles`: Tránh Sale ở văn phòng sửa giá thuê ghi đè lên trạng thái Bảo dưỡng do Kỹ thuật ngoài bãi cập nhật.
-    - `bookings`: Tránh Nhân viên xác nhận cọc ghi đè lên thao tác tự động hủy đơn của Scheduler.
-    - `customers`: Bảo vệ cờ cảnh báo nợ xấu/rủi ro `is_risk` và thông tin CCCD/GPLX.
-  - **Trường hợp BẮT BUỘC DÙNG Pessimistic Lock:**
-    - **Tạo Booking giữ cọc xe:** Khi 2 khách cùng đặt 1 xe cùng giờ, thao tác là `INSERT INTO bookings` (2 bản ghi mới tinh, `@Version` hoàn toàn bất lực vì chưa có bản ghi cũ để so sánh). Phải dùng `SELECT ... FOR UPDATE` trên chiếc xe cha để khóa trong 2ms!
+### 2.4 Đa Tab cùng trình duyệt vs Đa Thiết bị trong Multi-Tenant
+- Cookie `refreshToken` được trình duyệt dùng chung theo Origin (`domain:port`) cho toàn bộ tab thường.
+- **Quy chuẩn:** Trên 1 profile trình duyệt, người dùng làm việc đồng nhất trên 1 Nhà xe. Để làm việc song song 2 Nhà xe khác nhau, dùng 2 thiết bị khác nhau hoặc 2 Profile trình duyệt / Tab ẩn danh (mỗi nơi 1 `sessionId` độc lập).
 
 ---
 
-### ❌ Hiểu lầm 4: "Tại sao Optimistic Lock bắt buộc phải có sự tham gia của Frontend?"
+## 🛡️ 3. PHÂN TÍCH 5 EDGE CASES "CHÍ MẠNG" CỦA AUTH & THIẾT KẾ PHÒNG VỆ
 
-Nhiều dev lầm tưởng: *"Optimistic Lock là chuyện của Backend với DB, Backend tự thêm `WHERE version = ...` lúc query là xong, liên quan gì tới Frontend?"*.
-* **Bản chất Stateless của HTTP REST API:**
-  1. Lúc 10:00, Frontend gọi `GET /vehicles/1` $\rightarrow$ Nhận JSON có `version: 1`. Ngay lập tức, kết nối đóng lại, server hoàn toàn giải phóng bộ nhớ! Server KHÔNG HỀ BIẾT người dùng đang mở form ngắm nghía.
-  2. Lúc 10:05, người khác sửa xe $\rightarrow$ Trong DB, `version` đã nhảy lên `2`.
-  3. Lúc 10:10, người dùng bấm Lưu (`PUT /vehicles/1`).
-  4. **NẾU FRONTEND KHÔNG GỬI KÈM `version: 1`:**
-     - Backend gọi `vehicleRepository.findById(1)`. Tại thời điểm 10:10, DB đang có `version = 2`!
-     - Backend gán giá trị mới và gọi `save()`. Hibernate thấy version trong đối tượng là 2 $\rightarrow$ Sinh SQL: `UPDATE vehicles SET ..., version = 3 WHERE id = 1 AND version = 2;` $\rightarrow$ **LƯU THÀNH CÔNG!**
-     - Dữ liệu người sửa lúc 10:05 bị **ghi đè mất trắng (Lost Update)** mà không có lỗi nào văng ra!
-* **Cách triển khai CHUẨN:**
-  - Vì Backend không giữ State trong suốt 10 phút người dùng gõ phím, nên **Frontend chính là nơi duy nhất giữ bằng chứng** rằng: *"Lúc tôi mở form, bản ghi đang ở version 1"*.
-  - Khi gửi `PUT`, Frontend bắt buộc phải đính kèm `"version": 1`. Backend so sánh: Version gửi lên (`1`) $\ne$ Version hiện tại trong DB (`2`) $\rightarrow$ Ném ngay `AppException(ErrorCode.CONFLICT, "Dữ liệu vừa được người khác cập nhật!")`.
+### 🔥 Edge Case 1: Trộn lẫn Tenant giữa 2 Tab trình duyệt (Cross-Tab Tenant Drift)
+- **Rủi ro:** Tab 2 đổi sang Nhà xe B làm ghi đè Cookie `refreshToken` $\rightarrow$ Tab 1 (đang mở màn hình Nhà xe A) thực hiện Silent Refresh nhận nhầm JWT của Nhà xe B $\rightarrow$ Lưu dữ liệu sang sai Nhà xe.
+- **Phòng vệ (Triển khai ngay trong đợt này):**
+  - Frontend (Angular HTTP Interceptor) tự động đính kèm Header `X-Tenant-Id` chứa `tenantId` mà tab hiện tại đang hiển thị.
+  - Ở `JwtAuthenticationFilter`: Với các request nghiệp vụ có `tenant_id` trong JWT, nếu Header `X-Tenant-Id` tồn tại:
+    - Parse UUID trong khối `try-catch (IllegalArgumentException)` và so khớp `headerTenantUUID.equals(jwtTenantUUID)`.
+    - Nếu **không khớp** hoặc **sai định dạng UUID** $\rightarrow$ Ném `AppException(ErrorCode.TENANT_CONTEXT_MISMATCH)` (**HTTP `409 Conflict`**) — tuyệt đối không để `IllegalArgumentException` rơi xuống lỗi `500`!
+  - **Miễn trừ không kiểm tra `X-Tenant-Id`:** `SUPER_ADMIN`, Pre-tenant user (`tenant_id == null`), và các endpoint cấp User / chuyển ngữ cảnh (`/api/v1/auth/select-tenant`, `/api/v1/auth/logout`, `/api/v1/auth/sessions/**`).
+  - **Tương thích Swagger / Postman:** Nếu client không gửi header `X-Tenant-Id` thì bỏ qua kiểm tra (Present-then-Verify).
+  - **Tại sao trả `409 Conflict` thay vì `401`?** Để Frontend phân biệt rạch ròi: `401` bật Re-Auth Modal nhập mật khẩu, còn `409 TENANT_CONTEXT_MISMATCH` hiển thị thông báo và reload/đồng bộ lại context của tab.
+  - **CORS bắt buộc:** Thêm `"X-Tenant-Id"` vào `AllowedHeaders` trong `SecurityConfig.corsConfigurationSource()`.
 
----
-
-### ❌ Hiểu lầm 5: "Sửa Auth sang Multi-Session có làm gãy code hoặc conflict với các nhánh `branch`, `tenant`, `user` đang code song song không?"
-
-* **Hoàn toàn KHÔNG (Zero-conflict)**, nếu tuân thủ nguyên tắc **"Expand and Contract"**:
-  1. **Không xóa cột cũ:** Cột `current_session_id` trên bảng `users` được giữ nguyên trong DB và trong entity `User.java` (đánh dấu `@Deprecated`). Không ai bị lỗi thiếu cột khi chạy code cũ.
-  2. **Không đổi hàm của Context:** `TenantContext` giữ nguyên 100% các hàm `getTenantId()`, `getBranchId()`, `getUserId()`. Các nhánh khác chỉ dùng các hàm này.
-  3. **Tạo bảng mới độc lập:** Chỉ viết migration tạo bảng `user_sessions`. Mọi thay đổi gói gọn trong package `auth/` và `security/`. Đồng đội merge vào sẽ mượt mà 100%!
-
----
-
-### ❌ Hiểu lầm 6: "Mở 2 Tab trên cùng 1 trình duyệt để làm việc ở 2 Nhà xe khác nhau có được không?"
-
-* **KHÔNG THỂ VÀ KHÔNG NÊN TRÊN CÙNG MỘT TRÌNH DUYỆT THƯỜNG!**
-  - **Bản chất Cookie:** Trình duyệt quản lý Cookie theo Origin (`domain:port`). Cookie `refreshToken` dùng chung cho toàn bộ các tab của trình duyệt đó.
-  - Nếu Tab 1 chọn Nhà xe Hà Nội, Tab 2 chọn Nhà xe Sài Gòn $\rightarrow$ Cookie bị ghi đè sang Sài Gòn $\rightarrow$ Khi Tab 1 Silent Refresh, nó sẽ bị kéo theo sang Nhà xe Sài Gòn!
-  - **Quy chuẩn:** Trên cùng 1 trình duyệt, người dùng làm việc đồng nhất trên 1 Nhà xe. Muốn làm việc trên 2 Nhà xe độc lập cùng lúc:
-    - Cách 1: Dùng 2 thiết bị khác nhau (ví dụ: PC mở Nhà xe Hà Nội, Điện thoại mở Nhà xe Sài Gòn $\rightarrow$ 2 Session ID khác nhau, chạy độc lập 100%).
-    - Cách 2: Trên cùng 1 PC nhưng dùng 2 Profile Chrome khác nhau (hoặc 1 Tab thường + 1 Tab ẩn danh Incognito).
-
----
-
-### ❌ Hiểu lầm 7: "Kiểm tra ràng buộc chéo (Cross-Tenant Validation) là gì?"
-
-* **Khái niệm:** Là nguyên tắc **TUYỆT ĐỐI KHÔNG TIN TƯỞNG MÙ QUÁNG VÀO CÁC ID CLIENT GỬI LÊN**, mọi truy vấn đều phải đối chiếu chéo với `tenant_id` lấy từ Token xác thực.
-* **Ví dụ chống IDOR:**
-  - Token của user mang `tenant_id = A`.
-  - User gửi request cập nhật chi nhánh: `PUT /api/v1/branches/{id_chi_nhanh_B}`.
-  - Service bắt buộc phải query: `branchRepository.findByIdAndTenantId(branchId, tenantId)`. Chi nhánh B thuộc Nhà xe B nên câu query trả về rỗng $\rightarrow$ Ném lỗi `403 Forbidden` ngay lập tức!
-
----
-
-## 🛡️ 3. PHÂN TÍCH 5 EDGE CASES "CHÍ MẠNG" & THIẾT KẾ PHÒNG VỆ
-
-Dưới đây là 5 kịch bản rủi ro cao nhất trong thực tế có thể gây tổn thất kinh doanh, xáo trộn dữ liệu hoặc hủy hoại uy tín nhà xe, kèm giải pháp thiết kế triệt để:
-
-### 🔥 Edge Case 1: Trộn lẫn Tenant giữa 2 Tab trình duyệt (Cross-Tenant Data Bleed)
-- **Rủi ro:** Tab 2 chuyển tenant làm ghi đè cookie `refreshToken` $\rightarrow$ Tab 1 refresh token bị đổi sang tenant của Tab 2 $\rightarrow$ Lưu nhầm đơn hàng của nhà xe này sang nhà xe khác.
+### 🔥 Edge Case 2: Đào thải nhầm phiên đang nhập dở Form (Blind LRU Eviction)
+- **Rủi ro:** Nhân viên nhập hợp đồng trong thời gian dài, bị thiết bị thứ 6 đẩy ra theo LRU $\rightarrow$ Bấm Lưu gặp `401`.
 - **Phòng vệ:**
-  - Trên 1 trình duyệt, yêu cầu đồng nhất 1 tenant context.
-  - Header request từ Frontend gửi kèm `X-Tenant-Id` của giao diện hiện tại. Backend so sánh với `tenant_id` trong JWT: nếu không khớp $\rightarrow$ Từ chối và bắt Frontend reload lại context!
+  - **Backend (KISS):** Giữ thuật toán LRU tinh gọn (`ORDER BY last_active_at ASC`) kết hợp cập nhật `last_active_at` có ngưỡng **Throttle 5 phút** trong Filter để phản ánh chính xác thiết bị nào thực sự đang tương tác.
+  - **Frontend (Auto-Save & Re-Auth Modal):** Tự lưu nháp form vào `localStorage`; khi nhận `401 Unauthorized` không reload trang mà mở **Re-Auth Modal** đăng nhập tại chỗ lấy token mới rồi tự động retry request lưu form.
 
-### 🔥 Edge Case 2: Đào thải nhầm phiên đang làm thủ tục bàn giao xe & nhận cọc (Blind LRU Eviction)
-- **Rủi ro:** Nhân viên quầy đón khách VIP, đếm cọc 50 triệu và kiểm tra xe trong 25 phút không gọi API. Sếp ở ngoài đăng nhập liên tiếp thiết bị mới làm phiên máy quầy bị LRU thu hồi. Nhân viên bấm Lưu đơn bị lỗi 401 $\rightarrow$ Văng trang Login, mất trắng form!
-- **Phòng vệ (Đỉnh cao KISS & UX):**
-  - **Backend (KISS/YAGNI):** Giữ nguyên thuật toán LRU tinh gọn, không thêm cờ ưu tiên hay timer phức tạp: `ORDER BY last_active_at ASC LIMIT 1`.
-  - **Frontend (Auto-Save & Re-Auth Modal):** 
-    - Form nhập liệu tự động lưu nháp liên tục vào `localStorage`.
-    - Khi nhận lỗi `401 Unauthorized` do bị đá phiên LRU: Frontend **không tải lại trang (No Reload)**, mà bật ngay một **Modal Popup đăng nhập lại tại chỗ**: *"Phiên làm việc trên thiết bị này đã hết hạn. Vui lòng nhập mật khẩu để tiếp tục lưu đơn!"*.
-    - Nhập xong có token mới $\rightarrow$ Tự động bấm Lưu lại đơn hàng! Không mất 1 ký tự, khách không phải chờ!
+### 🔥 Edge Case 3: Cửa sổ 15 phút Zombie Token & Quy tắc Atomic Revocation (Khóa tài khoản / Đổi & Reset mật khẩu)
+- **Rủi ro:** Nhân viên gian lận bị khóa tài khoản, bị mất điện thoại, hoặc nghỉ việc (cần đổi mật khẩu tài khoản quầy dùng chung) nhưng Access Token cũ vẫn còn hạn 15 phút hoặc Refresh Token cũ sống dài hạn với Sliding Expiration để trộm dữ liệu khách hàng (CCCD, SĐT).
+- **Phòng vệ — Quy tắc Atomic Revocation (áp dụng bắt buộc cho cả module `account`):**
+  1. **Admin khóa tài khoản (`is_active = false`) hoặc Admin reset mật khẩu nhân viên:** Trong cùng transaction, khóa dòng `User` (`findByIdForUpdate`), cập nhật trạng thái/mật khẩu mới và **bắt buộc gọi `sessionManager.revokeAllByUserId(userId)`** để thu hồi toàn bộ thiết bị ngay lập tức.
+  2. **Người dùng tự đổi mật khẩu:** Sau khi cập nhật `password_hash`, **bắt buộc gọi `sessionManager.revokeAllOtherSessions(userId, currentSessionId)`** (đá toàn bộ thiết bị lạ, chỉ giữ lại đúng thiết bị đang thao tác đổi mật khẩu).
+  3. Tại `JwtAuthenticationFilter`: Mọi request đều qua `sessionManager.validateAndTouchSession(sessionId, userId)` và `CustomUserDetailsService` (`user.isActive = true`) $\rightarrow$ Chặn đứng kẻ xấu trong tích tắc.
 
-### 🔥 Edge Case 3: Lệch vị trí thực tế của xe do "Stale Branch Context"
-- **Rủi ro:** Nhân viên sáng trực Cầu Giấy, chiều sang Đống Đa làm thủ tục nhận trả xe nhưng quên bấm đổi chi nhánh trên điện thoại (Token vẫn mang Cầu Giấy) $\rightarrow$ Xe thực tế ở Đống Đa nhưng phần mềm lưu ở Cầu Giấy $\rightarrow$ Hôm sau khách tới Cầu Giấy không có xe giao.
-- **Phòng vệ:**
-  - Khi làm thủ tục Bàn giao (`handover`) và Nhận lại xe (`return`): Backend **lấy chi nhánh từ chính đơn hàng (`booking.getBranchId()`)**, TUYỆT ĐỐI KHÔNG tin vào `activeBranchId` trong token!
-  - Màn hình danh sách đơn hàng đã tự động lọc `WHERE branch_id = :activeBranchId`, nhân viên ở sai chi nhánh sẽ không thấy đơn hiển thị, buộc phải bấm đổi sang đúng chi nhánh.
+### 🔥 Edge Case 4: Race Condition khi Login đồng thời (TOCTOU vượt 5 thiết bị & Ghi đè Lockout - R04)
+- **Tại sao ở Single Session cũ chỉ cần Atomic Conditional Update, còn sang Multi-Session BẮT BUỘC phải chuyển sang Pessimistic Lock trên dòng `users`?**
+  - Ở **Single Session cũ**, đăng nhập chỉ là 1 câu `UPDATE users SET current_session_id = ... WHERE id = :id AND is_active = true` — tự nguyên tử trên 1 dòng.
+  - Ở **Multi-Session mới**, đăng nhập là chuỗi nhiều thao tác trên **2 bảng (`users` + `user_sessions`)** kết thúc bằng lệnh **`INSERT` dòng mới vào `user_sessions`** (lệnh `INSERT` dòng mới khiến Optimistic Lock `@Version` bất lực).
+- **Hai kịch bản lỗi chắc chắn xảy ra nếu KHÔNG khóa dòng `User`:**
+  1. **Lỗi 1 — Vượt trần 5 thiết bị (TOCTOU):** User đang có 4 thiết bị active. Thiết bị 5 và 6 bấm Login cùng 1 mili-giây $\rightarrow$ cả 2 luồng cùng `SELECT` thấy `count = 4` $\rightarrow$ cả 2 đều bỏ qua bước đào thải LRU $\rightarrow$ cả 2 cùng `INSERT` $\rightarrow$ DB lọt lên **6 thiết bị active**! *(Tương tự, nếu đang có 5 thiết bị, cả 2 luồng cùng chọn thu hồi đúng thiết bị #1 rồi cả 2 cùng `INSERT` $\rightarrow$ vẫn lòi ra **6 thiết bị active**!)*
+  2. **Lỗi 2 — Mất bản vá R04 khi Admin khóa tài khoản đồng thời:**
+     - `t = 1ms`: Luồng Login đọc thấy `users.is_active = true`.
+     - `t = 2ms`: Admin bấm Khóa tài khoản (`is_active = false` + `revokeAllByUserId`) và `COMMIT`.
+     - `t = 3ms`: Luồng Login chạy tiếp `INSERT INTO user_sessions (..., is_revoked = false)` $\rightarrow$ DB sinh ra trạng thái rác mâu thuẫn: tài khoản đã bị khóa nhưng lại có 1 phiên mới đang `is_revoked = false`!
+- **Phòng vệ (Row Lock 2–5ms trên dòng cha `users` làm Mutex — Tách BCrypt ra NGOÀI Transaction):**
+  - **CẤM đặt `@Transactional` ở cấp Class `AuthServiceImpl`!** Trong `login()`:
+    1. Chạy `userRepository.findByEmail()` và `passwordEncoder.matches()` (BCrypt tốn 50–100ms CPU) **hoàn toàn NGOÀI Transaction** $\rightarrow$ không mượn/giữ HikariCP DB Connection khi CPU đang băm mật khẩu (chống cạn Connection Pool khi bị spam sai mật khẩu!).
+    2. Sau khi mật khẩu hợp lệ mới mở Transaction ngắn bằng `TransactionTemplate`:
+       - Khóa cấp dòng bản ghi `User` bằng `@Lock(LockModeType.PESSIMISTIC_WRITE)` (`SELECT * FROM users WHERE id = :userId FOR UPDATE`).
+       - Kiểm tra lại `user.getIsActive()` (nếu bị khóa đúng tích tắc đó $\rightarrow$ ném `401 UNAUTHORIZED`).
+       - Cập nhật `user.setLastLoginAt(now)`.
+       - Truy vấn các phiên active (`ORDER BY last_active_at ASC, created_at ASC`). Nếu `size >= MAX_ACTIVE_SESSIONS (5)`, thu hồi **tất cả các phiên dư** (`size - 5 + 1`) rồi `INSERT` phiên `UserSession` mới.
+       - Commit nhả khóa ngay sau ~2–5ms!
 
-### 🔥 Edge Case 4: Cửa sổ 15 phút của Access Token khi Nhân viên bị sa thải (Zombie Token Window)
-- **Rủi ro:** Sếp bấm khóa tài khoản và thu hồi thiết bị của nhân viên gian lận. Nhưng Access Token cũ vẫn còn hạn 15 phút về mặt mật mã $\rightarrow$ Nhân viên vẫn gọi API tải trộm dữ liệu khách hàng.
-- **Phòng vệ:**
-  - **Khóa tài khoản "Một phát chết toàn bộ":** Khi khóa tài khoản, Service thực hiện nguyên tử:
-    ```java
-    user.setIsActive(false);
-    userSessionRepository.revokeAllByUserId(userId);
-    ```
-  - Trong `JwtAuthenticationFilter`: Bắt buộc kiểm tra `session.isRevoked == false` ở mọi request $\rightarrow$ Chặn đứng 100% các thiết bị của kẻ gian trong vòng 0.001 giây!
-
-### 🔥 Edge Case 5: "Song kiếm hợp bích" — Cùng 1 nghiệp vụ Booking kết hợp cả 2 loại Lock
-- **Rủi ro:** 
-  - Nguy cơ 1: 2 khách cùng đặt 1 xe cùng khung giờ (Double Booking).
-  - Nguy cơ 2: Đơn đang chờ cọc, Sale ở văn phòng bấm xác nhận cọc chuyển khoản, Nhân viên bãi cùng lúc bấm xác nhận cọc tiền mặt $\rightarrow$ Đơn ghi nhận 2 lần cọc (Double Payment), lệch sổ sách kế toán.
-- **Phòng vệ (Song kiếm hợp bích):**
-  ```
-  [ GIAI ĐOẠN 1: TẠO ĐƠN MỚI (INSERT) ]
-  👉 DÙNG PESSIMISTIC LOCK TRÊN XE (2 mili-giây)
-  - Khóa chiếc xe cha: SELECT * FROM vehicles WHERE id = :id FOR UPDATE;
-  - Check xem khung giờ có bị ai chiếm chưa -> Insert booking mới.
-  - Nhả khóa xe ngay! Chống Double Booking tuyệt đối 100%.
-
-                       │
-                       ▼
-  [ GIAI ĐOẠN 2: TÁC NGHIỆP TRÊN ĐƠN ĐÃ CÓ (UPDATE) ]
-  👉 DÙNG OPTIMISTIC LOCK TRÊN BOOKING (@Version)
-  - Đơn đã nằm trong DB (version = 1).
-  - Thao tác xác nhận cọc, bàn giao, trả xe đều kiểm tra @Version.
-  - Ai bấm trước thành công (version lên 2), người bấm sau bị ném lỗi Conflict:
-    "Đơn này đã được xác nhận thanh toán trước đó!". Chống Double Payment triệt để!
-  ```
+### 🔥 Edge Case 5: Nhân viên bấm "Đăng xuất" khi Access Token đã hết hạn (>15 phút nghỉ tay)
+- **Rủi ro thực tế tại máy quầy:** Cuối ca trực, nhân viên để máy nghỉ 20 phút (Access Token 15p đã hết hạn) rồi bấm **Đăng xuất** để bàn giao máy cho ca sau. Nếu `/api/v1/auth/logout` yêu cầu Bearer Access Token hợp lệ, Filter sẽ chặn `401` $\rightarrow$ UI bật Re-Auth Modal bắt nhập mật khẩu chỉ để... đăng xuất, hoặc không gọi được Backend để xóa **HttpOnly Cookie `refreshToken`** (vì JS bị cấm đụng HttpOnly Cookie!) $\rightarrow$ Ca sau mở máy vẫn tự động vào tài khoản ca trước!
+- **Phòng vệ (Idempotent Logout):**
+  - Cấu hình `POST /api/v1/auth/logout` là **`permitAll()`** ở `SecurityConfig` và đưa vào `PUBLIC_ENDPOINTS` (`shouldNotFilter`) của `JwtAuthenticationFilter` để Access Token hết hạn **không bao giờ bị Filter chặn 401**.
+  - Trong `AuthServiceImpl.logout(String authorizationHeader, String refreshTokenCookie)`:
+    1. Nếu có Bearer Access Token hợp lệ $\rightarrow$ lấy `(userId, sessionId)` từ Access Token.
+    2. Nếu Access Token thiếu hoặc đã hết hạn $\rightarrow$ **fallback đọc `(userId, sessionId)` từ HttpOnly Cookie `refreshToken`** (có verify chữ ký & `token_type = REFRESH` qua `jwtProvider`).
+    3. Nếu trích xuất được `(userId, sessionId)` hợp lệ $\rightarrow$ gọi `sessionManager.revokeSession(userId, sessionId)` đánh dấu `is_revoked = true` trong DB.
+    4. **Luôn trả `200 OK` và gửi `Set-Cookie: refreshToken=; Max-Age=0`** (dù cả 2 token đều đã hết hạn/rỗng) để đảm bảo trình duyệt chắc chắn xóa sạch Cookie! *(Chống tấn công CSRF ép đăng xuất đã được bảo vệ bởi `SameSite=Strict` trên Cookie).*
 
 ---
 
 ## 🗄️ 4. ĐẶC TẢ CƠ SỞ DỮ LIỆU (DATABASE SPECIFICATION)
 
-### 4.1 Migration File: `V8__create_user_sessions_table.sql`
-Đường dẫn: `backend/src/main/resources/db/migration/V8__create_user_sessions_table.sql`
+### 4.1 Migration File: `V3__create_user_sessions_table.sql`
+- **Đường dẫn:** `backend/src/main/resources/db/migration/V3__create_user_sessions_table.sql`
+- **Lưu ý phối hợp nhóm:** Do thư mục `db/migration/` đã được squash còn `V1` & `V2`, migration mới bắt buộc đánh số **`V3`** (thông báo nhóm chốt số `V3` để tránh trùng version khi merge với nhánh `tenant`/`user`).
 
 ```sql
--- Migration V8: Quản lý Phiên đăng nhập Đa thiết bị (Multi-Session & Device Management)
+-- Migration V3: Quản lý Phiên đăng nhập Đa thiết bị (Multi-Session & Device Management)
 
 CREATE TABLE IF NOT EXISTS user_sessions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),               -- Mã phiên (Session ID mang trong JWT Token)
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,-- Người dùng sở hữu phiên
-    device_name VARCHAR(255),                                    -- Tên thiết bị/trình duyệt (Parse từ User-Agent)
-    ip_address VARCHAR(45),                                      -- Địa chỉ IP lúc đăng nhập (IPv4 hoặc IPv6)
-    is_revoked BOOLEAN NOT NULL DEFAULT FALSE,                   -- TRUE: Đã đăng xuất / bị thu hồi
-    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Thời điểm gọi API gần nhất (phục vụ LRU)
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,                -- Thời điểm hết hạn phiên (theo hạn Refresh Token)
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP-- Thời điểm tạo phiên
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),                      -- Mã phiên (Session ID mang trong JWT claim current_session_id)
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,       -- Người dùng sở hữu phiên
+    device_name VARCHAR(255) NOT NULL DEFAULT 'Unknown Device',         -- Tên thiết bị/trình duyệt (Parse từ User-Agent, cắt tối đa 255 ký tự)
+    ip_address VARCHAR(45),                                             -- Địa chỉ IP lúc đăng nhập (IPv4 hoặc IPv6, tối đa 45 ký tự)
+    is_revoked BOOLEAN NOT NULL DEFAULT FALSE,                          -- TRUE: Đã đăng xuất / bị đá từ xa / bị đào thải LRU
+    last_active_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Thời điểm tương tác gần nhất (Throttle 5 phút, phục vụ LRU)
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,                       -- Thời điểm hết hạn phiên (Sliding Expiration: now + refresh-token-expiration-ms)
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP      -- Thời điểm tạo phiên
 );
 
--- Index tra cứu phiên của người dùng
-CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+-- Composite Index tối ưu: (1) Tra cứu phiên theo user_id (left-most prefix),
+-- (2) Đếm phiên active & sắp xếp LRU theo last_active_at ASC, (3) Lấy danh sách thiết bị đang online
+CREATE INDEX IF NOT EXISTS idx_user_sessions_lru
+    ON user_sessions(user_id, is_revoked, last_active_at);
 
--- Composite Index tối ưu truy vấn đếm phiên active và tìm phiên cũ nhất để đào thải LRU
-CREATE INDEX IF NOT EXISTS idx_user_sessions_lru ON user_sessions(user_id, is_revoked, last_active_at);
+-- Index phục vụ Scheduled Cleanup Job quét bản ghi hết hạn hoặc đã thu hồi quá hạn audit
+CREATE INDEX IF NOT EXISTS idx_user_sessions_cleanup
+    ON user_sessions(expires_at, is_revoked);
 ```
 
-### 4.2 Giải thích chi tiết các trường bảng `user_sessions`
-- **`id` (UUID PK):** Đóng vai trò là `sessionId`. Giá trị này được inject vào JWT Claims:
-  - Access Token: claim `"current_session_id"` hoặc `"session_id"`.
-  - Refresh Token: claim `"current_session_id"` hoặc `"session_id"`.
-- **`user_id` (UUID FK):** Khóa ngoại tham chiếu đến bảng `users`. Khai báo `ON DELETE CASCADE` để khi xóa người dùng thì toàn bộ phiên đăng nhập tự động dọn sạch.
-- **`device_name` (VARCHAR):** Chuỗi định danh thiết bị thân thiện (ví dụ: *"Chrome 120 on Windows 11"*, *"Safari on iOS"*). Backend tự động bóc tách từ Header `User-Agent`.
-- **`ip_address` (VARCHAR):** Lưu IP đăng nhập để hiển thị trên màn hình kiểm tra an ninh tài khoản.
-- **`is_revoked` (BOOLEAN):** 
-  - `FALSE`: Phiên đang hoạt động bình thường.
-  - `TRUE`: Phiên đã bị hủy (do người dùng bấm Đăng xuất, bị đá từ xa, hoặc bị đào thải LRU).
-- **`last_active_at` (TIMESTAMPTZ):** Cập nhật mỗi khi có tương tác hoặc refresh token. Căn cứ để thuật toán LRU chọn phiên có `last_active_at` cũ nhất để thu hồi khi vượt quá 5 thiết bị.
-- **`expires_at` (TIMESTAMPTZ):** Thời hạn sống tối đa của phiên (7 ngày). Dùng cho robot dọn dẹp chạy định kỳ hàng đêm: `DELETE WHERE expires_at < NOW() OR is_revoked = TRUE`.
+> 💡 **Tối ưu Index:** Không tạo thêm index đơn `idx_user_sessions_user_id(user_id)` vì `idx_user_sessions_lru(user_id, is_revoked, last_active_at)` đã bao phủ hoàn toàn các truy vấn lọc theo `user_id` theo quy tắc **Left-most Prefix**, giúp tránh nhân đôi chi phí ghi index.
+
+### 4.2 Giải thích các cột & Quy ước Claim JWT
+- **JWT Claim thống nhất:** Giữ nguyên hằng số có sẵn `ClaimKey.CURRENT_SESSION_ID = "current_session_id"` cho cả Access Token và Refresh Token (tương thích ngược 100%, không dùng song song tên `"session_id"`).
+- **`device_name`:** Parse gọn nhẹ từ header `User-Agent` (KISS — không kéo thư viện nặng vài chục MB RAM), nhận diện các trình duyệt/OS phổ biến (Chrome, Edge, Firefox, Safari, Postman / Windows, macOS, Android, iOS, Linux), fallback `"Unknown Device"`, sanitize và cắt tối đa 255 ký tự.
+- **`ip_address`:** Trích xuất IP thực (ưu tiên IP đầu tiên trong `X-Forwarded-For` nếu đã tin cậy proxy qua `server.forward-headers-strategy`, fallback `request.getRemoteAddr()`), cắt an toàn tối đa 45 ký tự.
 
 ---
 
-## 🏛️ 5. KIẾN TRÚC CODE: NGUYÊN LÝ DEPENDENCY INVERSION (SẴN SÀNG CHO REDIS)
+## 🏛️ 5. KIẾN TRÚC CODE, CẤU TRÚC FILE & QUY CHUẨN JAVA/SPRING
 
-Để hiện tại chạy mượt trên **PostgreSQL**, nhưng tương lai khi dự án scale lớn có thể chuyển sang **Redis** trong 15 phút mà không phải sửa một dòng code nghiệp vụ nào, ta áp dụng nguyên lý **Dependency Inversion (SOLID)**:
+### 5.1 Nguyên lý Dependency Inversion (`SessionManager` — Sẵn sàng cho Redis)
 
 ```
-                      ┌──────────────────────────────────────┐
-                      │    AuthService / SecurityFilter      │
-                      └──────────────────┬───────────────────┘
-                                         │ (Chỉ gọi Interface trừu tượng)
-                                         ▼
-                      ┌──────────────────────────────────────┐
-                      │     <<Interface>> SessionManager     │
-                      │  - createSession(userId, ...)        │
-                      │  - isSessionActive(sessionId)        │
-                      │  - revokeSession(sessionId)          │
-                      │  - revokeAllOtherSessions(userId)    │
-                      │  - revokeAllByUserId(userId)         │
-                      │  - getActiveSessions(userId)         │
-                      │  - updateLastActive(sessionId)       │
-                      └──────────────────┬───────────────────┘
-                                         │
-               ┌─────────────────────────┴─────────────────────────┐
-               │                                                   │
-               ▼                                                   ▼
-   ┌───────────────────────────────┐                   ┌───────────────────────────────┐
-   │ DatabaseSessionManager (JPA)  │                   │ RedisSessionManager (Roadmap) │
-   │ 👉 Giai đoạn hiện tại:        │                   │ 👉 Khi scale lớn: Đọc/ghi     │
-   │    Thao tác bảng user_sessions│                   │    Redis Hash & TTL cực nhanh │
-   │    trên PostgreSQL qua JPA    │                   │    trên RAM (Zero DB hit)     │
-   └───────────────────────────────┘                   └───────────────────────────────┘
+               ┌──────────────────────────────────────────────┐
+               │  AuthServiceImpl / JwtAuthenticationFilter / │
+               │  SessionController / SessionCleanupTask      │
+               └──────────────────────┬───────────────────────┘
+                                      │ (Chỉ phụ thuộc Interface trừu tượng)
+                                      ▼
+               ┌──────────────────────────────────────────────┐
+               │         <<Interface>> SessionManager         │
+               │  - createSessionWithLru(userId, device, ip)  │
+               │  - validateAndTouchSession(sessionId, userId)│
+               │  - touchAndExtendSession(sessionId, userId)  │
+               │  - revokeSession(userId, sessionId)          │
+               │  - revokeAllOtherSessions(userId, currentId) │
+               │  - revokeAllByUserId(userId)                 │
+               │  - getActiveSessions(userId, currentId)      │
+               │  - cleanupExpiredAndOldRevokedSessions()     │
+               └──────────────────────┬───────────────────────┘
+                                      │
+            ┌─────────────────────────┴─────────────────────────┐
+            ▼                                                   ▼
+┌───────────────────────────────────┐       ┌───────────────────────────────────┐
+│   DatabaseSessionManager (JPA)    │       │   RedisSessionManager (Roadmap)   │
+│  👉 Hiện tại: Thao tác bảng       │       │  👉 Tương lai: Redis Hash + TTL   │
+│     user_sessions trên PostgreSQL │       │     trên RAM (Zero DB hit)        │
+└───────────────────────────────────┘       └───────────────────────────────────┘
 ```
+
+### 5.2 Sơ đồ File cần tạo mới & chỉnh sửa (Package-by-Feature trong `auth/` & `security/`)
+
+**Các file TẠO MỚI (hoàn toàn nằm trong `auth/`, 0% conflict nhánh `tenant`/`branch`/`account`):**
+- `backend/src/main/resources/db/migration/V3__create_user_sessions_table.sql` — Migration tạo bảng & index.
+- `auth/entity/UserSession.java` — JPA Entity ánh xạ `user_sessions`:
+  - **Bắt buộc:** Dùng `@Entity`, `@Table(name = "user_sessions")`, `@Getter`, `@Setter`, `@Builder`, `@NoArgsConstructor`, `@AllArgsConstructor` (**CẤM dùng `@Data` trên Entity**).
+  - **Bắt buộc:** Gắn `@Builder.Default` cho `private Boolean isRevoked = false;` (tránh bẫy `@Builder` ghi đè `null` xuống cột `NOT NULL`).
+  - Dùng `@PrePersist` tự gán `createdAt` và `lastActiveAt` nếu null.
+- `auth/repository/UserSessionRepository.java` — Kế thừa `JpaRepository<UserSession, UUID>`.
+- `auth/service/SessionManager.java` — Interface trừu tượng quản lý vòng đời phiên.
+- `auth/service/impl/DatabaseSessionManager.java` — `@Service`, `@RequiredArgsConstructor`, cài đặt `SessionManager` trên PostgreSQL qua JPA.
+- `auth/dto/response/UserSessionResponseDTO.java` — DTO trả về danh sách thiết bị đang hoạt động.
+- `auth/controller/SessionController.java` — `@RestController`, `@RequestMapping("/api/v1/auth/sessions")`, chịu trách nhiệm 3 API quản lý thiết bị (tách khỏi `AuthController` để giữ Single Responsibility & file dưới 200 dòng).
+- `auth/scheduler/SessionCleanupTask.java` — Cronjob hàng đêm dọn phiên hết hạn & phiên thu hồi quá hạn audit.
+- `auth/util/ClientInfoExtractor.java` *(hoặc helper class gọn nhẹ)* — Tách riêng logic parse `User-Agent` và lấy IP an toàn từ `HttpServletRequest` (Controller chỉ gọi helper lấy 2 chuỗi `String deviceName`, `String ipAddress` rồi truyền xuống Service → Service không phụ thuộc Servlet API).
+
+**Các file CHỈNH SỬA:**
+- `CarRentalBackendApplication.java` — Thêm `@EnableScheduling`.
+- `application.yaml` — Bổ sung cấu hình `app.auth.max-active-sessions: 5`, `app.auth.last-active-throttle-minutes: 5`, `app.auth.session-cleanup-cron: "0 0 2 * * *"`, `app.auth.revoked-audit-retention-days: 7`, `app.cookie.secure: ${COOKIE_SECURE:false}` (mặc định `false` ở dev để test LAN HTTP bằng điện thoại thật không bị chặn Cookie; production set `COOKIE_SECURE=true`), và `server.forward-headers-strategy: framework`.
+- `common/exception/ErrorCode.java` — Thêm `TENANT_CONTEXT_MISMATCH("TENANT_CONTEXT_MISMATCH", "Ngữ cảnh nhà xe của tab đã thay đổi. Vui lòng tải lại trang để đồng bộ!", HttpStatus.CONFLICT)`.
+- `security/config/SecurityConfig.java` — Thêm `"X-Tenant-Id"` vào `CorsConfiguration.setAllowedHeaders(...)`; gỡ bỏ header thừa `"X-Active-Branch-Id"` (hệ thống lấy `active_branch_id` duy nhất từ JWT Claim); thêm `"/api/v1/auth/logout"` vào danh sách `.permitAll()` để hỗ trợ Idempotent Logout khi Access Token đã hết hạn.
+- `security/jwt/JwtAuthenticationFilter.java` — **Gỡ dependency `UserRepository` thừa** khỏi Filter (vì `CustomUserDetailsService` ngay bước sau đã load & kiểm tra `user.isActive`, tiết kiệm 1 câu query DB thừa trên mỗi request!); thêm `"/api/v1/auth/logout"` vào `PUBLIC_ENDPOINTS` (`shouldNotFilter`); thay kiểm tra `currentSessionId` bằng `SessionManager.validateAndTouchSession(sessionId, userId)`; chuẩn hóa `401` khi thiếu/sai format UUID; mở rộng bypass kiểm tra `tenant.isActive` cho `/sessions/**`; bổ sung kiểm tra Header `X-Tenant-Id` (catch `IllegalArgumentException` → `409 TENANT_CONTEXT_MISMATCH`).
+- `security/jwt/JwtProvider.java` — Bổ sung getter `getRefreshTokenExpirationMs()` và `getRefreshTokenExpirationInSeconds()` (để đồng bộ tuyệt đối 3 nơi: DB `expires_at` ↔ JWT `exp` ↔ Cookie `Max-Age`, không hardcode 7 ngày).
+- *(Dọn dẹp dead code kèm theo)* Xóa file không còn sử dụng `auth/dto/request/RefreshTokenRequestDTO.java` (do Refresh Token đã chuyển sang đọc từ HttpOnly Cookie).
+- `account/entity/User.java` — Chỉ thêm annotation `@Deprecated` trên field `currentSessionId` (không xóa!).
+- `account/repository/UserRepository.java` — Thêm method khóa dòng `findByIdForUpdate(UUID id)` dùng `@Lock(LockModeType.PESSIMISTIC_WRITE)` (giữ nguyên method cũ hoặc gắn `@Deprecated` để tránh vỡ compile nếu nhánh khác gọi).
+- `auth/controller/AuthController.java` — Nhận `HttpServletRequest` ở `login()` để trích `deviceName` & `ipAddress` truyền vào `AuthService.login(request, deviceName, ipAddress)`; cập nhật `logout()` nhận `@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false)` và `@CookieValue(name = "refreshToken", required = false)` truyền xuống `authService.logout(...)`; gom 5 đoạn tạo `ResponseCookie` lặp lại thành 1 private helper `buildRefreshTokenCookie(String token, long maxAgeSeconds)` dùng cờ `app.cookie.secure` và `jwtProvider.getRefreshTokenExpirationInSeconds()`.
+- `auth/service/AuthService.java` & `auth/service/impl/AuthServiceImpl.java` — **Bỏ `@Transactional` ở cấp Class** và chuyển sang `org.springframework.transaction.annotation.Transactional` ở cấp method (sửa lỗi import `jakarta.transaction.Transactional` cũ!); ở `login()` chạy `findByEmail()` + BCrypt **ngoài** transaction rồi dùng `TransactionTemplate` mở transaction ngắn 2–5ms để khóa dòng `User` + tạo phiên LRU; dùng `SessionManager` cho `refreshToken` (sửa đủ **8 chỗ** gọi `userInfo.getCurrentSessionId()` sang dùng `sessionId` từ token, đảm bảo kiểm tra `401` trước `403`) và Idempotent `logout` (thu hồi phiên từ Access Token hoặc fallback Cookie Refresh Token).
+- `auth/service/impl/CustomUserDetailsServiceImpl.java` — Chuyển sang `org.springframework.transaction.annotation.Transactional(readOnly = true)` (sửa import `jakarta.transaction.Transactional` cũ).
+
+### 5.3 Thiết luật `@Transactional` cho `DatabaseSessionManager` (Tránh bẫy Spring AOP!)
+- Luôn import **`org.springframework.transaction.annotation.Transactional`** (TUYỆT ĐỐI không dùng `jakarta.transaction.Transactional` vì không hỗ trợ `readOnly = true`).
+- `getActiveSessions(...)` $\rightarrow$ `@Transactional(readOnly = true)` (tắt Hibernate Dirty Checking, nhả HikariCP nhanh nhất).
+- **`validateAndTouchSession(...)` — Cấu trúc 2 lời gọi tách biệt (Tránh `TransactionRequiredException` & Self-Invocation):**
+  1. **KHÔNG** gắn `@Transactional` lên toàn bộ hàm `validateAndTouchSession(...)` (nếu gắn read-write thì 100% request `GET` mở write transaction; nếu gắn `readOnly = true` thì câu `UPDATE` bị lỗi/bỏ qua!).
+  2. Bước đọc: Gọi `userSessionRepository.findByIdAndUserId(sessionId, userId)` — Spring Data JPA tự chạy read-only mặc định → **>95% request trong cửa sổ 5 phút chỉ tốn 1 câu `SELECT` read-only, 0 write lock**.
+  3. Bước ghi có điều kiện: Chỉ khi phiên hợp lệ VÀ `last_active_at` cũ hơn ngưỡng **5 phút**, mới gọi trực tiếp `userSessionRepository.updateLastActiveIfStale(sessionId, now, threshold)` — method này trên interface `UserSessionRepository` được gắn `@Transactional` + `@Modifying(clearAutomatically = true)` (chạy qua Spring Data Repository Proxy nên không bao giờ bị lỗi Self-Invocation hay `TransactionRequiredException`!).
+- `createSessionWithLru(...)`, `touchAndExtendSession(...)`, `revokeSession(...)`, `revokeAllOtherSessions(...)`, `revokeAllByUserId(...)`, `cleanupExpiredAndOldRevokedSessions()` $\rightarrow$ `@Transactional`.
 
 ---
 
-## 🔄 6. ĐẶC TẢ THUẬT TOÁN & LUỒNG XỬ LÝ NGHIỆP VỤ (STEP-BY-STEP FLOW)
+## 🔄 6. ĐẶC TẢ THUẬT TOÁN & LUỒNG XỬ LÝ CHI TIẾT (STEP-BY-STEP FLOW)
 
 ### 6.1 Luồng Đăng nhập (`POST /api/v1/auth/login`)
-1. **Bước 1 (Xác thực thông tin):** Kiểm tra email và mật khẩu qua `passwordEncoder.matches()`. Kiểm tra tài khoản `isActive`.
-2. **Bước 2 (Trích xuất thông tin thiết bị):**
-   - Đọc header `User-Agent` $\rightarrow$ phân tích ra `deviceName` (ví dụ: *"Chrome 120 on Windows 11"*).
-   - Đọc địa chỉ IP từ `HttpServletRequest` (hỗ trợ đọc qua proxy `X-Forwarded-For`).
-3. **Bước 3 (Thuật toán đào thải LRU - Giới hạn 5 thiết bị):**
-   - Đếm số phiên đang active của user: `WHERE user_id = :userId AND is_revoked = false AND expires_at > NOW()`.
-   - Nếu `activeCount >= 5`:
-     - Tìm phiên có `last_active_at` **nhỏ nhất (cũ nhất)**:
-       ```sql
-       SELECT id FROM user_sessions 
-       WHERE user_id = :userId AND is_revoked = false AND expires_at > NOW() 
-       ORDER BY last_active_at ASC LIMIT 1;
-       ```
-     - Cập nhật phiên đó: `is_revoked = true`.
-4. **Bước 4 (Tạo phiên mới):**
-   - Lưu bản ghi mới vào `user_sessions` với `expires_at = NOW() + 7 days`.
-   - Nhận về `sessionId` (UUID).
-5. **Bước 5 (Cấp Token):**
-   - Sinh Access Token và Refresh Token chứa claim `current_session_id = sessionId`.
-   - Trả về JSON cho client, gắn Refresh Token vào HttpOnly Cookie.
+1. **Bước 1 (Trích xuất thông tin thiết bị tại Controller):**
+   - Dùng `ClientInfoExtractor` lấy `deviceName` (parse `User-Agent`, cắt tối đa 255 ký tự) và `ipAddress` (cắt tối đa 45 ký tự), truyền xuống `authService.login(loginRequestDTO, deviceName, ipAddress)`.
+2. **Bước 2 (Xác thực mật khẩu — NGOÀI Transaction, 0 DB Connection bị giữ khi BCrypt chạy):**
+   - Hàm `login(...)` **KHÔNG gắn `@Transactional` toàn hàm**.
+   - Tìm `User` theo `email`. Nếu không tồn tại hoặc `!passwordEncoder.matches(rawPassword, user.getPasswordHash())` $\rightarrow$ ném `AppException(ErrorCode.UNAUTHORIZED, "Sai tài khoản hoặc mật khẩu !")`.
+   - Kiểm tra nhanh `isActive` (nếu `false` $\rightarrow$ ném `AppException(ErrorCode.UNAUTHORIZED, "Tài khoản của bạn đã bị khóa !")`).
+3. **Bước 3 (Mở Transaction ngắn bằng `TransactionTemplate` + Khóa dòng `User` 2ms + Cập nhật `last_login_at`):**
+   - Mở transaction ngắn (`transactionTemplate.execute(...)`):
+     - Gọi `userRepository.findByIdForUpdate(userId)` (`PESSIMISTIC_WRITE` — chống race condition giữa Login song song và Admin khóa tài khoản).
+     - Kiểm tra lại `!Boolean.TRUE.equals(lockedUser.getIsActive())` $\rightarrow$ nếu bị khóa đúng tích tắc đó, ném `401 UNAUTHORIZED`.
+     - Cập nhật `lockedUser.setLastLoginAt(Instant.now())`.
+4. **Bước 4 (Thuật toán đào thải LRU — Tối đa `MAX_ACTIVE_SESSIONS = 5` thiết bị):**
+   - Gọi `sessionManager.createSessionWithLru(userId, deviceName, ipAddress)`:
+     - Truy vấn toàn bộ phiên active của user (`is_revoked = false AND expires_at > now`) sắp xếp `last_active_at ASC, created_at ASC`.
+     - Nếu `activeSessions.size() >= maxActiveSessions`:
+       - Tính `evictCount = activeSessions.size() - maxActiveSessions + 1`.
+       - Thu hồi (`is_revoked = true`) đúng `evictCount` phần tử đầu danh sách (các thiết bị lâu không tương tác nhất).
+     - Tạo bản ghi `UserSession` mới với `isRevoked = false`, `lastActiveAt = now`, `expiresAt = now.plusMillis(refreshTokenExpirationMs)`.
+     - Lưu và trả về `sessionId` (UUID mới sinh).
+5. **Bước 5 (Cấp Token theo phân nhánh Super Admin / 1 Active Tenant / >1 Active Tenant):**
+   - Giữ nguyên logic lọc tenant active (Task 6 - R18), sinh Access Token & Refresh Token mang claim `ClaimKey.CURRENT_SESSION_ID = sessionId`.
+   - Trả về `AuthResponseDTO` và gắn Refresh Token vào HttpOnly Cookie (`SameSite=Strict`, `Path=/api/v1/auth`, `Secure` theo config, `Max-Age` tính từ `refreshTokenExpirationMs`).
 
 ---
 
 ### 6.2 Luồng Xác thực Request (`JwtAuthenticationFilter`)
-1. **Bước 1:** Trích xuất Access Token từ Header `Authorization: Bearer <token>`.
-2. **Bước 2:** Xác thực chữ ký token qua `jwtProvider.validateToken(token)`.
-3. **Bước 3:** Bóc tách `sessionId` từ claims.
-4. **Bước 4:** Kiểm tra phiên qua `sessionManager.isSessionActive(sessionId)`:
-   - Phiên tồn tại trong `user_sessions`.
-   - `is_revoked == false`.
-   - `expires_at > NOW()`.
-   *(Nếu không thỏa mãn $\rightarrow$ Ném `AppException(ErrorCode.UNAUTHORIZED, "Phiên đăng nhập đã hết hạn hoặc bị thu hồi ở nơi khác")`).*
-5. **Bước 5:** Nạp thông tin định danh vào `SecurityContextHolder` và `TenantContext`. Cho request đi tiếp!
-$\implies$ **Không còn câu lệnh so sánh `equals(user.get().getCurrentSessionId())`! Hai người đăng nhập 2 máy tính khác nhau đều có `sessionId` riêng, hoạt động song song mượt mà!**
+1. **Bước 1 (Bỏ qua Public Endpoints):** Cập nhật `PUBLIC_ENDPOINTS` (`shouldNotFilter`) gồm: `/api/v1/auth/login`, `/api/v1/auth/refresh-token`, **`/api/v1/auth/logout`**, và Swagger docs (`/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html`).
+2. **Bước 2 (Parse & Verify Access Token):**
+   - Đọc Bearer token, gọi `jwtProvider.validateToken(token)`, trích `Claims`.
+   - Kiểm tra `sub` (`userIdStr`) và `token_type == ACCESS`.
+   - Trích `currentSessionIdStr = claims.get(ClaimKey.CURRENT_SESSION_ID, String.class)`.
+   - Nếu thiếu hoặc parse `UUID.fromString(...)` bị lỗi (`IllegalArgumentException`) $\rightarrow$ ném **`AppException(ErrorCode.UNAUTHORIZED, "Token không chứa mã phiên hợp lệ")`** *(không trả 400 hay 500!)*.
+3. **Bước 3 (Kiểm tra phiên & Throttle cập nhật `last_active_at` 5 phút):**
+   - Gọi `boolean isValid = sessionManager.validateAndTouchSession(sessionUUID, userUUID)`.
+   - Bên trong kiểm tra: bản ghi tồn tại với đúng `(id = sessionUUID, user_id = userUUID)`, `is_revoked == false`, `expires_at > now`.
+   - Nếu `isValid == false` $\rightarrow$ ném `AppException(ErrorCode.UNAUTHORIZED, "Phiên đăng nhập đã hết hạn hoặc bị thu hồi từ thiết bị khác. Vui lòng đăng nhập lại !")`.
+   - Nếu hợp lệ và `now - last_active_at >= 5 phút` $\rightarrow$ tự động chạy `userSessionRepository.updateLastActiveIfStale(...)` cập nhật `last_active_at = now`.
+4. **Bước 4 (Kiểm tra phạm vi Endpoint cấp User & Chống lệch Tab `X-Tenant-Id`):**
+   - Xác định nhóm endpoint cấp User không phụ thuộc trạng thái active của Tenant cũ (`isUserLevelEndpoint`):
+     - `/api/v1/auth/select-tenant`
+     - `/api/v1/auth/sessions` và `/api/v1/auth/sessions/**`
+   - **Kiểm tra `X-Tenant-Id` (Edge Case 1):**
+     - Nếu **không phải** `isUserLevelEndpoint`, **không phải** `SUPER_ADMIN`, và JWT có `tenant_id`:
+       - Đọc header `String headerTenantId = request.getHeader("X-Tenant-Id")`.
+       - Nếu `StringUtils.hasText(headerTenantId)`: bọc `UUID.fromString(headerTenantId)` trong `try-catch (IllegalArgumentException)` và so khớp với `tenantUUID`. Nếu sai định dạng UUID hoặc không khớp $\rightarrow$ ném `AppException(ErrorCode.TENANT_CONTEXT_MISMATCH)` (**HTTP 409 Conflict**).
+5. **Bước 5 (Nạp `TenantContext` & `SecurityContextHolder`):**
+   - Nạp `userId`, `role`, `currentSessionId` (và `tenantId`, `activeBranchId` khi không phải `isUserLevelEndpoint`) vào `TenantContext`.
+   - Tải `UserPrincipal` qua `CustomUserDetailsService` (nếu là `isUserLevelEndpoint` hoặc chưa có `tenantId` thì gọi `loadUserById(userUUID)` để user vẫn có thể đổi nhà xe hoặc quản lý thiết bị ngay cả khi nhà xe cũ bị khóa!).
+   - Khối `finally` luôn gọi `TenantContext.clear()`.
 
 ---
 
-### 6.3 Luồng Tự động làm mới Token (Silent Refresh - `POST /api/v1/auth/refresh-token`)
-1. **Bước 1:** Lấy Refresh Token từ HttpOnly Cookie.
-2. **Bước 2:** Xác thực chữ ký bí mật của Refresh Token qua `jwtProvider.validateToken()`.
-3. **Bước 3:** Trích xuất `sessionId` từ claims của Refresh Token.
-4. **Bước 4:** Kiểm tra `sessionManager.isSessionActive(sessionId)`. Nếu hợp lệ:
-   - Cập nhật `last_active_at = Instant.now()`.
-5. **Bước 5:** Cấp Access Token mới (kèm Refresh Token mới) bảo tồn nguyên vẹn ngữ cảnh (`tenantId`, `activeBranchId`, `sessionId`).
+### 6.3 Luồng Tự động làm mới Token (`POST /api/v1/auth/refresh-token`)
+1. Đọc Refresh Token từ HttpOnly Cookie `@CookieValue(name = "refreshToken", required = false)`. Nếu rỗng $\rightarrow$ `401 UNAUTHORIZED`.
+2. Xác thực chữ ký & hạn token qua `jwtProvider.validateToken()`, kiểm tra `token_type == REFRESH`.
+3. Trích xuất `userUUID`, `sessionUUID` (từ claim `current_session_id` — thiếu hoặc sai format UUID $\rightarrow$ `401`), `tenantId`, `activeBranchId`.
+4. Kiểm tra `User` tồn tại và `isActive == true` (không thỏa $\rightarrow$ `401 UNAUTHORIZED`).
+5. **Xác thực & Gia hạn trượt (Sliding Expiration):**
+   - Gọi `sessionManager.touchAndExtendSession(sessionUUID, userUUID)`:
+     - Kiểm tra phiên tồn tại thuộc `userUUID`, `is_revoked == false`, `expires_at > now`. Nếu sai $\rightarrow$ ném `401 UNAUTHORIZED`.
+     - Cập nhật **`last_active_at = now`** VÀ **`expires_at = now.plusMillis(refreshTokenExpirationMs)`**.
+6. **Cấp cặp Token mới bảo tồn ngữ cảnh (4 nhánh: Super Admin / Pre-Tenant / Đã chọn Tenant / Đã chọn Tenant + Branch):**
+   - ⚠️ **Bắt buộc:** Ở **toàn bộ các nhánh** trong `AuthServiceImpl.refreshToken()`, truyền **`sessionUUID`** (lấy từ Refresh Token đầu vào) vào `generateAccessToken(...)` & `generateRefreshToken(...)`, **tuyệt đối xóa bỏ mọi chỗ đọc `userInfo.getCurrentSessionId()`**.
+   - Controller set lại HttpOnly Cookie mới với `Max-Age` đồng bộ theo `refreshTokenExpirationMs`.
 
 ---
 
-### 6.4 Luồng Đăng xuất & Quản lý thiết bị (Device Management APIs)
+### 6.4 Luồng Chuyển Ngữ cảnh (`select-tenant` & `switch-branch`)
+- Giữ nguyên logic xác thực tenant/branch hiện có.
+- Đọc `UUID sessionId = TenantContext.getCurrentSessionId()` và tiếp tục gắn đúng `sessionId` đó vào Access Token & Refresh Token mới (**không** tạo dòng session mới, **không** ảnh hưởng các thiết bị khác).
 
-#### API 1: Đăng xuất phiên hiện tại (`POST /api/v1/auth/logout`)
-- Lấy `sessionId` từ Token hiện tại.
-- Gọi `sessionManager.revokeSession(sessionId)` $\rightarrow$ Cập nhật `is_revoked = true`.
-- Xóa HttpOnly Cookie.
+---
 
-#### API 2: Lấy danh sách thiết bị đang online (`GET /api/v1/auth/sessions`)
-- Lấy `userId` từ `TenantContext`.
-- Query toàn bộ phiên active của user: `WHERE user_id = :userId AND is_revoked = false AND expires_at > NOW() ORDER BY last_active_at DESC`.
-- Map sang danh sách `UserSessionResponseDTO`, trong đó đánh dấu `isCurrent = (session.getId().equals(currentSessionId))`.
+### 6.5 Luồng Đăng xuất & Quản lý Thiết bị (Device Management APIs)
+
+#### API 1: Đăng xuất phiên hiện tại — Idempotent Logout (`POST /api/v1/auth/logout`)
+- **Mức truy cập:** `permitAll()` (bỏ qua `JwtAuthenticationFilter` để không bị chặn `401` khi Access Token đã hết hạn!).
+- Controller đọc `@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false)` và `@CookieValue(name = "refreshToken", required = false)`, truyền xuống `authService.logout(authorizationHeader, refreshTokenCookie)`.
+- Thuật toán trong Service:
+  1. Thử bóc tách Bearer Access Token từ `authorizationHeader`, verify qua `jwtProvider` (trong `try-catch`, nếu lỗi/hết hạn thì không ném lỗi mà chuyển bước 2) $\rightarrow$ lấy `(userId, sessionId)`.
+  2. Nếu bước 1 không lấy được, thử verify `refreshTokenCookie` (`token_type == REFRESH`) qua `jwtProvider` (trong `try-catch`) $\rightarrow$ lấy `(userId, sessionId)`.
+  3. Nếu trích xuất được cặp `(userId, sessionId)` hợp lệ $\rightarrow$ gọi `sessionManager.revokeSession(userId, sessionId)` đánh dấu `is_revoked = true` cho **đúng phiên hiện tại** (các thiết bị khác vẫn online bình thường).
+  4. Dọn sạch `TenantContext.clear()` và `SecurityContextHolder.clearContext()`.
+- Controller **LUÔN** trả `200 OK` kèm `Set-Cookie: refreshToken=; Max-Age=0` để đảm bảo trình duyệt chắc chắn xóa sạch HttpOnly Cookie.
+
+#### API 2: Lấy danh sách thiết bị đang hoạt động (`GET /api/v1/auth/sessions`)
+- Lấy `userId = TenantContext.getUserId()` và `currentSessionId = TenantContext.getCurrentSessionId()`.
+- Truy vấn toàn bộ phiên của user thỏa `user_id = :userId AND is_revoked = false AND expires_at > NOW()`, sắp xếp `last_active_at DESC`.
+- Manual Mapping qua `@Builder` sang `List<UserSessionResponseDTO>`, với `isCurrent = session.getId().equals(currentSessionId)`.
 
 #### API 3: Đăng xuất một thiết bị cụ thể từ xa (`DELETE /api/v1/auth/sessions/{sessionId}`)
-- Kiểm tra tính sở hữu (Chống IDOR): Phiên bị xóa bắt buộc phải thuộc về `userId` hiện tại.
-- Cập nhật phiên đó: `is_revoked = true`.
-- Ngay lập tức, thiết bị đó ở lần gửi request tiếp theo sẽ nhận mã lỗi `401 Unauthorized` và bị đưa về màn hình đăng nhập.
+- Lấy `userId = TenantContext.getUserId()` và `currentSessionId = TenantContext.getCurrentSessionId()`.
+- **Chặn tự xóa phiên hiện tại (Guard Clause):** Nếu `sessionId.equals(currentSessionId)` $\rightarrow$ ném `AppException(ErrorCode.BAD_REQUEST, "Không thể thu hồi phiên hiện tại. Vui lòng sử dụng chức năng Đăng xuất!")`.
+- **Chống IDOR & Enumeration:** Tìm kiếm/cập nhật theo điều kiện ghép **`WHERE id = :sessionId AND user_id = :userId AND is_revoked = false`**.
+  - Nếu không tìm thấy (dù ID không tồn tại, đã thu hồi, hay thuộc về User khác) $\rightarrow$ đều ném chung **`AppException(ErrorCode.RESOURCE_NOT_FOUND, "Không tìm thấy phiên đăng nhập cần thu hồi!")`** (HTTP `404`).
+- Cập nhật `is_revoked = true` $\rightarrow$ Thiết bị mục tiêu bị chặn `401` ngay ở request tiếp theo.
 
-#### API 4: Đăng xuất khỏi toàn bộ các thiết bị khác (`POST /api/v1/auth/sessions/revoke-others`)
-- Lấy `userId` và `sessionId` của thiết bị hiện tại.
-- Cập nhật: `UPDATE user_sessions SET is_revoked = true WHERE user_id = :userId AND id != :currentSessionId`.
-- Giữ nguyên thiết bị hiện tại, đăng xuất tất cả các máy lạ còn lại!
+#### API 4: Đăng xuất khỏi tất cả các thiết bị khác (`POST /api/v1/auth/sessions/revoke-others`)
+- Lấy `userId = TenantContext.getUserId()` và `currentSessionId = TenantContext.getCurrentSessionId()`.
+- Thực thi 1 câu lệnh bulk update nguyên tử:
+  `UPDATE user_sessions SET is_revoked = true WHERE user_id = :userId AND id != :currentSessionId AND is_revoked = false`.
+- Trả về số lượng thiết bị đã bị đăng xuất (hoặc message thành công kèm số lượng).
 
 ---
 
-## 📦 7. HỢP ĐỒNG DỮ LIỆU DTO (DATA TRANSFER OBJECT CONTRACTS)
+### 6.6 Luồng Dọn dẹp Phiên rác Định kỳ (`SessionCleanupTask`)
+- Kích hoạt `@EnableScheduling` tại `CarRentalBackendApplication`.
+- Lịch chạy cấu hình qua `application.yaml`: `@Scheduled(cron = "${app.auth.session-cleanup-cron:0 0 2 * * *}")` (mặc định 02:00 sáng mỗi ngày).
+- Gọi `sessionManager.cleanupExpiredAndOldRevokedSessions()` thực thi xóa bản ghi thỏa:
+  - Phiên đã hết hạn quá ngưỡng giữ vết audit (`expires_at < now - auditRetentionDays`), **HOẶC**
+  - Phiên đã bị thu hồi và không còn hoạt động quá ngưỡng audit (`is_revoked = true AND last_active_at < now - auditRetentionDays`), với `auditRetentionDays = 7` ngày (đảm bảo giữ lại log đối soát gần nhất).
+- Ghi `log.info(...)` số bản ghi đã dọn sạch.
 
-### 7.1 `UserSessionResponseDTO.java`
-Đường dẫn: `backend/src/main/java/com/carrental/car_rental_backend/auth/dto/response/UserSessionResponseDTO.java`
+---
 
+## 📦 7. HỢP ĐỒNG API & DỮ LIỆU (API & DTO CONTRACTS)
+
+### 7.1 Bảng tổng hợp REST API Endpoints
+
+| Endpoint | Method | Auth / Bypass Tenant Lock | HTTP Status | Response Data (`ApiResponse<T>`) | Mã lỗi chính |
+| :--- | :---: | :--- | :---: | :--- | :--- |
+| `/api/v1/auth/login` | `POST` | Public | `200 OK` | `AuthResponseDTO` + `Set-Cookie: refreshToken` | `401 UNAUTHORIZED` |
+| `/api/v1/auth/refresh-token` | `POST` | Public (Cookie `refreshToken`) | `200 OK` | `AuthResponseDTO` + `Set-Cookie: refreshToken` | `401 UNAUTHORIZED`, `403 FORBIDDEN` |
+| `/api/v1/auth/logout` | `POST` | Public — Idempotent *(Bearer hoặc Cookie `refreshToken`)* | `200 OK` | `String` + Luôn Clear Cookie (`Max-Age=0`) | *(Luôn 200 OK — Idempotent)* |
+| `/api/v1/auth/sessions` | `GET` | Authenticated *(bypass tenant lock)* | `200 OK` | `List<UserSessionResponseDTO>` | `401 UNAUTHORIZED` |
+| `/api/v1/auth/sessions/{sessionId}` | `DELETE` | Authenticated *(bypass tenant lock)* | `200 OK` | `String` (Thông báo thu hồi thành công) | `400 BAD_REQUEST` (self-revoke), `404 RESOURCE_NOT_FOUND` (không tồn tại / IDOR) |
+| `/api/v1/auth/sessions/revoke-others` | `POST` | Authenticated *(bypass tenant lock)* | `200 OK` | `Map` / `RevokeSessionsResponseDTO` (`revokedCount`) | `401 UNAUTHORIZED` |
+
+### 7.2 `UserSessionResponseDTO.java`
+- **Đường dẫn:** `backend/src/main/java/com/carrental/car_rental_backend/auth/dto/response/UserSessionResponseDTO.java`
 - **Annotations:** `@Data`, `@Builder`, `@NoArgsConstructor`, `@AllArgsConstructor`
 - **Các trường:**
-  - `id` (`UUID`): Mã phiên (Session ID).
-  - `deviceName` (`String`): Tên thiết bị (VD: *"Chrome trên Windows 11"*).
+  - `id` (`UUID`): Mã phiên (`sessionId`).
+  - `deviceName` (`String`): Tên thiết bị / trình duyệt (VD: *"Chrome on Windows"*).
   - `ipAddress` (`String`): Địa chỉ IP đăng nhập.
-  - `lastActiveAt` (`Instant`): Thời điểm hoạt động gần nhất.
+  - `lastActiveAt` (`Instant`): Thời điểm tương tác gần nhất.
   - `createdAt` (`Instant`): Thời điểm đăng nhập.
-  - `isCurrent` (`boolean`): Cờ đánh dấu đây có phải thiết bị mà người dùng đang cầm trên tay hay không.
+  - `expiresAt` (`Instant`): Thời điểm hết hạn dự kiến của phiên.
+  - `isCurrent` (`Boolean` — **hoặc** `boolean` kèm `@JsonProperty("isCurrent")`):
+    > ⚠️ **Bẫy Jackson + Lombok:** Nếu khai báo primitive `boolean isCurrent` với `@Data`, Lombok sinh getter `isCurrent()` làm Jackson tự cắt chữ `"is"` thành JSON key **`"current"`** thay vì **`"isCurrent"`**! Bắt buộc dùng kiểu Wrapper `Boolean isCurrent` (Lombok sinh `getIsCurrent()` → JSON giữ đúng `"isCurrent"`) hoặc gắn `@JsonProperty("isCurrent")`.
 
 ---
 
-## 🧪 8. CHECKLIST KIỂM THỬ & NGHIỆM THU (TESTING & VERIFICATION CHECKLIST)
+## 🧪 8. CHIẾN LƯỢC KIỂM THỬ & NGHIỆM THU (TESTING & VERIFICATION)
 
-Khi triển khai code thực tế, dev phải tự kiểm chứng 5 kịch bản sau:
+### 8.1 Unit Tests bắt buộc (JUnit 5 + Mockito — AAA Pattern)
+Tạo test class cho `DatabaseSessionManagerTest` và `AuthServiceImplTest` phủ tối thiểu các kịch bản sau (đặt tên theo chuẩn `should_<expected>_when_<condition>`):
 
-- [ ] **Kịch bản 1 (Hai thiết bị hoạt động song song):**
-  - Mở Trình duyệt 1 (Chrome) đăng nhập tài khoản `staff@rentcarhanoi.vn`.
-  - Mở Trình duyệt 2 (Firefox / Ẩn danh) đăng nhập cùng tài khoản `staff@rentcarhanoi.vn`.
-  - Cả 2 trình duyệt cùng gọi API (tạo đơn, xem xe) $\rightarrow$ Cả 2 đều thành công 200 OK, **không ai bị đá văng**.
-- [ ] **Kịch bản 2 (Thuật toán đào thải LRU 5 thiết bị & Re-Auth Modal):**
-  - Đăng nhập liên tục trên 5 phiên ẩn danh khác nhau. DB ghi nhận 5 dòng `is_revoked = false`.
-  - Đăng nhập phiên thứ 6 $\rightarrow$ Phiên thứ 1 (cũ nhất) tự động chuyển thành `is_revoked = true`.
-  - Quay lại phiên thứ 1 click chuột gọi API $\rightarrow$ Nhận lỗi `401 Unauthorized` báo phiên đã bị thu hồi.
-  - Kiểm tra Frontend bật Re-Auth Modal và giữ nguyên form dữ liệu `localStorage`.
-- [ ] **Kịch bản 3 (Đăng xuất từ xa):**
-  - Đăng nhập trên Thiết bị A và Thiết bị B.
-  - Trên Thiết bị A, gọi `GET /api/v1/auth/sessions` $\rightarrow$ Thấy Thiết bị B trong danh sách.
-  - Trên Thiết bị A, bấm xóa Thiết bị B (`DELETE /api/v1/auth/sessions/{idB}`).
-  - Thiết bị B click chuột gọi API $\rightarrow$ Bị đá văng về trang Login. Thiết bị A vẫn làm việc bình thường.
-- [ ] **Kịch bản 4 (Khóa tài khoản thu hồi toàn bộ thiết bị):**
-  - Đăng nhập 3 thiết bị. Khóa tài khoản nhân viên.
-  - Toàn bộ 3 thiết bị đều bị thu hồi phiên (`is_revoked = true`), không thiết bị nào lọt qua Filter.
-- [ ] **Kịch bản 5 (Tương thích ngược Git Merge):**
-  - Không xóa cột `current_session_id` trên bảng `users`.
-  - Các nhánh `branch`, `tenant` của đồng đội pull về compile bình thường không bị đỏ lỗi.
+- [ ] `should_evict_oldest_session_when_active_sessions_reach_limit`: User đã có 5 phiên active $\rightarrow$ tạo phiên thứ 6 phải thu hồi đúng phiên có `last_active_at` cũ nhất và tổng active vẫn bằng 5.
+- [ ] `should_evict_multiple_excess_sessions_when_active_sessions_exceed_limit`: DB đang có sẵn 7 phiên active $\rightarrow$ tạo phiên mới phải thu hồi 3 phiên cũ nhất để tổng active quay về 5.
+- [ ] `should_update_last_active_only_when_throttle_threshold_exceeded`: Gọi `validateAndTouchSession` trong vòng 5 phút **không** gọi lệnh `UPDATE`; gọi sau khi quá 5 phút **có** gọi `UPDATE`.
+- [ ] `should_reject_session_when_expired_or_revoked_or_wrong_user`: Kiểm tra 3 nhánh trả `false` (hết hạn `expires_at < now`, `is_revoked = true`, sai `userId`).
+- [ ] `should_extend_expires_at_and_preserve_session_id_when_refresh_token`: Kiểm tra Sliding Expiration cập nhật cả `last_active_at` và `expires_at = now + refreshTokenExpirationMs`, đồng thời token mới giữ nguyên `sessionId` của thiết bị đó (không lấy `user.currentSessionId`).
+- [ ] `should_throw_400_when_user_revokes_current_session`: Tự xóa `currentSessionId` qua `DELETE /sessions/{id}` $\rightarrow$ ném `AppException(BAD_REQUEST)`.
+- [ ] `should_throw_404_when_revoking_another_users_session`: User A truyền `sessionId` của User B (IDOR) $\rightarrow$ ném `AppException(RESOURCE_NOT_FOUND)`.
+
+### 8.2 Kiểm thử Tích hợp & Thực tế (Manual / Swagger / Multi-Browser Checklist)
+- [ ] **Kịch bản 1 (Đa thiết bị song song):** Đăng nhập cùng 1 tài khoản trên Chrome và Firefox/Ẩn danh (hoặc điện thoại qua LAN HTTP với `COOKIE_SECURE=false`). Cả 2 gọi API đều `200 OK`, không đá nhau.
+- [ ] **Kịch bản 2 (LRU 5 thiết bị + Throttle 5 phút):** Đăng nhập 5 phiên, tương tác phiên 1 sau >5 phút để đẩy `last_active_at` lên mới nhất, đăng nhập phiên thứ 6 $\rightarrow$ Phiên thứ 2 (cũ nhất) bị đá `401`, phiên 1 vẫn sống!
+- [ ] **Kịch bản 3 (Quản lý thiết bị & IDOR):** Thiết bị A gọi `GET /api/v1/auth/sessions` thấy đúng `isCurrent: true` cho A và `false` cho B; xóa B bằng `DELETE /sessions/{idB}` → B lập tức nhận `401`; thử xóa A bằng `DELETE /sessions/{idA}` → nhận `400`; thử xóa session của user khác → nhận `404`.
+- [ ] **Kịch bản 4 (Idempotent Logout & Revoke-Others):** `POST /sessions/revoke-others` đá sạch mọi máy trừ máy hiện tại; `POST /logout` chỉ đá máy hiện tại, máy khác vẫn dùng bình thường; đặc biệt thử gửi `POST /logout` kèm **Access Token đã hết hạn** nhưng còn **Cookie `refreshToken`** $\rightarrow$ vẫn thu hồi đúng phiên trong DB, trả `200 OK` và xóa sạch Cookie (`Max-Age=0`)!
+- [ ] **Kịch bản 5 (Chống lệch Tab `X-Tenant-Id`):** Gửi API nghiệp vụ với JWT của Tenant A nhưng Header `X-Tenant-Id` của Tenant B (hoặc chuỗi rác `"not-a-uuid"`) $\rightarrow$ Nhận `409 TENANT_CONTEXT_MISMATCH` (không văng 500); không gửi Header trên Swagger vẫn chạy bình thường.
+- [ ] **Kịch bản 6 (Tenant bị khóa vẫn Logout / Quản lý thiết bị được):** Khóa Tenant A (`is_active = false`), user đang cầm token của Tenant A vẫn gọi được `/select-tenant`, `/logout`, `/sessions` mà không bị kẹt `403`.
+- [ ] **Kịch bản 7 (Bảo toàn `sessionId` qua chuyển ngữ cảnh & Git Merge an toàn):** Gọi `select-tenant` và `switch-branch` không sinh thêm dòng rác trong `user_sessions`; cột `users.current_session_id` còn nguyên (`@Deprecated`), không xung đột khi merge với nhánh `tenant`, `branch`, `user`.
 
 ---
 
-## 🎯 9. KẾT LUẬN & BÀN GIAO CHO DEV TỰ CODE
-Tài liệu này đã giải quyết trọn vẹn mọi khía cạnh:
-1. Nghiệp vụ thực tế nhà xe (Sếp và Nhân viên bãi không bao giờ bị mất form).
-2. Tinh giản tối đa theo nguyên lý YAGNI (Bỏ `refresh_token_hash` rườm rà).
-3. Đảm bảo an toàn merge code (Expand and Contract).
-4. Kiến trúc cắm rút sẵn sàng cho Redis trong tương lai.
-5. Phòng vệ 5 Edge Cases chí mạng bảo vệ an toàn dữ liệu và uy tín doanh nghiệp.
-
-*Dev hãy dựa trên bản đặc tả này để tự tay gõ từng dòng code, tự kiểm chứng bằng các test case trên và làm chủ 100% phân hệ Auth của mình!*
+## 🎯 9. TỪ KHÓA TÌM KIẾM CHUẨN (GOOGLE KEYWORDS CHO DEV TỰ CODE)
+- `"Spring Data JPA @Lock PESSIMISTIC_WRITE findById"`
+- `"Spring Data JPA @Modifying clearAutomatically atomic update"`
+- `"Spring Boot @Transactional readOnly vs jakarta.transaction.Transactional"`
+- `"Jackson Lombok boolean isCurrent serializes as current fix"`
+- `"Spring Boot @EnableScheduling @Scheduled cron expression"`
+- `"Spring Boot server.forward-headers-strategy X-Forwarded-For"`
+- `"JUnit 5 Mockito AAA pattern verify never called"`
