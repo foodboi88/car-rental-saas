@@ -30,5 +30,6 @@ public class UserDetailResponseDTO {
     private Instant joinedAt;
     private Instant lastLoginAt;
     private Instant createdAt;
+    private Long version;
 
 }

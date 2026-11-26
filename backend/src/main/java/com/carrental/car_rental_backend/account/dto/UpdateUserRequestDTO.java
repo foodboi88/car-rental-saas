@@ -31,4 +31,7 @@ public class UpdateUserRequestDTO {
 
     @NotNull (message = "Trạng thái hoạt động không được để trống")
     private Boolean isActive;
+
+    @NotNull(message = "Phiên bản dữ liệu không được để trống")
+    private Long version;
 }
