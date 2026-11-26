@@ -1,12 +1,12 @@
 # Hướng dẫn triển khai module Tenant
 
-Khởi tạo ngày 20/11/2026, cập nhật ngày 25/11/2026. Module Tenant quản lý hồ sơ nhà xe trên Car Rental SaaS. Mục tiêu là tự triển khai từng API và giải thích được luồng HTTP → Service → Repository, phạm vi quyền, dữ liệu được ghi và cách kiểm chứng.
+Khởi tạo ngày 20/11/2026, cập nhật ngày 27/11/2026. Module Tenant quản lý hồ sơ nhà xe trên Car Rental SaaS. Mục tiêu là tự triển khai từng API và giải thích được luồng HTTP → Service → Repository, phạm vi quyền, dữ liệu được ghi và cách kiểm chứng.
 
 ## Tiến độ và lộ trình
 
 | Chức năng | Trạng thái và phạm vi |
 |---|---|
-| `POST /api/v1/tenants` | Đã triển khai ở commit `fe5f153` trên `feature/huynq7`. Super Admin tạo nhà xe, bộ cấu hình, role, quyền và gán chủ từ các tài khoản có sẵn. |
+| `POST /api/v1/tenants` | Đã triển khai ở commit `fe5f153` trên `feature/huynq7`. Super Admin tạo nhà xe, bộ cấu hình, role, quyền và gán chủ từ các tài khoản có sẵn. Ngày 26–27/11 đã refactor: dùng `@Transactional` của Spring, rút gọn kiểm tra tài khoản tồn tại, tách `validateAdminUsers`, `loadRequiredPermissions` và `toResponse`. Hành vi và hợp đồng lỗi không đổi. Còn chờ chốt quy tắc domain và việc chặn Super Admin làm chủ. |
 | `GET /api/v1/tenants` | Đã chọn cách làm, đang ở bước chuẩn bị. Dùng lại `TenantResponseDTO`, Service trả `Page`, Controller chuyển sang `PageResponse`. Bắt đầu bằng `common/dto/PageResponse.java`. |
 | `GET /api/v1/tenants/{id}` | Đề xuất cho bước tiếp theo. Trả hồ sơ và `tenantAdmins` gồm `userId`, `fullName`, `email`, `isActive`. Tra chủ theo `user_tenants` của nhà xe đang xem và role `TENANT_ADMIN` thuộc nhà xe đó. |
 | `PATCH /api/v1/tenants/{id}` | Đề xuất cập nhật hồ sơ. Cần chốt trường nào được sửa, quy tắc cho giá trị rỗng và cách xử lý domain. |
@@ -66,7 +66,7 @@ TenantResponseDTO → ApiResponse → Frontend
 |---|---|
 | Người tạo | Chỉ Super Admin đã xác thực |
 | Số chủ | Ít nhất một, cho phép nhiều chủ trong cùng request |
-| Tài khoản chủ | Đã tồn tại và đang hoạt động; dùng danh sách userId |
+| Tài khoản chủ | Đã tồn tại và đang hoạt động; dùng danh sách userId. **Cần chốt:** có từ chối tài khoản Super Admin không |
 | Tạo tài khoản | Account thực hiện độc lập trước khi gọi API Tenant |
 | Gói ban đầu | Luôn `FREE` |
 | Trạng thái ban đầu | `isActive = true` |
@@ -249,14 +249,16 @@ Không sửa GlobalExceptionHandler trong phạm vi này. Handler hiện có x�
 
 1. **Kiểm tra danh sách chủ:** So kích thước danh sách với tập UUID duy nhất. Nếu có ID lặp, trả lỗi TENANT_ADMIN_IDS_DUPLICATED.
 2. **Kiểm tra domain:** gọi truy vấn kiểm tra trùng để trả thông báo dễ hiểu. UNIQUE của DB vẫn là lớp bảo vệ cuối cùng.
-3. **Kiểm tra tài khoản:** lấy nhóm User theo ID; xác định ID không tìm thấy và tài khoản không hoạt động. Có bất kỳ tài khoản không hợp lệ thì dừng cả thao tác.
+3. **Kiểm tra tài khoản:** lấy nhóm User theo ID. Nếu số User tìm được ít hơn số ID gửi lên thì có tài khoản không tồn tại. Phép so kích thước này chỉ đúng khi bước 1 đã chạy trước. Sau đó kiểm tra từng tài khoản đang hoạt động. Có bất kỳ tài khoản không hợp lệ thì dừng cả thao tác. Lỗi hiện báo chung, chưa chỉ ra ID cụ thể.
 4. **Kiểm tra bộ permission khởi tạo:** tra permission từ danh mục chung; thiếu mã cần thiết thì báo lỗi hệ thống, không tạo role với bộ quyền thiếu.
+
+Bước 1 và 2 độc lập nên đổi thứ tự cũng được. Code hiện kiểm tra domain trước, rồi gom bước 1 và 3 vào `validateAdminUsers` để giữ ràng buộc thứ tự giữa chúng. Bước 4 nằm trong `loadRequiredPermissions`. Hai method này trả kết quả qua giá trị trả về, không lưu vào field của Service.
 5. **Tạo Tenant:** gán `name`, `domain`, `logoUrl`, `contactEmail`, `contactPhone` và các mặc định `FREE`, `true`, JSON `{}`. Lưu để lấy ID dùng cho dữ liệu phụ thuộc. `adminUserIds` được dùng ở bước gán chủ.
 6. **Tạo TenantConfig:** dùng đúng ID đó, gán 30 phút, 100.000 đồng và 5%.
 7. **Tạo ba role:** cùng tenantId mới, code TENANT_ADMIN/STAFF/SALE; đánh dấu role mặc định theo thiết kế, giữ lại ID từng role.
 8. **Tạo role_permissions:** ghép ID role mới với ID permission đã có theo bộ quyền tương ứng.
 9. **Gán chủ:** với từng tài khoản hợp lệ, tạo UserTenant dùng tenantId mới và ID role TENANT_ADMIN vừa tạo; gán joinedAt. Không thay đổi User hoặc membership của người đó ở tenant khác.
-10. **Đồng bộ và trả kết quả:** nếu dùng timestamp do Hibernate sinh, flush trước khi map các giá trị đó vào DTO. Map tường minh và trả TenantResponseDTO; transaction proxy hoàn tất commit trước khi kết quả đi tiếp tới Controller.
+10. **Đồng bộ và trả kết quả:** nếu dùng timestamp do Hibernate sinh, flush trước khi map các giá trị đó vào DTO. Map tường minh qua method `toResponse` và trả TenantResponseDTO; transaction proxy hoàn tất commit trước khi kết quả đi tiếp tới Controller. `toResponse` là `private static` vì không dùng field nào của Service, và sẽ được `listTenants` dùng lại.
 
 Hai request cùng domain có thể cùng vượt qua bước 2; một request phải bị DB từ chối. Không bắt lỗi ghi rồi tiếp tục lưu để cố trả thành công.
 
@@ -264,7 +266,8 @@ Không cần logic “đã thuộc nhà xe thì đổi role” trong luồng nà
 
 #### 3. Transaction và Persistence Context cần hiểu
 
-- Đặt `@Transactional` trên method ghi cụ thể của Service Impl theo conventions, không đặt ở Controller.
+- Đặt `@Transactional` trên method ghi cụ thể của Service Impl theo conventions, không đặt ở Controller. Dùng `org.springframework.transaction.annotation.Transactional`. Bản `jakarta.transaction.Transactional` vẫn được Spring xử lý nhưng không có `readOnly`.
+- Không đặt `@Transactional` trên các method `private` tách ra từ `createTenant`. Lời gọi nội bộ không đi qua proxy, và proxy dạng class con không override được method `private`. Các method này vẫn chạy trong giao dịch của `createTenant` vì cùng thread.
 - Khi gọi qua bean được Spring quản lý, transaction interceptor/proxy mở hoặc tham gia giao dịch, gọi method, rồi commit/rollback theo kết quả. Các repository tham gia cùng giao dịch khi dùng chung transaction manager.
 - AppException hiện kế thừa RuntimeException, phù hợp rollback mặc định. Không nuốt exception; nếu chọn checked exception phải hiểu và khai báo quy tắc rollback tương ứng.
 - Persistence Context quản lý các Entity trong giao dịch; Hibernate có thể trì hoãn SQL tới lúc flush. UUID đã được cấp không tự chứng minh INSERT đã chạy hoặc giao dịch đã commit.
@@ -327,7 +330,7 @@ Viết test mong đợi trước phần code tương ứng. Dùng Arrange–Act�
 | Thiếu tên/domain/danh sách chủ; phần tử chủ null; chuỗi quá dài; email sai | 400; không tạo dữ liệu |
 | userId sai định dạng UUID | 400; không chạy nghiệp vụ tạo |
 | userId lặp | 400 TENANT_ADMIN_IDS_DUPLICATED; không ghi dữ liệu |
-| Một userId không tồn tại hoặc đang bị khóa | Từ chối toàn bộ; phản hồi xác định được tài khoản gặp vấn đề |
+| Một userId không tồn tại hoặc đang bị khóa | Từ chối toàn bộ với `TENANT_ADMIN_NOT_FOUND` hoặc `TENANT_ADMIN_INACTIVE`. Phản hồi hiện chưa chỉ ra ID cụ thể |
 | Domain đã tồn tại | 409; không thêm nhà xe |
 | Không có xác thực hoặc sai quyền | 401/403; không có dữ liệu mới |
 | Thiếu permission khởi tạo | Báo lỗi cấu hình; không lưu nhà xe với bộ quyền thiếu |
@@ -353,7 +356,9 @@ Mock không chứng minh transaction hoặc FK/UNIQUE thật. Integration test r
 
 #### 3. Các điểm cần chốt khi mở rộng
 
-- Định dạng/chuẩn hóa domain, cách xử lý chuỗi tùy chọn rỗng.
+- Định dạng/chuẩn hóa domain, cách xử lý chuỗi tùy chọn rỗng. Khi chuẩn hóa, dùng cùng một giá trị cho bước kiểm tra trùng và bước lưu.
+- Có từ chối tài khoản Super Admin làm chủ nhà xe không. Nếu có, thêm mã lỗi riêng và kiểm tra trong `validateAdminUsers`. Cột `is_super_admin` cho phép `NULL`, nên cần xử lý an toàn khi unbox `Boolean`.
+- Phản hồi lỗi tài khoản chủ có cần chỉ ra ID cụ thể cho frontend không.
 - Cách cập nhật permission mặc định cho các nhà xe đã tồn tại nếu danh mục quyền thay đổi.
 - API Account phục vụ Super Admin chuẩn bị/chọn tài khoản chủ.
 
@@ -415,9 +420,9 @@ Khai báo method `listTenants` nhận `page` và `size` kiểu `int`, trả `Pag
 1. Kiểm tra giới hạn `page` và `size`. Nếu sai, dùng `AppException` và `ErrorCode.BAD_REQUEST` có sẵn, kèm thông báo chỉ rõ tham số cần sửa. Kiểm tra trước khi tạo `PageRequest` để API dùng hợp đồng lỗi `400` của dự án.
 2. Tạo `PageRequest` từ `page`, `size` và `Sort` theo hai thuộc tính Java `createdAt`, `id`. `PageRequest` là một implementation của `Pageable`, mang số trang, kích thước và thứ tự cho Spring Data.
 3. Gọi `tenantRepository.findAll(pageable)`, nhận `Page<Tenant>`. `TenantRepository` đã kế thừa method này từ `JpaRepository`. Spring Data truyền phần sắp xếp và giới hạn trang xuống DB. Khi cần tính tổng, nó thực hiện thêm truy vấn đếm.
-4. Dùng `Page.map` để chuyển từng `Tenant` thành `TenantResponseDTO`, rồi trả trang DTO. Cách nghĩ giống `Array.map` trong TypeScript, đồng thời `Page.map` giữ metadata của trang. Có thể đưa phần mapping builder hiện có vào một method `toTenantResponse` để `createTenant` và `listTenants` dùng chung.
+4. Dùng `Page.map` để chuyển từng `Tenant` thành `TenantResponseDTO`, rồi trả trang DTO. Cách nghĩ giống `Array.map` trong TypeScript, đồng thời `Page.map` giữ metadata của trang. Dùng lại method `toResponse` đã tách từ `createTenant`, truyền vào `Page.map` dưới dạng method reference.
 
-Đặt `@Transactional(readOnly = true)` trực tiếp trên method đọc của `TenantServiceImpl`. File hiện import bản Jakarta. Để dùng thuộc tính `readOnly`, chuyển import sang `org.springframework.transaction.annotation.Transactional`. Annotation được Spring đọc để thiết lập interceptor quanh lời gọi qua bean, tạo ranh giới giao dịch và cung cấp gợi ý read-only cho tầng JPA/Hibernate. Method `createTenant` tiếp tục dùng giao dịch ghi mặc định.
+Đặt `@Transactional(readOnly = true)` trực tiếp trên method đọc của `TenantServiceImpl`. File đã dùng import `org.springframework.transaction.annotation.Transactional` nên có thuộc tính `readOnly`. Annotation được Spring đọc để thiết lập interceptor quanh lời gọi qua bean, tạo ranh giới giao dịch và cung cấp gợi ý read-only cho tầng JPA/Hibernate. Method `createTenant` tiếp tục dùng giao dịch ghi mặc định.
 
 #### Bước 3. `TenantController.java`
 

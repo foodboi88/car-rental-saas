@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.carrental.car_rental_backend.account.entity.Permission;
 import com.carrental.car_rental_backend.account.entity.Role;
@@ -34,7 +35,6 @@ import com.carrental.car_rental_backend.tenant.repository.TenantConfigRepository
 import com.carrental.car_rental_backend.tenant.repository.TenantRepository;
 import com.carrental.car_rental_backend.tenant.service.TenantService;
 
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -55,53 +55,14 @@ public class TenantServiceImpl implements TenantService {
   @Override
   @Transactional
   public TenantResponseDTO createTenant(CreateTenantRequestDTO request) {
-    List<UUID> adminUserIds = request.getAdminUserIds();
-    Set<UUID> uniqueAdminUserIds = new HashSet<>(adminUserIds);
-    boolean hasDuplicates = uniqueAdminUserIds.size() < adminUserIds.size();
-    if (hasDuplicates) {
-      throw new AppException(ErrorCode.TENANT_ADMIN_IDS_DUPLICATED);
-    }
-
     String domain = request.getDomain();
     if (this.tenantRepository.existsByDomain(domain)) {
       throw new AppException(ErrorCode.TENANT_DOMAIN_ALREADY_EXISTS);
     }
 
-    List<User> adminUsers = this.userRepository.findAllById(adminUserIds);
+    List<User> adminUsers = validateAdminUsers(request.getAdminUserIds());
 
-    Set<UUID> foundIds = new HashSet<>();
-    for (User adminUser : adminUsers) {
-      foundIds.add(adminUser.getId());
-    }
-
-    for (UUID id : adminUserIds) {
-      if (!foundIds.contains(id)) {
-        throw new AppException(ErrorCode.TENANT_ADMIN_NOT_FOUND);
-      }
-    }
-
-    for (User adminUser : adminUsers) {
-      if (!adminUser.getIsActive()) {
-        throw new AppException(ErrorCode.TENANT_ADMIN_INACTIVE);
-      }
-    }
-
-    Set<String> requiredCodes = new HashSet<>();
-    for (DefaultRole defaultRole : DefaultRole.values()) {
-      requiredCodes.addAll(defaultRole.getPermissionCodes());
-    }
-
-    List<Permission> permissions = this.permissionRepository.findAllByCodeIn(List.copyOf(requiredCodes));
-    Map<String, Permission> permissionsByCode = new HashMap<>();
-    for (Permission permission : permissions) {
-      permissionsByCode.put(permission.getCode(), permission);
-    }
-
-    for (String requiredCode : requiredCodes) {
-      if (!permissionsByCode.containsKey(requiredCode)) {
-        throw new AppException(ErrorCode.TENANT_DEFAULT_PERMISSION_MISSING);
-      }
-    }
+    Map<String, Permission> permissionsByCode = loadRequiredPermissions();
 
     Tenant tenant = Tenant.builder()
         .name(request.getName())
@@ -163,17 +124,64 @@ public class TenantServiceImpl implements TenantService {
 
     this.tenantRepository.flush();
 
+    return toResponse(savedTenant);
+  }
+
+  private List<User> validateAdminUsers(List<UUID> adminUserIds) {
+    Set<UUID> uniqueAdminUserIds = new HashSet<>(adminUserIds);
+    boolean hasDuplicateAdminIds = uniqueAdminUserIds.size() < adminUserIds.size();
+    if (hasDuplicateAdminIds) {
+      throw new AppException(ErrorCode.TENANT_ADMIN_IDS_DUPLICATED);
+    }
+
+    List<User> adminUsers = this.userRepository.findAllById(adminUserIds);
+    boolean hasMissingAdmins = adminUsers.size() < adminUserIds.size();
+    if (hasMissingAdmins) {
+      throw new AppException(ErrorCode.TENANT_ADMIN_NOT_FOUND);
+    }
+
+    for (User adminUser : adminUsers) {
+      if (!adminUser.getIsActive()) {
+        throw new AppException(ErrorCode.TENANT_ADMIN_INACTIVE);
+      }
+    }
+
+    return adminUsers;
+  }
+
+  private Map<String, Permission> loadRequiredPermissions() {
+    Set<String> requiredCodes = new HashSet<>();
+    for (DefaultRole defaultRole : DefaultRole.values()) {
+      requiredCodes.addAll(defaultRole.getPermissionCodes());
+    }
+
+    List<Permission> permissions = this.permissionRepository.findAllByCodeIn(List.copyOf(requiredCodes));
+    Map<String, Permission> permissionsByCode = new HashMap<>();
+    for (Permission permission : permissions) {
+      permissionsByCode.put(permission.getCode(), permission);
+    }
+
+    for (String requiredCode : requiredCodes) {
+      if (!permissionsByCode.containsKey(requiredCode)) {
+        throw new AppException(ErrorCode.TENANT_DEFAULT_PERMISSION_MISSING);
+      }
+    }
+
+    return permissionsByCode;
+  }
+
+  private static TenantResponseDTO toResponse(Tenant tenant) {
     return TenantResponseDTO.builder()
-        .id(savedTenant.getId())
-        .name(savedTenant.getName())
-        .domain(savedTenant.getDomain())
-        .logoUrl(savedTenant.getLogoUrl())
-        .contactEmail(savedTenant.getContactEmail())
-        .contactPhone(savedTenant.getContactPhone())
-        .planTier(savedTenant.getPlanTier())
-        .isActive(savedTenant.isActive())
-        .createdAt(savedTenant.getCreatedAt())
-        .updatedAt(savedTenant.getUpdatedAt())
+        .id(tenant.getId())
+        .name(tenant.getName())
+        .domain(tenant.getDomain())
+        .logoUrl(tenant.getLogoUrl())
+        .contactEmail(tenant.getContactEmail())
+        .contactPhone(tenant.getContactPhone())
+        .planTier(tenant.getPlanTier())
+        .isActive(tenant.isActive())
+        .createdAt(tenant.getCreatedAt())
+        .updatedAt(tenant.getUpdatedAt())
         .build();
   }
 }
