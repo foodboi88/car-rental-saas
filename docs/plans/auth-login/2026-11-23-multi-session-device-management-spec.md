@@ -222,10 +222,18 @@ CREATE INDEX IF NOT EXISTS idx_user_sessions_cleanup
 ### 5.3 Thiết luật `@Transactional` cho `DatabaseSessionManager` (Tránh bẫy Spring AOP!)
 - Luôn import **`org.springframework.transaction.annotation.Transactional`** (TUYỆT ĐỐI không dùng `jakarta.transaction.Transactional` vì không hỗ trợ `readOnly = true`).
 - `getActiveSessions(...)` $\rightarrow$ `@Transactional(readOnly = true)` (tắt Hibernate Dirty Checking, nhả HikariCP nhanh nhất).
-- **`validateAndTouchSession(...)` — Cấu trúc 2 lời gọi tách biệt (Tránh `TransactionRequiredException` & Self-Invocation):**
+- **`validateAndTouchSession(...)` — Cấu trúc 2 lời gọi tách biệt (Tránh `TransactionRequiredException`, Self-Invocation & tối ưu HikariCP/MVCC):**
   1. **KHÔNG** gắn `@Transactional` lên toàn bộ hàm `validateAndTouchSession(...)` (nếu gắn read-write thì 100% request `GET` mở write transaction; nếu gắn `readOnly = true` thì câu `UPDATE` bị lỗi/bỏ qua!).
-  2. Bước đọc: Gọi `userSessionRepository.findByIdAndUserId(sessionId, userId)` — Spring Data JPA tự chạy read-only mặc định → **>95% request trong cửa sổ 5 phút chỉ tốn 1 câu `SELECT` read-only, 0 write lock**.
-  3. Bước ghi có điều kiện: Chỉ khi phiên hợp lệ VÀ `last_active_at` cũ hơn ngưỡng **5 phút**, mới gọi trực tiếp `userSessionRepository.updateLastActiveIfStale(sessionId, now, threshold)` — method này trên interface `UserSessionRepository` được gắn `@Transactional` + `@Modifying(clearAutomatically = true)` (chạy qua Spring Data Repository Proxy nên không bao giờ bị lỗi Self-Invocation hay `TransactionRequiredException`!).
+  2. **Bước đọc — Bắt buộc gắn tường minh `@Transactional(readOnly = true)` trên `findByIdAndUserId(UUID id, UUID userId)`:**
+     - *Bản chất Spring Data JPA:* Chỉ các method có sẵn của `JpaRepository` (`findById`, `findAll`, `count`...) trong `SimpleJpaRepository` mới có sẵn `@Transactional(readOnly = true)`. Các **custom derived query** tự khai báo như `findByIdAndUserId` **CHƯA tự động có `readOnly = true`**!
+     - Do chưa dùng Redis/Second-Level Cache, `findByIdAndUserId` luôn truy vấn thẳng PostgreSQL. Gắn tường minh `@Transactional(readOnly = true)` giúp Hibernate tắt hoàn toàn **Snapshot & Dirty Checking** (tiết kiệm ~50% RAM Heap cho entity đó và nhả HikariCP ngay lập tức) → **>95% request trong cửa sổ 5 phút chỉ tốn 1 câu `SELECT` read-only, 0 write lock**.
+  3. **Bước ghi có điều kiện (`<5%` request) — `updateLastActiveIfStale(id, now, threshold)`:**
+     - Chỉ gọi khi phiên hợp lệ VÀ `last_active_at < threshold` (`now - 5 phút`).
+     - Gắn `@Transactional` + `@Modifying(clearAutomatically = true)` ngay trên method của `UserSessionRepository` (chạy qua Repository Proxy nên không bao giờ bị lỗi Self-Invocation hay `TransactionRequiredException`).
+     - *Bản chất Persistence Context & HikariCP:* Câu `@Modifying` bulk `UPDATE` bắn thẳng 1 SQL xuống PostgreSQL — **không `SELECT`, không tạo Object `UserSession` hay Snapshot trong Persistence Context**. Ngay khi return `int` (~1ms), Spring gọi `commit()` và **nhả HikariCP Connection ngay lập tức** (không giữ chờ Controller).
+     - *Tại sao phải Throttle 5 phút & thêm `AND last_active_at < :threshold` trong SQL `WHERE`?*
+       - **Chống Write Amplification & Dead Tuples (PostgreSQL MVCC):** Trong PostgreSQL, mỗi lần `UPDATE` đều sinh phiên bản dòng mới (*dead tuple* chờ `VACUUM`) và ghi lại cây B-Tree Index `idx_user_sessions_lru` (vì `last_active_at` nằm trong Index). Dù MVCC giúp `UPDATE` không chặn `SELECT`, việc biến mọi `GET` thành `UPDATE` vẫn gây tăng tải đĩa/WAL và dễ làm cạn HikariCP Pool (10 connections).
+       - **Chống ghi trùng trên cùng 1 tab Frontend:** Ngay trên **1 tab Angular duy nhất**, khi user bấm F5 hoặc mở Dashboard sau >5 phút nghỉ tay, `ngOnInit()` tự động bắn song song 4–5 API (`/me`, `/bookings`, `/vehicles`, `/branches`) cùng 1 mili-giây mang cùng `sessionId` → điều kiện `AND last_active_at < :threshold` ở tầng SQL đảm bảo chỉ **1 luồng duy nhất** thực sự ghi đĩa, các luồng còn lại Postgres bỏ qua (0 rows updated) không ghi đè vô ích!
 - `createSessionWithLru(...)`, `touchAndExtendSession(...)`, `revokeSession(...)`, `revokeAllOtherSessions(...)`, `revokeAllByUserId(...)`, `cleanupExpiredAndOldRevokedSessions()` $\rightarrow$ `@Transactional`.
 
 ---

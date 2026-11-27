@@ -1048,3 +1048,30 @@ Khi sếp phát hiện nhân viên gian lận và bấm Khóa tài khoản:
   - Hoặc dùng 2 Profile Chrome khác nhau (hoặc Tab ẩn danh).
 * **Kiểm tra ràng buộc chéo (Cross-Tenant Validation):** Mọi câu query cập nhật/truy vấn đều phải kiểm tra chéo với `tenant_id` từ Token (`findByIdAndTenantId`) để ngăn chặn hoàn toàn rò rỉ dữ liệu hoặc tấn công IDOR giữa các nhà xe.
 
+---
+
+#### 11. "Tại sao cập nhật `last_active_at` phải dùng Throttle 5 phút (`AND last_active_at < :threshold`) và tách `@Transactional(readOnly = true)` khỏi `@Modifying`?"
+
+> **Sếp / Tech Lead hỏi:** *"Tại sao trong `JwtAuthenticationFilter` không chạy luôn `UPDATE last_active_at = NOW()` cho mọi request mà phải bày ra Throttle 5 phút, gắn `@Transactional(readOnly = true)` cho `findByIdAndUserId`, rồi lại gắn `@Transactional` riêng cho `updateLastActiveIfStale`?"*
+
+**Câu trả lời chuẩn Tech Lead (4 lớp bản chất Spring Data JPA + PostgreSQL):**
+
+1. **Bản chất `findByIdAndUserId` (Custom Derived Query vs `SimpleJpaRepository`):**
+   - Khi chưa có Redis (Second-Level Cache), mỗi HTTP request đều truy vấn thẳng PostgreSQL (Persistence Context / First-Level Cache chỉ sống trong 1 request rồi hủy).
+   - Trong Spring Data JPA, chỉ các hàm có sẵn của `JpaRepository` (`findById`, `findAll`, `count`...) trong `SimpleJpaRepository` mới có sẵn `@Transactional(readOnly = true)`. Các **custom method tự khai báo** như `findByIdAndUserId` **chưa tự động có `readOnly = true`**!
+   - Gắn tường minh `@Transactional(readOnly = true)` lên `findByIdAndUserId` ép Hibernate tắt **Snapshot & Dirty Checking** (tiết kiệm ~50% RAM Heap cho entity đó và giải phóng HikariCP connection nhanh nhất).
+
+2. **Bản chất `updateLastActiveIfStale` (`@Transactional` + `@Modifying` ngay trên Repository):**
+   - Không bọc `@Transactional` lên toàn hàm `validateAndTouchSession()` để **>95% request** (trong cửa sổ 5 phút) chỉ chạy `SELECT` read-only, không mở write transaction.
+   - Khi `<5%` request vượt mốc 5 phút mới gọi `updateLastActiveIfStale(...)` — do hàm `@Modifying` bắt buộc cần transaction (nếu không sẽ nổ `TransactionRequiredException`), ta gắn `@Transactional` trực tiếp trên Repository method (chạy qua Proxy nên không dính lỗi Self-Invocation).
+   - Bulk `UPDATE` bắn thẳng 1 SQL xuống DB (**không `SELECT`, không load Object `UserSession` hay Snapshot vào Persistence Context**). Ngay khi return `int` (~1ms), Spring tự gọi `commit()` và **trả HikariCP Connection ngay lập tức** (không giữ chờ Controller).
+
+3. **Tại sao phải Throttle 5 phút? (PostgreSQL MVCC & Write Amplification):**
+   - Trong PostgreSQL (cơ chế MVCC), `UPDATE` **không chặn `SELECT`** (*writers don't block readers*), nhưng mỗi lệnh `UPDATE` tạo ra **1 phiên bản dòng rác (*dead tuple* chờ `VACUUM` dọn)** và **bắt buộc ghi lại cây B-Tree Index `idx_user_sessions_lru`** (do `last_active_at` nằm trong Index!).
+   - Nếu không Throttle, cứ 100 request `GET`/giây lại sinh 100 lệnh `UPDATE` làm phình bảng (table bloat), tốn I/O đĩa/WAL, và kéo dài thời gian giữ Connection dễ làm cạn HikariCP Pool (10 connections $\rightarrow$ `ConnectionTimeoutException`). Throttle 5 phút triệt tiêu **>95% lệnh `UPDATE` thừa**!
+
+4. **Tại sao cần `AND last_active_at < :threshold` ngay trong SQL `WHERE`? (Kịch bản thực tế 1 tab Angular):**
+   - Không cần mở nhiều tab hay nhiều máy: chỉ cần **1 tab trình duyệt duy nhất** khi nhân viên nghỉ tay 6 phút rồi bấm F5 / mở Dashboard, hàm `ngOnInit()` của Angular tự động bắn song song 4–5 API (`/me`, `/bookings`, `/vehicles`, `/branches`) trong **cùng 1 mili-giây** mang cùng `sessionId`.
+   - Cả 4 luồng Tomcat cùng đọc thấy `last_active_at < threshold` và gọi `updateLastActiveIfStale`. Nhờ điều kiện `AND last_active_at < :threshold` ngay ở tầng SQL, chỉ **luồng #1** thực sự ghi đĩa (1 row updated); 3 luồng sau Postgres thấy `FALSE` nên bỏ qua ngay (0 rows updated), không xếp hàng ghi đè trùng lặp vô ích!
+
+
