@@ -132,5 +132,9 @@ public class JwtProvider {
   public long getAccessTokenExpirationInSeconds() {
     return this.accessTokenExpirationMs / 1000;
   }
+
+  public long getRefreshTokenExpirationInSeconds() {
+    return this.refreshTokenExpirationMs / 1000;
+  }
   
 }

@@ -20,7 +20,8 @@ public enum ErrorCode {
   VEHICLE_NOT_AVAILABLE("VEHICLE_NOT_AVAILABLE", "Xe đã có lịch đặt hoặc đang bảo dưỡng", HttpStatus.CONFLICT),
   BOOKING_EXPIRED("BOOKING_EXPIRED", "Thời gian giữ chỗ tạm thời đã hết hạn", HttpStatus.BAD_REQUEST),
   METHOD_NOT_ALLOWED("ERR_405", "Phương thức HTTP không được hỗ trợ cho tài nguyên này", HttpStatus.METHOD_NOT_ALLOWED),
-  UNSUPPORTED_MEDIA_TYPE("ERR_415", "Định dạng dữ liệu gửi lên (Content-Type) không được hỗ trợ", HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+  UNSUPPORTED_MEDIA_TYPE("ERR_415", "Định dạng dữ liệu gửi lên (Content-Type) không được hỗ trợ", HttpStatus.UNSUPPORTED_MEDIA_TYPE),
+  TENANT_CONTEXT_MISMATCH("TENANT_CONTEXT_MISMATCH", "Bạn đã chọn làm việc ở 1 Nhà xe khác trên 1 tab khác. Vui lòng chọn đúng tab để tiếp tục làm việc!", HttpStatus.CONFLICT);
 
   private final String code;
   private final String message;

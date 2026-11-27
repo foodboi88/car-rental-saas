@@ -58,6 +58,7 @@ public class User {
   @Column(name = "last_login_at")
   private Instant lastLoginAt;
 
+  @Deprecated
   @Column(name = "current_session_id")
   private UUID currentSessionId;
 
