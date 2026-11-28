@@ -10,6 +10,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +47,7 @@ public class TenantServiceImpl implements TenantService {
   private static final int DEFAULT_HOLD_TIMEOUT_MINUTES = 30;
   private static final BigDecimal DEFAULT_LATE_HOURLY_PRICE = BigDecimal.valueOf(100_000);
   private static final BigDecimal DEFAULT_COMMISSION_RATE = BigDecimal.valueOf(5);
+  private static final int MAX_PAGE_SIZE = 100;
 
   private final TenantRepository tenantRepository;
   private final UserRepository userRepository;
@@ -125,6 +130,24 @@ public class TenantServiceImpl implements TenantService {
     this.tenantRepository.flush();
 
     return toResponse(savedTenant);
+  }
+
+  @Override
+  @Transactional(readOnly = true)
+  public Page<TenantResponseDTO> listTenants(int page, int size) {
+    if (page < 0) {
+      throw new AppException(ErrorCode.BAD_REQUEST, "page phải lớn hơn hoặc bằng 0");
+    }
+
+    if (size < 1 || size > MAX_PAGE_SIZE) {
+      throw new AppException(ErrorCode.BAD_REQUEST, String.format("size phải từ %d đến %d", 1, MAX_PAGE_SIZE));
+    }
+
+    Sort sort = Sort.by(Sort.Direction.DESC, "createdAt", "id");
+
+    Pageable pageable = PageRequest.of(page, size, sort);
+    Page<Tenant> tenantPage = this.tenantRepository.findAll(pageable);
+    return tenantPage.map(TenantServiceImpl::toResponse);
   }
 
   private List<User> validateAdminUsers(List<UUID> adminUserIds) {
